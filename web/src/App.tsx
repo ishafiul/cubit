@@ -19,6 +19,12 @@ import {
   Check,
   History,
   Send,
+  Database,
+  Box,
+  Cpu,
+  Clock,
+  GitMerge,
+  FileCode,
 } from 'lucide-react';
 
 import {
@@ -43,9 +49,35 @@ import {
 } from './api/generated/runtime/runtime';
 import type { Application } from './api/model';
 import { ApplicationDetailPage, getDeploymentStatusBadge } from './components/ApplicationDetailPage';
+import { KVView } from './components/services/KVView';
+import { D1View } from './components/services/D1View';
+import { R2View } from './components/services/R2View';
+import { DynamicWorkersView } from './components/services/DynamicWorkersView';
+import { CronView } from './components/services/CronView';
+import { QueuesView } from './components/services/QueuesView';
+import { WorkflowsView } from './components/services/WorkflowsView';
+import { DurableObjectsView } from './components/services/DurableObjectsView';
+import { ContainersView } from './components/services/ContainersView';
+import { StaticAssetsView } from './components/services/StaticAssetsView';
+
+export type ActiveTab =
+  | 'nodes'
+  | 'apps'
+  | 'dynamic-workers'
+  | 'durable-objects'
+  | 'containers'
+  | 'kv'
+  | 'd1'
+  | 'r2'
+  | 'static-assets'
+  | 'cron'
+  | 'queues'
+  | 'workflows'
+  | 'domains'
+  | 'logs';
 
 export default function App() {
-  const [tab, setTab] = useState<'nodes' | 'apps' | 'domains' | 'logs'>('nodes');
+  const [tab, setTab] = useState<ActiveTab>('apps');
   const [currentAppId, setCurrentAppId] = useState<string | null>(null);
 
   // Orval TanStack Query hooks (100% type-safe from OpenAPI)
@@ -259,70 +291,202 @@ export default function App() {
             </div>
           </div>
 
-          <nav className="space-y-1">
-            <button
-              onClick={() => setTab('nodes')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition ${
-                tab === 'nodes' ? 'bg-zinc-800 text-emerald-400 shadow-sm' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
-              }`}
-            >
-              <Server className="w-4 h-4" />
-              Fleet Nodes
-              <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400">
-                {nodes.length}
+          <nav className="space-y-4 overflow-y-auto max-h-[calc(100vh-250px)] pr-1">
+            {/* 1. Compute Section */}
+            <div className="space-y-0.5">
+              <span className="px-3 text-[10px] font-bold text-zinc-500 uppercase tracking-wider block mb-1">
+                Compute
               </span>
-            </button>
+              <button
+                onClick={() => {
+                  setTab('apps');
+                  setCurrentAppId(null);
+                }}
+                className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                  tab === 'apps' ? 'bg-zinc-800 text-emerald-400 shadow-sm' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>Workers</span>
+                <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full bg-zinc-800 text-zinc-400">
+                  {apps.length}
+                </span>
+              </button>
 
-            <button
-              onClick={() => {
-                setTab('apps');
-                setCurrentAppId(null);
-              }}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition ${
-                tab === 'apps' ? 'bg-zinc-800 text-emerald-400 shadow-sm' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
-              }`}
-            >
-              <Layers className="w-4 h-4" />
-              Applications
-              <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400">
-                {apps.length}
+              <button
+                onClick={() => setTab('dynamic-workers')}
+                className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                  tab === 'dynamic-workers' ? 'bg-zinc-800 text-emerald-400 shadow-sm' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+                }`}
+              >
+                <Code className="w-3.5 h-3.5" />
+                <span>Dynamic Workers</span>
+              </button>
+
+              <button
+                onClick={() => setTab('durable-objects')}
+                className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                  tab === 'durable-objects' ? 'bg-zinc-800 text-emerald-400 shadow-sm' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+                }`}
+              >
+                <Box className="w-3.5 h-3.5" />
+                <span>Durable Objects</span>
+              </button>
+
+              <button
+                onClick={() => setTab('containers')}
+                className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                  tab === 'containers' ? 'bg-zinc-800 text-emerald-400 shadow-sm' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+                }`}
+              >
+                <Cpu className="w-3.5 h-3.5" />
+                <span>Containers</span>
+                <span className="ml-auto text-[9px] px-1.5 py-0.2 rounded-full bg-amber-950 text-amber-400 border border-amber-800/80">
+                  Exp
+                </span>
+              </button>
+            </div>
+
+            {/* 2. Storage & Databases */}
+            <div className="space-y-0.5">
+              <span className="px-3 text-[10px] font-bold text-zinc-500 uppercase tracking-wider block mb-1">
+                Storage & Data
               </span>
-            </button>
+              <button
+                onClick={() => setTab('kv')}
+                className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                  tab === 'kv' ? 'bg-zinc-800 text-emerald-400 shadow-sm' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+                }`}
+              >
+                <Database className="w-3.5 h-3.5" />
+                <span>KV Namespaces</span>
+              </button>
 
-            <button
-              onClick={() => setTab('domains')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition ${
-                tab === 'domains' ? 'bg-zinc-800 text-emerald-400 shadow-sm' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
-              }`}
-            >
-              <Globe className="w-4 h-4" />
-              Traefik Routing
-              <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400">
-                {domains.length}
+              <button
+                onClick={() => setTab('d1')}
+                className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                  tab === 'd1' ? 'bg-zinc-800 text-emerald-400 shadow-sm' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+                }`}
+              >
+                <Database className="w-3.5 h-3.5 text-emerald-400" />
+                <span>D1 SQL</span>
+              </button>
+
+              <button
+                onClick={() => setTab('r2')}
+                className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                  tab === 'r2' ? 'bg-zinc-800 text-emerald-400 shadow-sm' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+                }`}
+              >
+                <HardDrive className="w-3.5 h-3.5" />
+                <span>R2 Storage</span>
+              </button>
+
+              <button
+                onClick={() => setTab('static-assets')}
+                className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                  tab === 'static-assets' ? 'bg-zinc-800 text-emerald-400 shadow-sm' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+                }`}
+              >
+                <FileCode className="w-3.5 h-3.5" />
+                <span>Static Assets</span>
+              </button>
+            </div>
+
+            {/* 3. Automation & Messaging */}
+            <div className="space-y-0.5">
+              <span className="px-3 text-[10px] font-bold text-zinc-500 uppercase tracking-wider block mb-1">
+                Automation & Events
               </span>
-            </button>
+              <button
+                onClick={() => setTab('cron')}
+                className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                  tab === 'cron' ? 'bg-zinc-800 text-emerald-400 shadow-sm' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+                }`}
+              >
+                <Clock className="w-3.5 h-3.5" />
+                <span>Cron Triggers</span>
+              </button>
 
-            <button
-              onClick={() => setTab('logs')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition ${
-                tab === 'logs' ? 'bg-zinc-800 text-emerald-400 shadow-sm' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
-              }`}
-            >
-              <Terminal className="w-4 h-4" />
-              Build Logs
-            </button>
+              <button
+                onClick={() => setTab('queues')}
+                className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                  tab === 'queues' ? 'bg-zinc-800 text-emerald-400 shadow-sm' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+                }`}
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>Queues</span>
+              </button>
+
+              <button
+                onClick={() => setTab('workflows')}
+                className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                  tab === 'workflows' ? 'bg-zinc-800 text-emerald-400 shadow-sm' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+                }`}
+              >
+                <GitMerge className="w-3.5 h-3.5" />
+                <span>Workflows</span>
+              </button>
+            </div>
+
+            {/* 4. Infrastructure & Fleet */}
+            <div className="space-y-0.5">
+              <span className="px-3 text-[10px] font-bold text-zinc-500 uppercase tracking-wider block mb-1">
+                Fleet & Routing
+              </span>
+              <button
+                onClick={() => setTab('nodes')}
+                className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                  tab === 'nodes' ? 'bg-zinc-800 text-emerald-400 shadow-sm' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+                }`}
+              >
+                <Server className="w-3.5 h-3.5" />
+                <span>Fleet Nodes</span>
+                <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full bg-zinc-800 text-zinc-400">
+                  {nodes.length}
+                </span>
+              </button>
+
+              <button
+                onClick={() => setTab('domains')}
+                className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                  tab === 'domains' ? 'bg-zinc-800 text-emerald-400 shadow-sm' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+                }`}
+              >
+                <Globe className="w-3.5 h-3.5" />
+                <span>Traefik Routing</span>
+                <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full bg-zinc-800 text-zinc-400">
+                  {domains.length}
+                </span>
+              </button>
+
+              <button
+                onClick={() => setTab('logs')}
+                className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                  tab === 'logs' ? 'bg-zinc-800 text-emerald-400 shadow-sm' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+                }`}
+              >
+                <Terminal className="w-3.5 h-3.5" />
+                <span>Build Logs</span>
+              </button>
+            </div>
           </nav>
         </div>
 
         {/* Fleet Status Badge */}
-        <div className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/60 text-xs space-y-2">
+        <div className="p-3.5 rounded-xl border border-zinc-800 bg-zinc-900/60 text-xs space-y-2 mt-2">
           <div className="flex items-center justify-between text-zinc-400">
-            <span>celld Runtime</span>
-            <span className="text-emerald-400 font-mono">v{runtimeStatus?.currentCelldVersion || '0.2.0'}</span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              celld Runtime
+            </span>
+            <span className="text-emerald-400 font-mono font-bold">
+              v{runtimeStatus?.currentCelldVersion || '0.5.1'}
+            </span>
           </div>
           <div className="flex items-center justify-between text-zinc-400">
             <span>Storage Driver</span>
-            <span className="text-zinc-200 uppercase font-semibold">{runtimeStatus?.storageBackend || 'Garage S3'}</span>
+            <span className="text-zinc-200 uppercase font-semibold text-[11px]">{runtimeStatus?.storageBackend || 'Garage S3'}</span>
           </div>
           {runtimeStatus?.isUpgrading && (
             <div className="pt-2 flex items-center gap-2 text-amber-400 animate-pulse">
@@ -339,7 +503,23 @@ export default function App() {
         {!(tab === 'apps' && currentApp) && (
           <header className="h-16 border-b border-zinc-800/80 px-8 flex items-center justify-between bg-zinc-950/60 backdrop-blur">
             <div className="flex items-center gap-4">
-              <h2 className="text-xl font-semibold capitalize tracking-tight">{tab}</h2>
+              <h2 className="text-xl font-semibold tracking-tight">
+                {tab === 'apps' ? 'Workers' :
+                 tab === 'dynamic-workers' ? 'Dynamic Workers' :
+                 tab === 'durable-objects' ? 'Durable Objects & Facets' :
+                 tab === 'containers' ? 'Containers (Experimental)' :
+                 tab === 'static-assets' ? 'Static Assets' :
+                 tab === 'cron' ? 'Cron Triggers' :
+                 tab === 'queues' ? 'Queues' :
+                 tab === 'workflows' ? 'Workflows' :
+                 tab === 'kv' ? 'KV Namespaces' :
+                 tab === 'd1' ? 'D1 SQL Databases' :
+                 tab === 'r2' ? 'R2 Object Storage' :
+                 tab === 'nodes' ? 'Fleet Nodes' :
+                 tab === 'domains' ? 'Traefik Routing' :
+                 tab === 'logs' ? 'Build Logs' :
+                 tab}
+              </h2>
             </div>
 
             <div className="flex items-center gap-3">
@@ -590,6 +770,17 @@ export default function App() {
               )}
             </div>
           )}
+
+          {tab === 'dynamic-workers' && <DynamicWorkersView />}
+          {tab === 'durable-objects' && <DurableObjectsView />}
+          {tab === 'containers' && <ContainersView />}
+          {tab === 'kv' && <KVView />}
+          {tab === 'd1' && <D1View />}
+          {tab === 'r2' && <R2View />}
+          {tab === 'static-assets' && <StaticAssetsView />}
+          {tab === 'cron' && <CronView />}
+          {tab === 'queues' && <QueuesView />}
+          {tab === 'workflows' && <WorkflowsView />}
         </div>
       </main>
 
