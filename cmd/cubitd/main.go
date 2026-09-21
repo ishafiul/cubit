@@ -4,7 +4,9 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -86,6 +88,57 @@ func main() {
 				return
 			}
 			next.ServeHTTP(w, r)
+		})
+	})
+
+	// Subdomain routing middleware: routes requests with *.localhost or *.cubit.local to deployed worker
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			host := req.Host
+			if h, _, err := net.SplitHostPort(host); err == nil {
+				host = h
+			}
+
+			var subdomain string
+			if strings.HasSuffix(host, ".localhost") {
+				subdomain = strings.TrimSuffix(host, ".localhost")
+			} else if strings.HasSuffix(host, ".cubit.local") {
+				subdomain = strings.TrimSuffix(host, ".cubit.local")
+			}
+
+			// If request is directed to a subdomain application (e.g. hello-world-api.localhost)
+			if subdomain != "" && subdomain != "api" && subdomain != "dashboard" && subdomain != "localhost" {
+				app, err := appUsecase.GetApplicationBySubdomain(req.Context(), subdomain)
+				if err == nil && app != nil {
+					if app.ActiveDeploymentID == "" {
+						http.Error(w, fmt.Sprintf("Application %q has no active deployment", app.Name), http.StatusServiceUnavailable)
+						return
+					}
+
+					reqBody, _ := io.ReadAll(req.Body)
+					headers := make(map[string]string)
+					for k, v := range req.Header {
+						if len(v) > 0 {
+							headers[k] = v[0]
+						}
+					}
+
+					status, respHeaders, respBody, err := appUsecase.InvokeApplication(req.Context(), app.ID, req.Method, req.URL.RequestURI(), headers, reqBody)
+					if err != nil {
+						http.Error(w, fmt.Sprintf("Worker invocation error: %v", err), http.StatusInternalServerError)
+						return
+					}
+
+					for k, v := range respHeaders {
+						w.Header().Set(k, v)
+					}
+					w.WriteHeader(status)
+					_, _ = w.Write(respBody)
+					return
+				}
+			}
+
+			next.ServeHTTP(w, req)
 		})
 	})
 

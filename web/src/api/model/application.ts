@@ -14,6 +14,8 @@ export interface Application {
   id: string;
   name: string;
   sourceType: SourceType;
+  subdomain?: string;
+  testUrl?: string;
   /** @nullable */
   gitRepo?: string | null;
   branch?: string;

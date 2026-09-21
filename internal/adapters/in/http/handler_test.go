@@ -182,13 +182,59 @@ func TestHTTPAPI(t *testing.T) {
 					t.Errorf("expected empty git repo, got %s", *app.GitRepo)
 				}
 
-				// Deploy inline application
+				if app.Subdomain == nil || *app.Subdomain != "hello-world-api" {
+					t.Errorf("expected subdomain hello-world-api, got %v", app.Subdomain)
+				}
+				if app.TestUrl == nil || *app.TestUrl != "http://hello-world-api.localhost:8000" {
+					t.Errorf("expected testUrl http://hello-world-api.localhost:8000, got %v", app.TestUrl)
+				}
+
+				// Deploy inline application (v1)
 				deployReq := httptest.NewRequest(http.MethodPost, "/api/v1/applications/"+app.Id.String()+"/deploy", nil)
 				deployRec := httptest.NewRecorder()
 				router.ServeHTTP(deployRec, deployReq)
 
 				if deployRec.Code != http.StatusAccepted {
 					t.Fatalf("expected 202 accepted for inline deploy, got %d", deployRec.Code)
+				}
+
+				var dep1 http_adapter.Deployment
+				_ = json.NewDecoder(deployRec.Body).Decode(&dep1)
+				if dep1.BuildVersion == nil || *dep1.BuildVersion != 1 {
+					t.Errorf("expected buildVersion 1 for first deploy, got %v", dep1.BuildVersion)
+				}
+
+				// Deploy inline application again (v2)
+				deployReq2 := httptest.NewRequest(http.MethodPost, "/api/v1/applications/"+app.Id.String()+"/deploy", nil)
+				deployRec2 := httptest.NewRecorder()
+				router.ServeHTTP(deployRec2, deployReq2)
+
+				var dep2 http_adapter.Deployment
+				_ = json.NewDecoder(deployRec2.Body).Decode(&dep2)
+				if dep2.BuildVersion == nil || *dep2.BuildVersion != 2 {
+					t.Errorf("expected buildVersion 2 for second deploy, got %v", dep2.BuildVersion)
+				}
+
+				// Test application via test endpoint
+				testBody := []byte(`{"method":"GET","path":"/"}`)
+				testReq := httptest.NewRequest(http.MethodPost, "/api/v1/applications/"+app.Id.String()+"/test", bytes.NewReader(testBody))
+				testReq.Header.Set("Content-Type", "application/json")
+				testRec := httptest.NewRecorder()
+				router.ServeHTTP(testRec, testReq)
+
+				if testRec.Code != http.StatusOK {
+					t.Fatalf("expected 200 OK from test endpoint, got %d: %s", testRec.Code, testRec.Body.String())
+				}
+
+				var testResp http_adapter.TestApplicationResponse
+				if err := json.NewDecoder(testRec.Body).Decode(&testResp); err != nil {
+					t.Fatalf("failed decoding test response: %v", err)
+				}
+				if testResp.StatusCode != 200 {
+					t.Errorf("expected worker status 200, got %d", testResp.StatusCode)
+				}
+				if !strings.Contains(testResp.Body, "Hello World from Cubit Worker!") {
+					t.Errorf("expected worker body to contain 'Hello World from Cubit Worker!', got: %s", testResp.Body)
 				}
 			})
 		})

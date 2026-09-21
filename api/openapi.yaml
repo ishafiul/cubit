@@ -275,6 +275,37 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /applications/{id}/test:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      summary: Send a test HTTP request to the active deployment of an application
+      operationId: testApplication
+      tags:
+        - applications
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TestApplicationRequest'
+      responses:
+        '200':
+          description: Result of the test invocation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestApplicationResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /deployments/{id}:
     parameters:
       - name: id
@@ -592,6 +623,12 @@ components:
           example: "my-worker-api"
         sourceType:
           $ref: '#/components/schemas/SourceType'
+        subdomain:
+          type: string
+          example: "my-worker-api"
+        testUrl:
+          type: string
+          example: "http://my-worker-api.localhost:8000"
         gitRepo:
           type: string
           nullable: true
@@ -669,6 +706,41 @@ components:
           items:
             $ref: '#/components/schemas/ResourceBinding'
 
+    TestApplicationRequest:
+      type: object
+      properties:
+        method:
+          type: string
+          example: "GET"
+          default: "GET"
+        path:
+          type: string
+          example: "/"
+          default: "/"
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        body:
+          type: string
+
+    TestApplicationResponse:
+      type: object
+      required:
+        - statusCode
+        - body
+      properties:
+        statusCode:
+          type: integer
+          example: 200
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        body:
+          type: string
+          example: "Hello World from Cubit!"
+
     DeploymentStatus:
       type: string
       enum:
@@ -694,6 +766,10 @@ components:
         applicationId:
           type: string
           format: uuid
+        buildVersion:
+          type: integer
+          example: 1
+          description: "Sequential build version for this application (e.g. 1 for v1)"
         commitHash:
           type: string
           example: "7f8b92c"

@@ -231,6 +231,48 @@ func (h *APIHandler) ListDeployments(w http.ResponseWriter, r *http.Request, id 
 	h.respondJSON(w, http.StatusOK, result)
 }
 
+// TestApplication POST /applications/{id}/test
+func (h *APIHandler) TestApplication(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	var req TestApplicationRequest
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	method := "GET"
+	if req.Method != nil && *req.Method != "" {
+		method = *req.Method
+	}
+
+	path := "/"
+	if req.Path != nil && *req.Path != "" {
+		path = *req.Path
+	}
+
+	headers := make(map[string]string)
+	if req.Headers != nil && *req.Headers != nil {
+		headers = *req.Headers
+	}
+
+	var reqBody []byte
+	if req.Body != nil {
+		reqBody = []byte(*req.Body)
+	}
+
+	statusCode, respHeaders, respBody, err := h.appUsecase.InvokeApplication(r.Context(), id.String(), method, path, headers, reqBody)
+	if err != nil {
+		h.respondError(w, err)
+		return
+	}
+
+	res := TestApplicationResponse{
+		StatusCode: statusCode,
+		Body:       string(respBody),
+	}
+	if len(respHeaders) > 0 {
+		res.Headers = &respHeaders
+	}
+
+	h.respondJSON(w, http.StatusOK, res)
+}
+
 // GetDeployment GET /deployments/{id}
 func (h *APIHandler) GetDeployment(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
 	dep, err := h.depRepo.GetByID(r.Context(), id.String())
@@ -527,10 +569,18 @@ func toAPIApplication(a *domain.Application) Application {
 		inlineCode = &a.InlineCode
 	}
 
+	subdomain := a.Subdomain
+	if subdomain == "" {
+		subdomain = domain.SanitizeSubdomain(a.Name)
+	}
+	testURL := a.DefaultTestURL(8000)
+
 	return Application{
 		Id:                 uid,
 		Name:               a.Name,
 		SourceType:         sourceType,
+		Subdomain:          &subdomain,
+		TestUrl:            &testURL,
 		GitRepo:            gitRepo,
 		Branch:             &branch,
 		InlineCode:         inlineCode,
@@ -550,9 +600,16 @@ func toAPIDeployment(d *domain.Deployment) Deployment {
 	bundleSize := int(d.BundleSize)
 	errMsg := d.ErrorMessage
 
+	var buildVer *int
+	if d.BuildVersion > 0 {
+		bv := d.BuildVersion
+		buildVer = &bv
+	}
+
 	dep := Deployment{
 		Id:            uid,
 		ApplicationId: appUUID,
+		BuildVersion:  buildVer,
 		CommitHash:    d.CommitHash,
 		CommitMessage: &commitMsg,
 		Status:        DeploymentStatus(d.Status),

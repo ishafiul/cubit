@@ -10,6 +10,8 @@ import type { DeploymentStatus } from './deploymentStatus';
 export interface Deployment {
   id: string;
   applicationId: string;
+  /** Sequential build version for this application (e.g. 1 for v1) */
+  buildVersion?: number;
   commitHash: string;
   commitMessage?: string;
   status: DeploymentStatus;

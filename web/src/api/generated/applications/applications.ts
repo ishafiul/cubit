@@ -31,6 +31,8 @@ import type {
   CreateApplicationRequest,
   InternalErrorResponse,
   NotFoundResponse,
+  TestApplicationRequest,
+  TestApplicationResponse,
   UpdateApplicationRequest
 } from '../../model';
 
@@ -407,6 +409,71 @@ export const useDeleteApplication = <TError = NotFoundResponse | InternalErrorRe
       > => {
 
       const mutationOptions = getDeleteApplicationMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * @summary Send a test HTTP request to the active deployment of an application
+ */
+export const testApplication = (
+    id: string,
+    testApplicationRequest?: TestApplicationRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return customInstance<TestApplicationResponse>(
+      {url: `/applications/${id}/test`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: testApplicationRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getTestApplicationMutationOptions = <TError = NotFoundResponse | InternalErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof testApplication>>, TError,{id: string;data: TestApplicationRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof testApplication>>, TError,{id: string;data: TestApplicationRequest}, TContext> => {
+
+const mutationKey = ['testApplication'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof testApplication>>, {id: string;data: TestApplicationRequest}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  testApplication(id,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type TestApplicationMutationResult = NonNullable<Awaited<ReturnType<typeof testApplication>>>
+    export type TestApplicationMutationBody = TestApplicationRequest
+    export type TestApplicationMutationError = NotFoundResponse | InternalErrorResponse
+
+    /**
+ * @summary Send a test HTTP request to the active deployment of an application
+ */
+export const useTestApplication = <TError = NotFoundResponse | InternalErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof testApplication>>, TError,{id: string;data: TestApplicationRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof testApplication>>,
+        TError,
+        {id: string;data: TestApplicationRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getTestApplicationMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }
