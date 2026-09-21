@@ -109,4 +109,18 @@ func TestDeployment(t *testing.T) {
 			}
 		})
 	})
+
+	t.Run("Given an active deployment", func(t *testing.T) {
+		dep, _ := domain.NewDeployment("dep-1", "app-1", "abc", "msg")
+		_ = dep.StartBuilding()
+		_ = dep.StartDeploying(100)
+		_ = dep.MarkActive()
+
+		t.Run("When marked superseded then its status transitions to superseded", func(t *testing.T) {
+			dep.MarkSuperseded()
+			if dep.Status != domain.DeploymentStatusSuperseded {
+				t.Errorf("expected superseded status, got %s", dep.Status)
+			}
+		})
+	})
 }
