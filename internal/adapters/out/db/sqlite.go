@@ -98,5 +98,8 @@ func OpenSQLite(dsn string) (*sql.DB, error) {
 		  )
 	`)
 
+	// Upgrade legacy 0.2.0 nodes to celld 0.5.1
+	_, _ = db.ExecContext(context.Background(), "UPDATE nodes SET celld_version = '0.5.1' WHERE celld_version = '0.2.0'")
+
 	return db, nil
 }

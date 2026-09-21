@@ -67,3 +67,126 @@ CREATE TABLE IF NOT EXISTS domains (
 CREATE INDEX IF NOT EXISTS idx_deployments_app_id ON deployments(application_id);
 CREATE INDEX IF NOT EXISTS idx_deployment_logs_dep_id ON deployment_logs(deployment_id);
 CREATE INDEX IF NOT EXISTS idx_domains_app_id ON domains(application_id);
+
+-- celld Service Suite Tables
+CREATE TABLE IF NOT EXISTS kv_namespaces (
+    id TEXT PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    created_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS kv_entries (
+    namespace_id TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    expiration_ttl INTEGER DEFAULT 0,
+    metadata TEXT DEFAULT '',
+    updated_at TIMESTAMP NOT NULL,
+    PRIMARY KEY (namespace_id, key),
+    FOREIGN KEY(namespace_id) REFERENCES kv_namespaces(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS d1_databases (
+    id TEXT PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    size_bytes INTEGER DEFAULT 0,
+    created_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS queues (
+    id TEXT PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    consumer_app_id TEXT DEFAULT '',
+    max_retries INTEGER DEFAULT 3,
+    created_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS queue_messages (
+    id TEXT PRIMARY KEY,
+    queue_id TEXT NOT NULL,
+    body TEXT NOT NULL,
+    attempts INTEGER DEFAULT 0,
+    created_at TIMESTAMP NOT NULL,
+    FOREIGN KEY(queue_id) REFERENCES queues(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS cron_triggers (
+    id TEXT PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    cron_expression TEXT NOT NULL,
+    target_app_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    last_run_at TIMESTAMP,
+    next_run_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS cron_runs (
+    id TEXT PRIMARY KEY,
+    trigger_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    status_code INTEGER NOT NULL,
+    duration_ms REAL NOT NULL,
+    executed_at TIMESTAMP NOT NULL,
+    FOREIGN KEY(trigger_id) REFERENCES cron_triggers(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS workflows (
+    id TEXT PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    target_app_id TEXT NOT NULL,
+    steps TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS workflow_runs (
+    id TEXT PRIMARY KEY,
+    workflow_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    current_step TEXT NOT NULL,
+    logs TEXT NOT NULL,
+    started_at TIMESTAMP NOT NULL,
+    finished_at TIMESTAMP,
+    FOREIGN KEY(workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS durable_objects (
+    id TEXT PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    app_id TEXT NOT NULL,
+    facets TEXT NOT NULL,
+    storage_backend TEXT NOT NULL DEFAULT 'sqlite',
+    created_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS do_instances (
+    id TEXT PRIMARY KEY,
+    class_id TEXT NOT NULL,
+    object_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    storage_keys_count INTEGER DEFAULT 0,
+    alarm_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL,
+    FOREIGN KEY(class_id) REFERENCES durable_objects(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS containers (
+    id TEXT PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    image TEXT NOT NULL,
+    port INTEGER NOT NULL DEFAULT 8080,
+    status TEXT NOT NULL DEFAULT 'running',
+    env_vars TEXT,
+    created_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS static_assets (
+    id TEXT PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    subdomain TEXT NOT NULL DEFAULT '',
+    files_count INTEGER DEFAULT 0,
+    total_size INTEGER DEFAULT 0,
+    index_document TEXT NOT NULL DEFAULT 'index.html',
+    spa_routing INTEGER NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL
+);
