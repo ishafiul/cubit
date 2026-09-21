@@ -31,5 +31,6 @@ export * from './resourceBinding';
 export * from './resourceBindingType';
 export * from './runtimeStatus';
 export * from './runtimeStatusStorageBackend';
+export * from './sourceType';
 export * from './updateApplicationRequest';
 export * from './upgradeDaemonRequest';

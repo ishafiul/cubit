@@ -5,13 +5,16 @@
  * Strict REST API for Cubit, an open-source bare-metal PaaS for running Cloudflare Workers and Durable Objects using celld, Traefik, and S3 storage.
  * OpenAPI spec version: 1.0.0
  */
+import type { SourceType } from './sourceType';
 import type { EnvironmentVariable } from './environmentVariable';
 import type { ResourceBinding } from './resourceBinding';
 
 export interface CreateApplicationRequest {
   name: string;
-  gitRepo: string;
+  sourceType?: SourceType;
+  gitRepo?: string;
   branch?: string;
+  inlineCode?: string;
   envVars?: EnvironmentVariable[];
   bindings?: ResourceBinding[];
 }

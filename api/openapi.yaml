@@ -569,13 +569,17 @@ components:
           type: string
           example: "kv_store_app1"
 
+    SourceType:
+      type: string
+      enum: [git, inline]
+      default: git
+
     Application:
       type: object
       required:
         - id
         - name
-        - gitRepo
-        - branch
+        - sourceType
         - status
         - createdAt
         - updatedAt
@@ -586,12 +590,19 @@ components:
         name:
           type: string
           example: "my-worker-api"
+        sourceType:
+          $ref: '#/components/schemas/SourceType'
         gitRepo:
           type: string
+          nullable: true
           example: "https://github.com/myorg/api"
         branch:
           type: string
           default: "main"
+        inlineCode:
+          type: string
+          nullable: true
+          example: "export default { fetch: (req) => new Response('Hello World!') };"
         status:
           type: string
           enum: [created, building, running, stopped, failed]
@@ -618,17 +629,21 @@ components:
       type: object
       required:
         - name
-        - gitRepo
       properties:
         name:
           type: string
           example: "my-worker-api"
+        sourceType:
+          $ref: '#/components/schemas/SourceType'
         gitRepo:
           type: string
           example: "https://github.com/myorg/api"
         branch:
           type: string
           default: "main"
+        inlineCode:
+          type: string
+          example: "export default { fetch: (req) => new Response('Hello World from Cubit!') };"
         envVars:
           type: array
           items:
@@ -642,6 +657,8 @@ components:
       type: object
       properties:
         branch:
+          type: string
+        inlineCode:
           type: string
         envVars:
           type: array
