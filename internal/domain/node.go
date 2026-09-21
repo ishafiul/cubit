@@ -15,6 +15,9 @@ const (
 	NodeStatusOffline  NodeStatus = "offline"
 )
 
+// DefaultCelldVersion represents the current stable release of the celld runtime.
+const DefaultCelldVersion = "0.5.1"
+
 // NodeSpecs stores telemetry and capacity specifications for a node.
 type NodeSpecs struct {
 	CPUCores      int
