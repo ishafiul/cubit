@@ -335,7 +335,7 @@ func (h *APIHandler) CreateNode(w http.ResponseWriter, r *http.Request) {
 		workerPort = *req.WorkerPort
 	}
 
-	node, err := h.nodeUsecase.RegisterNode(r.Context(), req.Name, req.IpAddress, intPort, workerPort, "0.2.0")
+	node, err := h.nodeUsecase.RegisterNode(r.Context(), req.Name, req.IpAddress, intPort, workerPort, domain.DefaultCelldVersion)
 	if err != nil {
 		h.respondError(w, err)
 		return

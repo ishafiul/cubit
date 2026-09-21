@@ -15,6 +15,7 @@ import (
 	"github.com/ishaf/cubit/internal/adapters/out/docker"
 	"github.com/ishaf/cubit/internal/adapters/out/storage"
 	"github.com/ishaf/cubit/internal/adapters/out/traefik"
+	"github.com/ishaf/cubit/internal/domain"
 	"github.com/ishaf/cubit/internal/usecase"
 )
 
@@ -38,10 +39,10 @@ func setupTestServer(t *testing.T) http.Handler {
 	nodeUsecase := usecase.NewNodeUsecase(nodeRepo, supervisor, "s3://fleet-bucket")
 	appUsecase := usecase.NewAppUsecase(appRepo, depRepo, nodeRepo, domRepo, storageAdapter, proxyAdapter, "fleet-bucket")
 	domainUsecase := usecase.NewDomainUsecase(domRepo, appRepo, appUsecase)
-	runtimeUsecase := usecase.NewRuntimeUsecase(nodeRepo, supervisor, storageAdapter, "s3://fleet-bucket", "0.2.0")
+	runtimeUsecase := usecase.NewRuntimeUsecase(nodeRepo, supervisor, storageAdapter, "s3://fleet-bucket", domain.DefaultCelldVersion)
 
 	// Register an initial node
-	_, _ = nodeUsecase.RegisterNode(ctx, "test-node", "10.0.0.1", 8081, 8080, "0.2.0")
+	_, _ = nodeUsecase.RegisterNode(ctx, "test-node", "10.0.0.1", 8081, 8080, domain.DefaultCelldVersion)
 
 	apiHandler := http_adapter.NewAPIHandler(nodeUsecase, appUsecase, domainUsecase, runtimeUsecase, depRepo)
 	sseStreamer := http_adapter.NewSSELogStreamer(depRepo)
@@ -70,8 +71,8 @@ func TestHTTPAPI(t *testing.T) {
 
 			var status http_adapter.RuntimeStatus
 			_ = json.NewDecoder(rec.Body).Decode(&status)
-			if status.CurrentCelldVersion != "0.2.0" {
-				t.Errorf("expected celld version 0.2.0, got %s", status.CurrentCelldVersion)
+			if status.CurrentCelldVersion != domain.DefaultCelldVersion {
+				t.Errorf("expected celld version %s, got %s", domain.DefaultCelldVersion, status.CurrentCelldVersion)
 			}
 			if status.ActiveNodesCount != 1 {
 				t.Errorf("expected 1 active node, got %d", status.ActiveNodesCount)

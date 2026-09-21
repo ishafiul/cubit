@@ -23,6 +23,7 @@ import (
 	"github.com/ishaf/cubit/internal/adapters/out/docker"
 	"github.com/ishaf/cubit/internal/adapters/out/storage"
 	"github.com/ishaf/cubit/internal/adapters/out/traefik"
+	"github.com/ishaf/cubit/internal/domain"
 	"github.com/ishaf/cubit/internal/usecase"
 )
 
@@ -51,6 +52,7 @@ func main() {
 	appRepo := db.NewAppRepo(database)
 	depRepo := db.NewDeploymentRepo(database)
 	domRepo := db.NewDomainRepo(database)
+	servicesRepo := db.NewServicesRepo(database, filepath.Join(*storageDir, "d1"))
 
 	// 3. Initialize Outbound Infrastructure Adapters
 	proxyAdapter := traefik.NewFileProvider(*traefikOut, "letsencrypt")
@@ -64,10 +66,12 @@ func main() {
 	nodeUsecase := usecase.NewNodeUsecase(nodeRepo, dockerSupervisor, fmt.Sprintf("s3://%s", *bucketName))
 	appUsecase := usecase.NewAppUsecase(appRepo, depRepo, nodeRepo, domRepo, storageAdapter, proxyAdapter, *bucketName)
 	domainUsecase := usecase.NewDomainUsecase(domRepo, appRepo, appUsecase)
-	runtimeUsecase := usecase.NewRuntimeUsecase(nodeRepo, dockerSupervisor, storageAdapter, fmt.Sprintf("s3://%s", *bucketName), "0.2.0")
+	runtimeUsecase := usecase.NewRuntimeUsecase(nodeRepo, dockerSupervisor, storageAdapter, fmt.Sprintf("s3://%s", *bucketName), domain.DefaultCelldVersion)
+	servicesUsecase := usecase.NewServicesUsecase(servicesRepo, appRepo, appUsecase, storageAdapter, *bucketName)
 
 	// 5. Initialize Inbound HTTP Adapter
 	apiHandler := http_adapter.NewAPIHandler(nodeUsecase, appUsecase, domainUsecase, runtimeUsecase, depRepo)
+	servicesHandler := http_adapter.NewServicesHandler(servicesUsecase)
 	sseStreamer := http_adapter.NewSSELogStreamer(depRepo)
 
 	// 6. Configure Chi Router
@@ -152,6 +156,7 @@ func main() {
 	// Mount Generated OpenAPI Routes under /api/v1
 	r.Route("/api/v1", func(sub chi.Router) {
 		http_adapter.HandlerFromMux(apiHandler, sub)
+		servicesHandler.RegisterRoutes(sub)
 		sub.Get("/deployments/{id}/logs/stream", sseStreamer.HandleStream)
 	})
 
