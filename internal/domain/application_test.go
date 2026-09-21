@@ -58,4 +58,75 @@ func TestApplication(t *testing.T) {
 			}
 		})
 	})
+
+	t.Run("Given inline application parameters without git repo", func(t *testing.T) {
+		id := "app-inline-1"
+		name := "hello-world-worker"
+
+		t.Run("When creating with blank code then it initializes with default Hello World template", func(t *testing.T) {
+			app, err := domain.NewApplicationWithSource(id, name, domain.SourceTypeInline, "", "", "", nil, nil)
+
+			if err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+			if app.SourceType != domain.SourceTypeInline {
+				t.Errorf("expected SourceTypeInline, got %s", app.SourceType)
+			}
+			if app.InlineCode != domain.DefaultHelloWorldWorker {
+				t.Errorf("expected DefaultHelloWorldWorker, got %s", app.InlineCode)
+			}
+			if app.GitRepo != "" {
+				t.Errorf("expected empty git repo, got %s", app.GitRepo)
+			}
+		})
+
+		t.Run("When creating with custom worker code then it stores the custom code", func(t *testing.T) {
+			customCode := `export default { fetch: () => new Response("custom") };`
+			app, err := domain.NewApplicationWithSource(id, name, domain.SourceTypeInline, "", "", customCode, nil, nil)
+
+			if err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+			if app.InlineCode != customCode {
+				t.Errorf("expected custom code, got %s", app.InlineCode)
+			}
+		})
+	})
+
+	t.Run("Given git application parameters without git repo", func(t *testing.T) {
+		t.Run("When creating a git application then it returns validation error", func(t *testing.T) {
+			_, err := domain.NewApplicationWithSource("app-2", "git-worker", domain.SourceTypeGit, "", "main", "", nil, nil)
+
+			if err == nil {
+				t.Fatal("expected validation error for missing git repo, got nil")
+			}
+		})
+	})
+
+	t.Run("Given an existing inline application", func(t *testing.T) {
+		app, err := domain.NewApplicationWithSource("app-3", "editable-worker", domain.SourceTypeInline, "", "", "", nil, nil)
+		if err != nil {
+			t.Fatalf("setup failed: %v", err)
+		}
+
+		t.Run("When updating inline code then it updates successfully", func(t *testing.T) {
+			newCode := `export default { fetch: () => new Response("updated") };`
+			err := app.UpdateInlineCode(newCode)
+
+			if err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+			if app.InlineCode != newCode {
+				t.Errorf("expected updated code, got %s", app.InlineCode)
+			}
+		})
+
+		t.Run("When updating with empty code then it returns validation error", func(t *testing.T) {
+			err := app.UpdateInlineCode("   ")
+
+			if err == nil {
+				t.Fatal("expected validation error for empty inline code, got nil")
+			}
+		})
+	})
 }

@@ -23,6 +23,23 @@ const (
 	AppStatusFailed   ApplicationStatus = "failed"
 )
 
+// SourceType defines the origin of the application worker code.
+type SourceType string
+
+const (
+	SourceTypeGit    SourceType = "git"
+	SourceTypeInline SourceType = "inline"
+)
+
+// DefaultHelloWorldWorker is the standard ES module template for inline worker applications.
+const DefaultHelloWorldWorker = `export default {
+  async fetch(request, env, ctx) {
+    return new Response("Hello World from Cubit Worker!", {
+      headers: { "content-type": "text/plain; charset=utf-8" },
+    });
+  },
+};`
+
 // BindingType identifies Cloudflare Worker resource bindings.
 type BindingType string
 
@@ -52,8 +69,10 @@ type ResourceBinding struct {
 type Application struct {
 	ID                 string
 	Name               string
+	SourceType         SourceType
 	GitRepo            string
 	Branch             string
+	InlineCode         string
 	Status             ApplicationStatus
 	EnvVars            []EnvironmentVariable
 	Bindings           []ResourceBinding
@@ -62,21 +81,45 @@ type Application struct {
 	UpdatedAt          time.Time
 }
 
-// NewApplication constructs and validates a new Application entity.
+// NewApplication constructs and validates a new Git-backed Application entity (backwards-compatible).
 func NewApplication(id, name, gitRepo, branch string, envVars []EnvironmentVariable, bindings []ResourceBinding) (*Application, error) {
+	return NewApplicationWithSource(id, name, SourceTypeGit, gitRepo, branch, "", envVars, bindings)
+}
+
+// NewApplicationWithSource constructs and validates an Application with explicit source type.
+func NewApplicationWithSource(
+	id, name string,
+	sourceType SourceType,
+	gitRepo, branch, inlineCode string,
+	envVars []EnvironmentVariable,
+	bindings []ResourceBinding,
+) (*Application, error) {
 	name = strings.TrimSpace(name)
 	if !appNameRegex.MatchString(name) {
 		return nil, NewValidationError("application name must be lowercase alphanumeric and may contain dashes, e.g. 'my-app'")
 	}
 
-	gitRepo = strings.TrimSpace(gitRepo)
-	if !gitRepoURLRegex.MatchString(gitRepo) {
-		return nil, NewValidationError("invalid git repository URL format")
+	if sourceType == "" {
+		sourceType = SourceTypeGit
 	}
 
-	branch = strings.TrimSpace(branch)
-	if branch == "" {
-		branch = "main"
+	switch sourceType {
+	case SourceTypeGit:
+		gitRepo = strings.TrimSpace(gitRepo)
+		if !gitRepoURLRegex.MatchString(gitRepo) {
+			return nil, NewValidationError("invalid git repository URL format")
+		}
+		branch = strings.TrimSpace(branch)
+		if branch == "" {
+			branch = "main"
+		}
+	case SourceTypeInline:
+		inlineCode = strings.TrimSpace(inlineCode)
+		if inlineCode == "" {
+			inlineCode = DefaultHelloWorldWorker
+		}
+	default:
+		return nil, NewValidationError("unsupported source type: " + string(sourceType))
 	}
 
 	for _, env := range envVars {
@@ -87,15 +130,17 @@ func NewApplication(id, name, gitRepo, branch string, envVars []EnvironmentVaria
 
 	now := time.Now().UTC()
 	return &Application{
-		ID:        id,
-		Name:      name,
-		GitRepo:   gitRepo,
-		Branch:    branch,
-		Status:    AppStatusCreated,
-		EnvVars:   envVars,
-		Bindings:  bindings,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:         id,
+		Name:       name,
+		SourceType: sourceType,
+		GitRepo:    gitRepo,
+		Branch:     branch,
+		InlineCode: inlineCode,
+		Status:     AppStatusCreated,
+		EnvVars:    envVars,
+		Bindings:   bindings,
+		CreatedAt:  now,
+		UpdatedAt:  now,
 	}, nil
 }
 
@@ -112,11 +157,27 @@ func (a *Application) SetStatus(status ApplicationStatus) {
 	a.UpdatedAt = time.Now().UTC()
 }
 
-// UpdateConfig updates branch, environment variables, and resource bindings.
-func (a *Application) UpdateConfig(branch string, envVars []EnvironmentVariable, bindings []ResourceBinding) error {
+// UpdateInlineCode updates the script content for an inline application.
+func (a *Application) UpdateInlineCode(code string) error {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return NewValidationError("inline code cannot be empty")
+	}
+	a.InlineCode = code
+	a.UpdatedAt = time.Now().UTC()
+	return nil
+}
+
+// UpdateConfig updates branch, inline code, environment variables, and resource bindings.
+func (a *Application) UpdateConfig(branch, inlineCode string, envVars []EnvironmentVariable, bindings []ResourceBinding) error {
 	branch = strings.TrimSpace(branch)
 	if branch != "" {
 		a.Branch = branch
+	}
+
+	inlineCode = strings.TrimSpace(inlineCode)
+	if inlineCode != "" {
+		a.InlineCode = inlineCode
 	}
 
 	for _, env := range envVars {
