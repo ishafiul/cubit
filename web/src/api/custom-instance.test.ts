@@ -36,7 +36,7 @@ describe('Given customInstance fetch client', () => {
     });
 
     it('Then it formats query parameters into the URL', () => {
-      expect(fetchCalledWithUrl).toBe('/applications?page=1&filter=active');
+      expect(fetchCalledWithUrl).toBe('/api/v1/applications?page=1&filter=active');
     });
 
     it('Then it parses and returns the JSON body', () => {

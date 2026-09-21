@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -73,7 +74,6 @@ func main() {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(60 * time.Second))
 
 	// CORS for frontend web dashboard
 	r.Use(func(next http.Handler) http.Handler {
@@ -113,31 +113,43 @@ func main() {
 		}
 	}
 	if staticDir != "" {
-		if _, err := os.Stat(staticDir); err == nil {
-			fileServer := http.FileServer(http.Dir(staticDir))
-			r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
-				if strings.HasPrefix(r.URL.Path, "/api") || r.URL.Path == "/health" {
-					http.NotFound(w, r)
-					return
-				}
-				fpath := filepath.Join(staticDir, filepath.Clean(r.URL.Path))
-				info, err := os.Stat(fpath)
-				if os.IsNotExist(err) || (err == nil && info.IsDir() && r.URL.Path != "/") {
-					http.ServeFile(w, r, filepath.Join(staticDir, "index.html"))
-					return
-				}
-				fileServer.ServeHTTP(w, r)
-			})
-			log.Printf("Serving web dashboard from %s", staticDir)
+		absDir, err := filepath.Abs(staticDir)
+		if err == nil {
+			if _, err := os.Stat(absDir); err == nil {
+				r.Get("/*", func(w http.ResponseWriter, req *http.Request) {
+					if strings.HasPrefix(req.URL.Path, "/api") || req.URL.Path == "/health" {
+						http.NotFound(w, req)
+						return
+					}
+					cleanPath := filepath.Clean(req.URL.Path)
+					fpath := filepath.Join(absDir, cleanPath)
+
+					info, err := os.Stat(fpath)
+					if os.IsNotExist(err) || (err == nil && info.IsDir()) {
+						fpath = filepath.Join(absDir, "index.html")
+					}
+
+					data, err := os.ReadFile(fpath)
+					if err != nil {
+						http.NotFound(w, req)
+						return
+					}
+
+					w.Header().Set("Content-Type", getMimeType(fpath))
+					w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write(data)
+				})
+				log.Printf("Serving web dashboard from %s", absDir)
+			}
 		}
 	}
 
 	srv := &http.Server{
-		Addr:         fmt.Sprintf(":%d", *port),
-		Handler:      r,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:        fmt.Sprintf(":%d", *port),
+		Handler:     r,
+		ReadTimeout: 15 * time.Second,
+		IdleTimeout: 60 * time.Second,
 	}
 
 	go func() {
@@ -163,3 +175,26 @@ func main() {
 
 	log.Println("Cubit Control Plane cleanly stopped.")
 }
+
+func getMimeType(path string) string {
+	ext := filepath.Ext(path)
+	switch ext {
+	case ".html":
+		return "text/html; charset=utf-8"
+	case ".js", ".mjs":
+		return "application/javascript; charset=utf-8"
+	case ".css":
+		return "text/css; charset=utf-8"
+	case ".svg":
+		return "image/svg+xml"
+	case ".json":
+		return "application/json"
+	case ".png":
+		return "image/png"
+	case ".ico":
+		return "image/x-icon"
+	default:
+		return "application/octet-stream"
+	}
+}
+

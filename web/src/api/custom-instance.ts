@@ -15,6 +15,11 @@ export const customInstance = async <T>(
   const { url, method = 'GET', params, headers, data, signal } = config;
 
   let requestUrl = url;
+  if (!requestUrl.startsWith('http://') && !requestUrl.startsWith('https://')) {
+    if (!requestUrl.startsWith('/api/v1')) {
+      requestUrl = `/api/v1${requestUrl.startsWith('/') ? '' : '/'}${requestUrl}`;
+    }
+  }
   if (params) {
     const searchParams = new URLSearchParams();
     Object.entries(params).forEach(([key, value]) => {
