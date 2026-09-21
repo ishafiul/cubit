@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -43,10 +44,12 @@ func setupTestServer(t *testing.T) http.Handler {
 	_, _ = nodeUsecase.RegisterNode(ctx, "test-node", "10.0.0.1", 8081, 8080, "0.2.0")
 
 	apiHandler := http_adapter.NewAPIHandler(nodeUsecase, appUsecase, domainUsecase, runtimeUsecase, depRepo)
+	sseStreamer := http_adapter.NewSSELogStreamer(depRepo)
 
 	r := chi.NewRouter()
 	r.Route("/api/v1", func(sub chi.Router) {
 		http_adapter.HandlerFromMux(apiHandler, sub)
+		sub.Get("/deployments/{id}/logs/stream", sseStreamer.HandleStream)
 	})
 	return r
 }
@@ -108,6 +111,44 @@ func TestHTTPAPI(t *testing.T) {
 				_ = json.NewDecoder(deployRec.Body).Decode(&dep)
 				if dep.Status != http_adapter.DeploymentStatusActive {
 					t.Errorf("expected active deployment, got %s", dep.Status)
+				}
+
+				// Verify deployment logs via REST
+				logsReq := httptest.NewRequest(http.MethodGet, "/api/v1/deployments/"+dep.Id.String()+"/logs", nil)
+				logsRec := httptest.NewRecorder()
+				router.ServeHTTP(logsRec, logsReq)
+
+				if logsRec.Code != http.StatusOK {
+					t.Fatalf("expected 200 OK for logs, got %d", logsRec.Code)
+				}
+
+				var rawLogs []map[string]interface{}
+				if err := json.NewDecoder(logsRec.Body).Decode(&rawLogs); err != nil {
+					t.Fatalf("failed decoding logs: %v", err)
+				}
+				if len(rawLogs) == 0 {
+					t.Fatal("expected at least one log entry")
+				}
+				for _, field := range []string{"timestamp", "step", "message", "level"} {
+					if _, ok := rawLogs[0][field]; !ok {
+						t.Errorf("expected json field %q in log entry, got %+v", field, rawLogs[0])
+					}
+				}
+
+				// Verify deployment logs via SSE stream
+				streamReq := httptest.NewRequest(http.MethodGet, "/api/v1/deployments/"+dep.Id.String()+"/logs/stream", nil)
+				streamRec := httptest.NewRecorder()
+				router.ServeHTTP(streamRec, streamReq)
+
+				if streamRec.Code != http.StatusOK {
+					t.Fatalf("expected 200 OK for stream, got %d", streamRec.Code)
+				}
+				streamBody := streamRec.Body.String()
+				if !strings.Contains(streamBody, "data: ") {
+					t.Errorf("expected SSE data stream, got: %s", streamBody)
+				}
+				if !strings.Contains(streamBody, "\"step\":") {
+					t.Errorf("expected lowercase step key in SSE data, got: %s", streamBody)
 				}
 			})
 		})

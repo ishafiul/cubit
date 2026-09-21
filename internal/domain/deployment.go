@@ -39,10 +39,10 @@ const (
 
 // DeploymentLog represents a discrete event or output line during deployment execution.
 type DeploymentLog struct {
-	Timestamp time.Time
-	Step      LogStep
-	Message   string
-	Level     LogLevel
+	Timestamp time.Time `json:"timestamp"`
+	Step      LogStep   `json:"step"`
+	Message   string    `json:"message"`
+	Level     LogLevel  `json:"level"`
 }
 
 // Deployment represents an immutable release of an application.

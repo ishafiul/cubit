@@ -81,6 +81,8 @@ export default function App() {
 
   // Live log streaming
   const [activeDeploymentId, setActiveDeploymentId] = useState<string | null>(null);
+  const [deployStatus, setDeployStatus] = useState<string>('');
+  const [isDeploying, setIsDeploying] = useState<string | null>(null);
   const [logs, setLogs] = useState<Array<{ timestamp: string; step: string; message: string; level: string }>>([]);
 
   const refreshAll = () => {
@@ -96,24 +98,69 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // EventSource live log streaming
+  // EventSource live log streaming with initial REST fetch fallback
   useEffect(() => {
     if (!activeDeploymentId) return;
 
     setLogs([]);
+    setDeployStatus('building');
+
+    // Immediate REST fetch for existing logs
+    fetch(`/api/v1/deployments/${activeDeploymentId}/logs`)
+      .then(r => r.json())
+      .then((data: any[]) => {
+        if (Array.isArray(data) && data.length > 0) {
+          const formatted = data.map(entry => ({
+            timestamp: entry.timestamp || entry.Timestamp || new Date().toISOString(),
+            step: entry.step || entry.Step || 'info',
+            message: entry.message || entry.Message || '',
+            level: entry.level || entry.Level || 'info',
+          }));
+          setLogs(formatted);
+        }
+      })
+      .catch(err => console.error("Failed fetching initial logs", err));
+
+    // Fetch deployment details to update status
+    fetch(`/api/v1/deployments/${activeDeploymentId}`)
+      .then(r => r.json())
+      .then((data: any) => {
+        if (data && data.status) {
+          setDeployStatus(data.status);
+        }
+      })
+      .catch(err => console.error("Failed fetching deployment info", err));
+
     const es = new EventSource(`/api/v1/deployments/${activeDeploymentId}/logs/stream`);
 
     es.onmessage = (event) => {
       try {
         const entry = JSON.parse(event.data);
-        setLogs(prev => [...prev, entry]);
+        const normalized = {
+          timestamp: entry.timestamp || entry.Timestamp || new Date().toISOString(),
+          step: entry.step || entry.Step || 'info',
+          message: entry.message || entry.Message || '',
+          level: entry.level || entry.Level || 'info',
+        };
+        setLogs(prev => {
+          const exists = prev.some(p => p.step === normalized.step && p.message === normalized.message);
+          return exists ? prev : [...prev, normalized];
+        });
       } catch (e) {
         console.error("Failed parsing log entry", e);
       }
     };
 
-    es.addEventListener('complete', () => {
+    es.addEventListener('complete', (event: any) => {
       es.close();
+      if (event.data) {
+        try {
+          const parsed = JSON.parse(event.data);
+          if (parsed.status) setDeployStatus(parsed.status);
+        } catch (_) {}
+      } else {
+        setDeployStatus('active');
+      }
       refreshAll();
     });
 
@@ -146,13 +193,18 @@ export default function App() {
   };
 
   const handleDeployApp = async (appId: string) => {
-    const res = await deployApplicationMutation.mutateAsync({
-      id: appId,
-      data: { commitHash: 'HEAD' }
-    });
-    if (res && res.id) {
-      setActiveDeploymentId(res.id);
-      setTab('logs');
+    setIsDeploying(appId);
+    try {
+      const res = await deployApplicationMutation.mutateAsync({
+        id: appId,
+        data: { commitHash: 'HEAD' }
+      });
+      if (res && res.id) {
+        setActiveDeploymentId(res.id);
+        setTab('logs');
+      }
+    } finally {
+      setIsDeploying(null);
     }
   };
 
@@ -413,10 +465,15 @@ export default function App() {
                       )}
                       <button
                         onClick={() => handleDeployApp(app.id)}
-                        className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-zinc-950 text-xs font-semibold transition"
+                        disabled={isDeploying === app.id}
+                        className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-zinc-950 text-xs font-semibold transition"
                       >
-                        <Play className="w-3.5 h-3.5 fill-current" />
-                        Deploy Now
+                        {isDeploying === app.id ? (
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Play className="w-3.5 h-3.5 fill-current" />
+                        )}
+                        {isDeploying === app.id ? 'Deploying...' : 'Deploy Now'}
                       </button>
                     </div>
                   </div>
@@ -451,21 +508,66 @@ export default function App() {
           {tab === 'logs' && (
             <div className="h-full flex flex-col space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-semibold text-zinc-400 uppercase tracking-wider">Live Build & Deployment Stream</span>
+                <div className="flex items-center gap-3">
+                  <span className="text-sm font-semibold text-zinc-400 uppercase tracking-wider">Live Build & Deployment Stream</span>
+                  {deployStatus && (
+                    <span className={`text-[11px] font-mono px-2.5 py-0.5 rounded-full border uppercase font-bold flex items-center gap-1.5 ${
+                      deployStatus === 'active'
+                        ? 'bg-emerald-950/60 border-emerald-700/80 text-emerald-400'
+                        : deployStatus === 'failed'
+                        ? 'bg-rose-950/60 border-rose-700/80 text-rose-400'
+                        : 'bg-amber-950/60 border-amber-700/80 text-amber-400'
+                    }`}>
+                      {deployStatus === 'active' && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />}
+                      {deployStatus === 'building' && <RefreshCw className="w-3 h-3 animate-spin text-amber-400" />}
+                      Status: {deployStatus}
+                    </span>
+                  )}
+                </div>
                 {activeDeploymentId && <span className="text-xs font-mono text-zinc-500">ID: {activeDeploymentId}</span>}
               </div>
+
+              {deployStatus === 'active' && (
+                <div className="p-3 bg-emerald-950/40 border border-emerald-800/80 rounded-xl flex items-center justify-between text-xs text-emerald-300">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                    <span className="font-semibold">Deployment active and traffic routing live!</span>
+                  </div>
+                  <span className="text-[11px] text-emerald-500/80">Traefik route synchronized</span>
+                </div>
+              )}
+
+              {deployStatus === 'failed' && (
+                <div className="p-3 bg-rose-950/40 border border-rose-800/80 rounded-xl flex items-center justify-between text-xs text-rose-300">
+                  <div className="flex items-center gap-2">
+                    <X className="w-4 h-4 text-rose-400" />
+                    <span className="font-semibold">Deployment failed during build or route sync.</span>
+                  </div>
+                  <span className="text-[11px] text-rose-500/80">Check logs below for details</span>
+                </div>
+              )}
 
               <div className="flex-1 bg-black/80 rounded-xl p-5 font-mono text-xs text-zinc-300 overflow-y-auto border border-zinc-900 space-y-1.5 shadow-inner">
                 {logs.length === 0 ? (
                   <div className="text-zinc-600 italic">Waiting for deployment stream...</div>
                 ) : (
-                  logs.map((l, idx) => (
-                    <div key={idx} className="flex items-start gap-3">
-                      <span className="text-zinc-600">{new Date(l.timestamp).toLocaleTimeString()}</span>
-                      <span className="text-emerald-500 font-bold uppercase text-[10px]">[{l.step}]</span>
-                      <span className={l.level === 'error' ? 'text-red-400' : 'text-zinc-200'}>{l.message}</span>
-                    </div>
-                  ))
+                  logs.map((l, idx) => {
+                    const timeStr = (() => {
+                      try {
+                        const d = new Date(l.timestamp);
+                        return isNaN(d.getTime()) ? new Date().toLocaleTimeString() : d.toLocaleTimeString();
+                      } catch (_) {
+                        return new Date().toLocaleTimeString();
+                      }
+                    })();
+                    return (
+                      <div key={idx} className="flex items-start gap-3">
+                        <span className="text-zinc-600">{timeStr}</span>
+                        <span className="text-emerald-500 font-bold uppercase text-[10px]">[{l.step}]</span>
+                        <span className={l.level === 'error' ? 'text-red-400 font-semibold' : 'text-zinc-200'}>{l.message}</span>
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </div>

@@ -49,6 +49,23 @@ func (s *SSELogStreamer) HandleStream(w http.ResponseWriter, r *http.Request) {
 
 	lastCount := 0
 
+	// Immediate initial flush of existing logs
+	if initialLogs, err := s.depRepo.GetLogs(ctx, depID); err == nil && len(initialLogs) > 0 {
+		for _, entry := range initialLogs {
+			data, _ := json.Marshal(entry)
+			fmt.Fprintf(w, "data: %s\n\n", data)
+		}
+		lastCount = len(initialLogs)
+		flusher.Flush()
+	}
+
+	// Check if already completed
+	if dep, err := s.depRepo.GetByID(ctx, depID); err == nil && (dep.Status == domain.DeploymentStatusActive || dep.Status == domain.DeploymentStatusFailed) {
+		fmt.Fprintf(w, "event: complete\ndata: {\"status\":\"%s\"}\n\n", dep.Status)
+		flusher.Flush()
+		return
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
