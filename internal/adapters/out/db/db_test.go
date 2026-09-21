@@ -89,5 +89,33 @@ func TestSQLiteRepositories(t *testing.T) {
 				}
 			})
 		})
+
+		t.Run("When saving an inline application", func(t *testing.T) {
+			customCode := `export default { fetch: () => new Response("hello world") };`
+			inlineApp, err := domain.NewApplicationWithSource("a-inline", "inline-app", domain.SourceTypeInline, "", "", customCode, nil, nil)
+			if err != nil {
+				t.Fatalf("failed creating inline app: %v", err)
+			}
+
+			if err := appRepo.Save(ctx, inlineApp); err != nil {
+				t.Fatalf("failed saving inline app: %v", err)
+			}
+
+			t.Run("Then it is retrieved with SourceTypeInline and inline code intact", func(t *testing.T) {
+				fetched, err := appRepo.GetByID(ctx, "a-inline")
+				if err != nil {
+					t.Fatalf("failed retrieving inline app: %v", err)
+				}
+				if fetched.SourceType != domain.SourceTypeInline {
+					t.Errorf("expected SourceTypeInline, got %s", fetched.SourceType)
+				}
+				if fetched.InlineCode != customCode {
+					t.Errorf("expected custom code, got %s", fetched.InlineCode)
+				}
+				if fetched.GitRepo != "" {
+					t.Errorf("expected empty git repo, got %s", fetched.GitRepo)
+				}
+			})
+		})
 	})
 }

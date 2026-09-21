@@ -32,5 +32,33 @@ func OpenSQLite(dsn string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to execute schema migration: %w", err)
 	}
 
+	// Dynamic column migrations for existing SQLite databases
+	var hasSourceType, hasInlineCode bool
+	rows, err := db.QueryContext(context.Background(), "PRAGMA table_info(applications)")
+	if err == nil {
+		for rows.Next() {
+			var cid int
+			var colName, ctype string
+			var notnull, pk int
+			var dfltValue sql.NullString
+			if err := rows.Scan(&cid, &colName, &ctype, &notnull, &dfltValue, &pk); err == nil {
+				if colName == "source_type" {
+					hasSourceType = true
+				}
+				if colName == "inline_code" {
+					hasInlineCode = true
+				}
+			}
+		}
+		rows.Close()
+
+		if !hasSourceType {
+			_, _ = db.ExecContext(context.Background(), "ALTER TABLE applications ADD COLUMN source_type TEXT NOT NULL DEFAULT 'git'")
+		}
+		if !hasInlineCode {
+			_, _ = db.ExecContext(context.Background(), "ALTER TABLE applications ADD COLUMN inline_code TEXT")
+		}
+	}
+
 	return db, nil
 }

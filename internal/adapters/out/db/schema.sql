@@ -16,8 +16,10 @@ CREATE TABLE IF NOT EXISTS nodes (
 CREATE TABLE IF NOT EXISTS applications (
     id TEXT PRIMARY KEY,
     name TEXT UNIQUE NOT NULL,
-    git_repo TEXT NOT NULL,
+    source_type TEXT NOT NULL DEFAULT 'git',
+    git_repo TEXT,
     branch TEXT NOT NULL,
+    inline_code TEXT,
     status TEXT NOT NULL,
     env_vars TEXT,
     bindings TEXT,
