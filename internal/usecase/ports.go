@@ -23,6 +23,7 @@ type ApplicationRepository interface {
 	List(ctx context.Context) ([]*domain.Application, error)
 	Delete(ctx context.Context, id string) error
 	Update(ctx context.Context, app *domain.Application) error
+	ListByGitRepoAndBranch(ctx context.Context, repo, branch string) ([]*domain.Application, error)
 }
 
 // DeploymentRepository defines the persistence contract for deployments and logs.
@@ -34,6 +35,13 @@ type DeploymentRepository interface {
 	Update(ctx context.Context, dep *domain.Deployment) error
 	AppendLog(ctx context.Context, deploymentID string, entry domain.DeploymentLog) error
 	GetLogs(ctx context.Context, deploymentID string) ([]domain.DeploymentLog, error)
+}
+
+// GitHubRepository defines the persistence contract for GitHub App settings.
+type GitHubRepository interface {
+	GetSettings(ctx context.Context) (*domain.GitHubAppSettings, error)
+	SaveSettings(ctx context.Context, settings *domain.GitHubAppSettings) error
+	ClearSettings(ctx context.Context) error
 }
 
 // DomainRepository defines the persistence contract for custom domain routes.

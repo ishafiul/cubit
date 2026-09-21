@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/ishaf/cubit/internal/domain"
@@ -37,12 +38,17 @@ func (r *AppRepo) Save(ctx context.Context, app *domain.Application) error {
 		subdomain = domain.SanitizeSubdomain(app.Name)
 	}
 
+	autoDeployInt := 0
+	if app.AutoDeploy {
+		autoDeployInt = 1
+	}
+
 	query := `
-		INSERT INTO applications (id, name, source_type, subdomain, git_repo, branch, inline_code, status, env_vars, bindings, active_deployment_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO applications (id, name, source_type, subdomain, git_repo, branch, inline_code, auto_deploy, status, env_vars, bindings, active_deployment_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	_, err := r.db.ExecContext(ctx, query,
-		app.ID, app.Name, sourceType, subdomain, app.GitRepo, app.Branch, app.InlineCode, string(app.Status),
+		app.ID, app.Name, sourceType, subdomain, app.GitRepo, app.Branch, app.InlineCode, autoDeployInt, string(app.Status),
 		string(envVarsJSON), string(bindingsJSON), app.ActiveDeploymentID,
 		app.CreatedAt.Format(time.RFC3339), app.UpdatedAt.Format(time.RFC3339),
 	)
@@ -55,7 +61,7 @@ func (r *AppRepo) Save(ctx context.Context, app *domain.Application) error {
 // GetByID retrieves an application by ID.
 func (r *AppRepo) GetByID(ctx context.Context, id string) (*domain.Application, error) {
 	query := `
-		SELECT id, name, source_type, subdomain, git_repo, branch, inline_code, status, env_vars, bindings, active_deployment_id, created_at, updated_at
+		SELECT id, name, source_type, subdomain, git_repo, branch, inline_code, COALESCE(auto_deploy, 1), status, env_vars, bindings, active_deployment_id, created_at, updated_at
 		FROM applications WHERE id = ?
 	`
 	row := r.db.QueryRowContext(ctx, query, id)
@@ -64,10 +70,11 @@ func (r *AppRepo) GetByID(ctx context.Context, id string) (*domain.Application, 
 		app                                                                domain.Application
 		sourceTypeStr, subdomainStr, statusStr, envJSON, bindingsJSON, createdAtStr, updatedAtStr string
 		gitRepoNull, inlineCodeNull, activeDepID                           sql.NullString
+		autoDeployInt                                                      int
 	)
 
 	err := row.Scan(
-		&app.ID, &app.Name, &sourceTypeStr, &subdomainStr, &gitRepoNull, &app.Branch, &inlineCodeNull, &statusStr,
+		&app.ID, &app.Name, &sourceTypeStr, &subdomainStr, &gitRepoNull, &app.Branch, &inlineCodeNull, &autoDeployInt, &statusStr,
 		&envJSON, &bindingsJSON, &activeDepID, &createdAtStr, &updatedAtStr,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -91,6 +98,7 @@ func (r *AppRepo) GetByID(ctx context.Context, id string) (*domain.Application, 
 	if inlineCodeNull.Valid {
 		app.InlineCode = inlineCodeNull.String
 	}
+	app.AutoDeploy = autoDeployInt == 1
 	app.Status = domain.ApplicationStatus(statusStr)
 	if activeDepID.Valid {
 		app.ActiveDeploymentID = activeDepID.String
@@ -105,7 +113,7 @@ func (r *AppRepo) GetByID(ctx context.Context, id string) (*domain.Application, 
 // GetBySubdomain retrieves an application by its unique subdomain.
 func (r *AppRepo) GetBySubdomain(ctx context.Context, subdomain string) (*domain.Application, error) {
 	query := `
-		SELECT id, name, source_type, subdomain, git_repo, branch, inline_code, status, env_vars, bindings, active_deployment_id, created_at, updated_at
+		SELECT id, name, source_type, subdomain, git_repo, branch, inline_code, COALESCE(auto_deploy, 1), status, env_vars, bindings, active_deployment_id, created_at, updated_at
 		FROM applications WHERE subdomain = ? OR name = ?
 	`
 	row := r.db.QueryRowContext(ctx, query, subdomain, subdomain)
@@ -114,10 +122,11 @@ func (r *AppRepo) GetBySubdomain(ctx context.Context, subdomain string) (*domain
 		app                                                                domain.Application
 		sourceTypeStr, subdomainStr, statusStr, envJSON, bindingsJSON, createdAtStr, updatedAtStr string
 		gitRepoNull, inlineCodeNull, activeDepID                           sql.NullString
+		autoDeployInt                                                      int
 	)
 
 	err := row.Scan(
-		&app.ID, &app.Name, &sourceTypeStr, &subdomainStr, &gitRepoNull, &app.Branch, &inlineCodeNull, &statusStr,
+		&app.ID, &app.Name, &sourceTypeStr, &subdomainStr, &gitRepoNull, &app.Branch, &inlineCodeNull, &autoDeployInt, &statusStr,
 		&envJSON, &bindingsJSON, &activeDepID, &createdAtStr, &updatedAtStr,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -141,6 +150,7 @@ func (r *AppRepo) GetBySubdomain(ctx context.Context, subdomain string) (*domain
 	if inlineCodeNull.Valid {
 		app.InlineCode = inlineCodeNull.String
 	}
+	app.AutoDeploy = autoDeployInt == 1
 	app.Status = domain.ApplicationStatus(statusStr)
 	if activeDepID.Valid {
 		app.ActiveDeploymentID = activeDepID.String
@@ -155,7 +165,7 @@ func (r *AppRepo) GetBySubdomain(ctx context.Context, subdomain string) (*domain
 // List returns all registered applications.
 func (r *AppRepo) List(ctx context.Context) ([]*domain.Application, error) {
 	query := `
-		SELECT id, name, source_type, subdomain, git_repo, branch, inline_code, status, env_vars, bindings, active_deployment_id, created_at, updated_at
+		SELECT id, name, source_type, subdomain, git_repo, branch, inline_code, COALESCE(auto_deploy, 1), status, env_vars, bindings, active_deployment_id, created_at, updated_at
 		FROM applications ORDER BY created_at DESC
 	`
 	rows, err := r.db.QueryContext(ctx, query)
@@ -170,9 +180,10 @@ func (r *AppRepo) List(ctx context.Context) ([]*domain.Application, error) {
 			app                                                                domain.Application
 			sourceTypeStr, subdomainStr, statusStr, envJSON, bindingsJSON, createdAtStr, updatedAtStr string
 			gitRepoNull, inlineCodeNull, activeDepID                           sql.NullString
+			autoDeployInt                                                      int
 		)
 		if err := rows.Scan(
-			&app.ID, &app.Name, &sourceTypeStr, &subdomainStr, &gitRepoNull, &app.Branch, &inlineCodeNull, &statusStr,
+			&app.ID, &app.Name, &sourceTypeStr, &subdomainStr, &gitRepoNull, &app.Branch, &inlineCodeNull, &autoDeployInt, &statusStr,
 			&envJSON, &bindingsJSON, &activeDepID, &createdAtStr, &updatedAtStr,
 		); err != nil {
 			return nil, err
@@ -191,6 +202,7 @@ func (r *AppRepo) List(ctx context.Context) ([]*domain.Application, error) {
 		if inlineCodeNull.Valid {
 			app.InlineCode = inlineCodeNull.String
 		}
+		app.AutoDeploy = autoDeployInt == 1
 		app.Status = domain.ApplicationStatus(statusStr)
 		if activeDepID.Valid {
 			app.ActiveDeploymentID = activeDepID.String
@@ -232,13 +244,18 @@ func (r *AppRepo) Update(ctx context.Context, app *domain.Application) error {
 		subdomain = domain.SanitizeSubdomain(app.Name)
 	}
 
+	autoDeployInt := 0
+	if app.AutoDeploy {
+		autoDeployInt = 1
+	}
+
 	query := `
 		UPDATE applications
-		SET name = ?, source_type = ?, subdomain = ?, git_repo = ?, branch = ?, inline_code = ?, status = ?, env_vars = ?, bindings = ?, active_deployment_id = ?, updated_at = ?
+		SET name = ?, source_type = ?, subdomain = ?, git_repo = ?, branch = ?, inline_code = ?, auto_deploy = ?, status = ?, env_vars = ?, bindings = ?, active_deployment_id = ?, updated_at = ?
 		WHERE id = ?
 	`
 	res, err := r.db.ExecContext(ctx, query,
-		app.Name, sourceType, subdomain, app.GitRepo, app.Branch, app.InlineCode, string(app.Status),
+		app.Name, sourceType, subdomain, app.GitRepo, app.Branch, app.InlineCode, autoDeployInt, string(app.Status),
 		string(envVarsJSON), string(bindingsJSON), app.ActiveDeploymentID,
 		time.Now().UTC().Format(time.RFC3339), app.ID,
 	)
@@ -250,4 +267,37 @@ func (r *AppRepo) Update(ctx context.Context, app *domain.Application) error {
 		return domain.NewNotFoundError("application not found")
 	}
 	return nil
+}
+
+// ListByGitRepoAndBranch returns all Git applications configured with auto-deploy matching a repository and branch.
+func (r *AppRepo) ListByGitRepoAndBranch(ctx context.Context, repo, branch string) ([]*domain.Application, error) {
+	all, err := r.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var matched []*domain.Application
+	normalizedTargetRepo := strings.ToLower(strings.TrimSpace(repo))
+	normalizedTargetRepo = strings.TrimSuffix(normalizedTargetRepo, ".git")
+
+	for _, app := range all {
+		if app.SourceType != domain.SourceTypeGit || !app.AutoDeploy {
+			continue
+		}
+
+		appRepo := strings.ToLower(strings.TrimSpace(app.GitRepo))
+		appRepo = strings.TrimSuffix(appRepo, ".git")
+
+		// Match if equal, or if appRepo ends with "/owner/repo", or ":owner/repo" (SSH git@github.com:owner/repo)
+		isRepoMatch := appRepo == normalizedTargetRepo ||
+			strings.HasSuffix(appRepo, "/"+normalizedTargetRepo) ||
+			strings.HasSuffix(appRepo, ":"+normalizedTargetRepo)
+
+		isBranchMatch := app.Branch == branch || (app.Branch == "" && branch == "main")
+
+		if isRepoMatch && isBranchMatch {
+			matched = append(matched, app)
+		}
+	}
+	return matched, nil
 }

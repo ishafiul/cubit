@@ -193,11 +193,20 @@ func (u *AppUsecase) DeleteApplication(ctx context.Context, id string) error {
 	return u.syncAllRoutes(ctx)
 }
 
-// DeployApplication creates and executes a deployment for an application.
+// DeployApplication creates and executes a deployment for an application with default message.
 func (u *AppUsecase) DeployApplication(ctx context.Context, appID, commitHash string) (*domain.Deployment, error) {
+	return u.DeployApplicationWithDetails(ctx, appID, commitHash, "Manual deployment")
+}
+
+// DeployApplicationWithDetails creates and executes a deployment with explicit commit hash and message.
+func (u *AppUsecase) DeployApplicationWithDetails(ctx context.Context, appID, commitHash, commitMessage string) (*domain.Deployment, error) {
 	app, err := u.appRepo.GetByID(ctx, appID)
 	if err != nil {
 		return nil, err
+	}
+
+	if commitMessage == "" {
+		commitMessage = "Deployment triggered"
 	}
 
 	// Compute next sequential build version for this application
@@ -205,7 +214,7 @@ func (u *AppUsecase) DeployApplication(ctx context.Context, appID, commitHash st
 	nextBuildVersion := latestVer + 1
 
 	depID := generateID()
-	dep, err := domain.NewDeploymentWithVersion(depID, app.ID, commitHash, "Deployment triggered", nextBuildVersion)
+	dep, err := domain.NewDeploymentWithVersion(depID, app.ID, commitHash, commitMessage, nextBuildVersion)
 	if err != nil {
 		return nil, err
 	}

@@ -10,7 +10,7 @@ import (
 var (
 	appNameRegex   = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 	envKeyRegex    = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
-	gitRepoURLRegex = regexp.MustCompile(`^(https?://|git@).+`)
+	gitRepoURLRegex = regexp.MustCompile(`^(https?://|git@|[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)`)
 )
 
 // ApplicationStatus represents the state of a worker application.
@@ -75,6 +75,7 @@ type Application struct {
 	GitRepo            string
 	Branch             string
 	InlineCode         string
+	AutoDeploy         bool
 	Status             ApplicationStatus
 	EnvVars            []EnvironmentVariable
 	Bindings           []ResourceBinding
@@ -160,6 +161,7 @@ func NewApplicationWithSource(
 		GitRepo:    gitRepo,
 		Branch:     branch,
 		InlineCode: inlineCode,
+		AutoDeploy: true,
 		Status:     AppStatusCreated,
 		EnvVars:    envVars,
 		Bindings:   bindings,

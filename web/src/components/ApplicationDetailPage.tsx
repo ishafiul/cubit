@@ -840,6 +840,16 @@ export function ApplicationDetailPage({
                       </button>
                     </div>
                   </div>
+
+                  <div className="p-3 rounded-xl bg-purple-950/20 border border-purple-900/40 space-y-1">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-purple-300">
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      <span>Push-to-Deploy CI/CD Active</span>
+                    </div>
+                    <p className="text-[11px] text-zinc-400">
+                      Incoming commits pushed to <code className="text-zinc-200">{app.branch || 'main'}</code> trigger automatic builds and releases via the GitHub App webhook.
+                    </p>
+                  </div>
                 </div>
               </div>
             )}

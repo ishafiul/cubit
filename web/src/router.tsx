@@ -23,6 +23,7 @@ import { QueuesView } from './components/services/QueuesView';
 import { WorkflowsView } from './components/services/WorkflowsView';
 import { DurableObjectsView } from './components/services/DurableObjectsView';
 import { ContainersView } from './components/services/ContainersView';
+import { GitHubSettingsView } from './components/views/GitHubSettingsView';
 import type { DetailTab } from './components/ApplicationDetailPage';
 
 // 1. Root Route
@@ -213,6 +214,12 @@ export const logsRoute = createRoute({
   component: LogsRouteComponent,
 });
 
+export const githubRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/github',
+  component: GitHubSettingsView,
+});
+
 // 7. Route Tree & Router
 export const routeTree = rootRoute.addChildren([
   indexRoute,
@@ -231,6 +238,7 @@ export const routeTree = rootRoute.addChildren([
   nodesRoute,
   domainsRoute,
   logsRoute,
+  githubRoute,
 ]);
 
 export const router = createRouter({

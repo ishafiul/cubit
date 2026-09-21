@@ -53,6 +53,7 @@ func main() {
 	depRepo := db.NewDeploymentRepo(database)
 	domRepo := db.NewDomainRepo(database)
 	servicesRepo := db.NewServicesRepo(database, filepath.Join(*storageDir, "d1"))
+	githubRepo := db.NewSQLiteGitHubRepo(database)
 
 	// 3. Initialize Outbound Infrastructure Adapters
 	proxyAdapter := traefik.NewFileProvider(*traefikOut, "letsencrypt")
@@ -68,10 +69,12 @@ func main() {
 	domainUsecase := usecase.NewDomainUsecase(domRepo, appRepo, appUsecase)
 	runtimeUsecase := usecase.NewRuntimeUsecase(nodeRepo, dockerSupervisor, storageAdapter, fmt.Sprintf("s3://%s", *bucketName), domain.DefaultCelldVersion)
 	servicesUsecase := usecase.NewServicesUsecase(servicesRepo, appRepo, appUsecase, storageAdapter, *bucketName)
+	githubUsecase := usecase.NewGitHubUsecase(githubRepo, appRepo, appUsecase)
 
 	// 5. Initialize Inbound HTTP Adapter
 	apiHandler := http_adapter.NewAPIHandler(nodeUsecase, appUsecase, domainUsecase, runtimeUsecase, depRepo)
 	servicesHandler := http_adapter.NewServicesHandler(servicesUsecase)
+	githubHandler := http_adapter.NewGitHubHandler(githubUsecase)
 	sseStreamer := http_adapter.NewSSELogStreamer(depRepo)
 
 	// 6. Configure Chi Router
@@ -157,6 +160,7 @@ func main() {
 	r.Route("/api/v1", func(sub chi.Router) {
 		http_adapter.HandlerFromMux(apiHandler, sub)
 		servicesHandler.RegisterRoutes(sub)
+		githubHandler.RegisterRoutes(sub)
 		sub.Get("/deployments/{id}/logs/stream", sseStreamer.HandleStream)
 	})
 

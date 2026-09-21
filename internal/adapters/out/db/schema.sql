@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS applications (
     env_vars TEXT,
     bindings TEXT,
     active_deployment_id TEXT,
+    auto_deploy INTEGER NOT NULL DEFAULT 1,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL
 );
@@ -189,4 +190,18 @@ CREATE TABLE IF NOT EXISTS static_assets (
     index_document TEXT NOT NULL DEFAULT 'index.html',
     spa_routing INTEGER NOT NULL DEFAULT 1,
     created_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS github_app_settings (
+    id TEXT PRIMARY KEY,
+    app_id TEXT NOT NULL DEFAULT '',
+    app_name TEXT NOT NULL DEFAULT '',
+    client_id TEXT NOT NULL DEFAULT '',
+    client_secret TEXT NOT NULL DEFAULT '',
+    webhook_secret TEXT NOT NULL DEFAULT '',
+    private_key TEXT NOT NULL DEFAULT '',
+    installation_id TEXT NOT NULL DEFAULT '',
+    is_configured INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
 );

@@ -57,6 +57,16 @@ func (m *mockAppRepo) Update(ctx context.Context, app *domain.Application) error
 	return nil
 }
 
+func (m *mockAppRepo) ListByGitRepoAndBranch(ctx context.Context, repo, branch string) ([]*domain.Application, error) {
+	var list []*domain.Application
+	for _, a := range m.apps {
+		if a.GitRepo == repo && a.Branch == branch {
+			list = append(list, a)
+		}
+	}
+	return list, nil
+}
+
 // Mock DeploymentRepository
 type mockDepRepo struct {
 	deps map[string]*domain.Deployment

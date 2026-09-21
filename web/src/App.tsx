@@ -15,6 +15,7 @@ import {
   Clock,
   GitMerge,
   FileCode,
+  GitBranch,
 } from 'lucide-react';
 import { DashboardProvider, useDashboard } from './context/DashboardContext';
 import { NewAppModal } from './components/modals/NewAppModal';
@@ -55,6 +56,7 @@ function getHeaderTitle(pathname: string): string {
   if (pathname.startsWith('/nodes')) return 'Fleet Nodes';
   if (pathname.startsWith('/domains')) return 'Traefik Routing';
   if (pathname.startsWith('/logs')) return 'Build Logs';
+  if (pathname.startsWith('/github')) return 'GitHub Integration';
   return 'Workers';
 }
 
@@ -256,6 +258,14 @@ function DashboardLayout() {
               >
                 <Terminal className="w-3.5 h-3.5" />
                 <span>Build Logs</span>
+              </Link>
+
+              <Link
+                to="/github"
+                className={navItemClass(pathname === '/github')}
+              >
+                <GitBranch className="w-3.5 h-3.5 text-purple-400" />
+                <span>GitHub App</span>
               </Link>
             </div>
           </nav>

@@ -18,6 +18,7 @@ import {
   nodesRoute,
   domainsRoute,
   logsRoute,
+  githubRoute,
 } from './router';
 
 describe('Given the Cubit TanStack Router configuration', () => {
@@ -34,10 +35,11 @@ describe('Given the Cubit TanStack Router configuration', () => {
       expect(appDetailRoute.fullPath).toBe('/apps/$appId');
     });
 
-    it('Then fleet and routing routes match their expected paths', () => {
+    it('Then fleet, settings and routing routes match their expected paths', () => {
       expect(nodesRoute.fullPath).toBe('/nodes');
       expect(domainsRoute.fullPath).toBe('/domains');
       expect(logsRoute.fullPath).toBe('/logs');
+      expect(githubRoute.fullPath).toBe('/github');
     });
 
     it('Then all 10 Cloudflare service routes are declared with exact paths', () => {
@@ -110,7 +112,7 @@ describe('Given the Cubit TanStack Router configuration', () => {
       expect(router).toBeDefined();
       expect(router.routeTree).toBeDefined();
       expect(rootRoute.children).toBeDefined();
-      expect((rootRoute.children as any)?.length).toBe(16);
+      expect((rootRoute.children as any)?.length).toBe(17);
     });
   });
 });

@@ -33,7 +33,7 @@ func OpenSQLite(dsn string) (*sql.DB, error) {
 	}
 
 	// Dynamic column migrations for existing SQLite databases
-	var hasSourceType, hasInlineCode, hasSubdomain bool
+	var hasSourceType, hasInlineCode, hasSubdomain, hasAutoDeploy bool
 	rows, err := db.QueryContext(context.Background(), "PRAGMA table_info(applications)")
 	if err == nil {
 		for rows.Next() {
@@ -51,6 +51,9 @@ func OpenSQLite(dsn string) (*sql.DB, error) {
 				if colName == "subdomain" {
 					hasSubdomain = true
 				}
+				if colName == "auto_deploy" {
+					hasAutoDeploy = true
+				}
 			}
 		}
 		rows.Close()
@@ -63,6 +66,9 @@ func OpenSQLite(dsn string) (*sql.DB, error) {
 		}
 		if !hasSubdomain {
 			_, _ = db.ExecContext(context.Background(), "ALTER TABLE applications ADD COLUMN subdomain TEXT NOT NULL DEFAULT ''")
+		}
+		if !hasAutoDeploy {
+			_, _ = db.ExecContext(context.Background(), "ALTER TABLE applications ADD COLUMN auto_deploy INTEGER NOT NULL DEFAULT 1")
 		}
 	}
 
