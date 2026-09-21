@@ -1,0 +1,8 @@
+package: http
+output: internal/adapters/in/http/server.gen.go
+generate:
+  models: true
+  chi-server: true
+  embedded-spec: true
+output-options:
+  skip-prune: true

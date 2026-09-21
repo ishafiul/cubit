@@ -1,0 +1,827 @@
+openapi: 3.1.0
+info:
+  title: Cubit Control Plane API
+  version: 1.0.0
+  description: >-
+    Strict REST API for Cubit, an open-source bare-metal PaaS for running
+    Cloudflare Workers and Durable Objects using celld, Traefik, and S3 storage.
+servers:
+  - url: /api/v1
+    description: Cubit API v1
+
+paths:
+  /nodes:
+    get:
+      summary: List all fleet nodes
+      operationId: listNodes
+      tags:
+        - nodes
+      responses:
+        '200':
+          description: A list of registered bare-metal nodes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Node'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      summary: Register a new bare-metal node
+      operationId: createNode
+      tags:
+        - nodes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateNodeRequest'
+      responses:
+        '201':
+          description: Node registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Node'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /nodes/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: Get node details by ID
+      operationId: getNode
+      tags:
+        - nodes
+      responses:
+        '200':
+          description: Node details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Node'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      summary: Deregister a node from the fleet
+      operationId: deleteNode
+      tags:
+        - nodes
+      responses:
+        '204':
+          description: Node successfully removed
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /nodes/{id}/drain:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      summary: Drain a node to safely migrate its active Durable Object leases
+      operationId: drainNode
+      tags:
+        - nodes
+      responses:
+        '200':
+          description: Node drained successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Node'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /applications:
+    get:
+      summary: List all applications
+      operationId: listApplications
+      tags:
+        - applications
+      responses:
+        '200':
+          description: List of applications
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Application'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      summary: Create a new application
+      operationId: createApplication
+      tags:
+        - applications
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateApplicationRequest'
+      responses:
+        '201':
+          description: Application created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Application'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /applications/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: Get application details
+      operationId: getApplication
+      tags:
+        - applications
+      responses:
+        '200':
+          description: Application details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Application'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      summary: Update application configuration
+      operationId: updateApplication
+      tags:
+        - applications
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateApplicationRequest'
+      responses:
+        '200':
+          description: Application updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Application'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      summary: Delete an application and clean up its routes
+      operationId: deleteApplication
+      tags:
+        - applications
+      responses:
+        '204':
+          description: Application deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /applications/{id}/deploy:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      summary: Trigger a new deployment for an application
+      operationId: deployApplication
+      tags:
+        - deployments
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDeploymentRequest'
+      responses:
+        '202':
+          description: Deployment accepted and queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deployment'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /applications/{id}/deployments:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: List deployment history for an application
+      operationId: listDeployments
+      tags:
+        - deployments
+      responses:
+        '200':
+          description: Deployment history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Deployment'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /deployments/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: Get deployment details and status
+      operationId: getDeployment
+      tags:
+        - deployments
+      responses:
+        '200':
+          description: Deployment status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deployment'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /deployments/{id}/logs:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: Get deployment build and execution logs
+      operationId: getDeploymentLogs
+      tags:
+        - deployments
+      responses:
+        '200':
+          description: Build logs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DeploymentLogEntry'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /domains:
+    get:
+      summary: List all custom domain bindings
+      operationId: listDomains
+      tags:
+        - domains
+      responses:
+        '200':
+          description: List of custom domains
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Domain'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      summary: Add a custom domain route
+      operationId: createDomain
+      tags:
+        - domains
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDomainRequest'
+      responses:
+        '201':
+          description: Domain route created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Domain'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /domains/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    delete:
+      summary: Remove a custom domain route
+      operationId: deleteDomain
+      tags:
+        - domains
+      responses:
+        '204':
+          description: Domain deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /runtime/status:
+    get:
+      summary: Get fleet runtime status and celld version information
+      operationId: getRuntimeStatus
+      tags:
+        - runtime
+      responses:
+        '200':
+          description: Runtime status across fleet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeStatus'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /runtime/upgrade:
+    post:
+      summary: Trigger zero-downtime rolling upgrade of the celld daemon across nodes
+      operationId: upgradeCelldDaemon
+      tags:
+        - runtime
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpgradeDaemonRequest'
+      responses:
+        '202':
+          description: Rolling upgrade initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeStatus'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  responses:
+    BadRequest:
+      description: Bad request / validation failure
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: Conflict with existing resource
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+    NodeStatus:
+      type: string
+      enum:
+        - active
+        - draining
+        - offline
+
+    NodeSpecs:
+      type: object
+      properties:
+        cpuCores:
+          type: integer
+          example: 8
+        memoryBytes:
+          type: integer
+          format: int64
+          example: 17179869184
+        diskFreeBytes:
+          type: integer
+          format: int64
+          example: 107374182400
+
+    Node:
+      type: object
+      required:
+        - id
+        - name
+        - ipAddress
+        - internalPort
+        - workerPort
+        - status
+        - celldVersion
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: "node-london-1"
+        ipAddress:
+          type: string
+          example: "192.168.1.50"
+        internalPort:
+          type: integer
+          default: 8081
+        workerPort:
+          type: integer
+          default: 8080
+        status:
+          $ref: '#/components/schemas/NodeStatus'
+        celldVersion:
+          type: string
+          example: "0.2.0"
+        specs:
+          $ref: '#/components/schemas/NodeSpecs'
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateNodeRequest:
+      type: object
+      required:
+        - name
+        - ipAddress
+      properties:
+        name:
+          type: string
+          example: "node-frankfurt-1"
+        ipAddress:
+          type: string
+          example: "10.0.0.12"
+        internalPort:
+          type: integer
+          default: 8081
+        workerPort:
+          type: integer
+          default: 8080
+
+    EnvironmentVariable:
+      type: object
+      required:
+        - key
+        - value
+      properties:
+        key:
+          type: string
+          example: "API_SECRET"
+        value:
+          type: string
+          example: "secret_val_123"
+        isSecret:
+          type: boolean
+          default: false
+
+    ResourceBinding:
+      type: object
+      required:
+        - type
+        - name
+      properties:
+        type:
+          type: string
+          enum: [kv_namespace, d1_database, r2_bucket, queue, workflow]
+        name:
+          type: string
+          example: "MY_KV"
+        resourceId:
+          type: string
+          example: "kv_store_app1"
+
+    Application:
+      type: object
+      required:
+        - id
+        - name
+        - gitRepo
+        - branch
+        - status
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: "my-worker-api"
+        gitRepo:
+          type: string
+          example: "https://github.com/myorg/api"
+        branch:
+          type: string
+          default: "main"
+        status:
+          type: string
+          enum: [created, building, running, stopped, failed]
+        envVars:
+          type: array
+          items:
+            $ref: '#/components/schemas/EnvironmentVariable'
+        bindings:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResourceBinding'
+        activeDeploymentId:
+          type: string
+          format: uuid
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CreateApplicationRequest:
+      type: object
+      required:
+        - name
+        - gitRepo
+      properties:
+        name:
+          type: string
+          example: "my-worker-api"
+        gitRepo:
+          type: string
+          example: "https://github.com/myorg/api"
+        branch:
+          type: string
+          default: "main"
+        envVars:
+          type: array
+          items:
+            $ref: '#/components/schemas/EnvironmentVariable'
+        bindings:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResourceBinding'
+
+    UpdateApplicationRequest:
+      type: object
+      properties:
+        branch:
+          type: string
+        envVars:
+          type: array
+          items:
+            $ref: '#/components/schemas/EnvironmentVariable'
+        bindings:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResourceBinding'
+
+    DeploymentStatus:
+      type: string
+      enum:
+        - pending
+        - building
+        - deploying
+        - active
+        - failed
+        - superseded
+
+    Deployment:
+      type: object
+      required:
+        - id
+        - applicationId
+        - commitHash
+        - status
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        applicationId:
+          type: string
+          format: uuid
+        commitHash:
+          type: string
+          example: "7f8b92c"
+        commitMessage:
+          type: string
+          example: "feat: Add new payment endpoint"
+        status:
+          $ref: '#/components/schemas/DeploymentStatus'
+        bundleSize:
+          type: integer
+          example: 452000
+        errorMessage:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    CreateDeploymentRequest:
+      type: object
+      properties:
+        commitHash:
+          type: string
+        forceRebuild:
+          type: boolean
+          default: false
+
+    DeploymentLogEntry:
+      type: object
+      required:
+        - timestamp
+        - step
+        - message
+        - level
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        step:
+          type: string
+          enum: [git_clone, esbuild, s3_upload, celld_deploy, route_sync]
+        message:
+          type: string
+          example: "Building bundle using esbuild..."
+        level:
+          type: string
+          enum: [info, warn, error]
+
+    Domain:
+      type: object
+      required:
+        - id
+        - applicationId
+        - hostname
+        - pathPrefix
+        - sslActive
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        applicationId:
+          type: string
+          format: uuid
+        hostname:
+          type: string
+          example: "api.mycustomdomain.com"
+        pathPrefix:
+          type: string
+          default: "/"
+        sslActive:
+          type: boolean
+          default: false
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateDomainRequest:
+      type: object
+      required:
+        - applicationId
+        - hostname
+      properties:
+        applicationId:
+          type: string
+          format: uuid
+        hostname:
+          type: string
+          example: "api.mycustomdomain.com"
+        pathPrefix:
+          type: string
+          default: "/"
+
+    RuntimeStatus:
+      type: object
+      required:
+        - activeNodesCount
+        - currentCelldVersion
+        - isUpgrading
+      properties:
+        activeNodesCount:
+          type: integer
+          example: 3
+        currentCelldVersion:
+          type: string
+          example: "0.2.0"
+        targetCelldVersion:
+          type: string
+          nullable: true
+          example: "0.3.0"
+        isUpgrading:
+          type: boolean
+          example: false
+        storageBackend:
+          type: string
+          enum: [garage_local, cloudflare_r2, aws_s3, custom_s3]
+          example: "garage_local"
+
+    UpgradeDaemonRequest:
+      type: object
+      required:
+        - targetVersion
+      properties:
+        targetVersion:
+          type: string
+          example: "0.3.0"
+
+    ErrorResponse:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          example: "NOT_FOUND"
+        message:
+          type: string
+          example: "Application with ID not found"
+        details:
+          type: array
+          items:
+            type: string
+          nullable: true
