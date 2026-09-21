@@ -7,10 +7,7 @@ import (
 	"time"
 
 	"github.com/ishaf/cubit/internal/domain"
-	"github.com/ishaf/cubit/internal/usecase"
 )
-
-var _ usecase.ContainerSupervisor = (*CelldSupervisor)(nil)
 
 // CelldSupervisor coordinates celld container instances on bare metal.
 type CelldSupervisor struct {

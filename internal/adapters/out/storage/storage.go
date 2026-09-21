@@ -6,11 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-
-	"github.com/ishaf/cubit/internal/usecase"
 )
-
-var _ usecase.StoragePort = (*LocalStorageAdapter)(nil)
 
 // StorageDriver specifies the storage driver type.
 type StorageDriver string

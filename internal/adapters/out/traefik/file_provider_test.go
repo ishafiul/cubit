@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/ishaf/cubit/internal/adapters/out/traefik"
-	"github.com/ishaf/cubit/internal/usecase"
 )
 
 func TestFileProvider(t *testing.T) {
@@ -23,7 +22,7 @@ func TestFileProvider(t *testing.T) {
 	provider := traefik.NewFileProvider(outFile, "letsencrypt")
 
 	t.Run("Given dynamic routing rules for an application", func(t *testing.T) {
-		rules := []usecase.RouteRule{
+		rules := []traefik.RouteRule{
 			{
 				AppName:    "my-worker",
 				Hostname:   "api.example.com",

@@ -4,27 +4,28 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
-	http_adapter "github.com/ishaf/cubit/internal/adapters/in/http"
-	"github.com/ishaf/cubit/internal/adapters/out/db"
+	"github.com/gin-gonic/gin"
 	"github.com/ishaf/cubit/internal/adapters/out/docker"
 	"github.com/ishaf/cubit/internal/adapters/out/storage"
 	"github.com/ishaf/cubit/internal/adapters/out/traefik"
+	"github.com/ishaf/cubit/internal/core/middleware"
 	"github.com/ishaf/cubit/internal/domain"
-	"github.com/ishaf/cubit/internal/usecase"
+	"github.com/ishaf/cubit/internal/infrastructure/db"
+	appModule "github.com/ishaf/cubit/internal/modules/application"
+	depModule "github.com/ishaf/cubit/internal/modules/deployment"
+	domModule "github.com/ishaf/cubit/internal/modules/domain"
+	ghModule "github.com/ishaf/cubit/internal/modules/github"
+	nodeModule "github.com/ishaf/cubit/internal/modules/node"
+	runtimeModule "github.com/ishaf/cubit/internal/modules/runtime"
+	srvModule "github.com/ishaf/cubit/internal/modules/service"
 )
 
 func main() {
@@ -47,165 +48,68 @@ func main() {
 	defer database.Close()
 	log.Println("SQLite database initialized in WAL mode.")
 
-	// 2. Initialize Repositories (Outbound Adapters)
-	nodeRepo := db.NewNodeRepo(database)
-	appRepo := db.NewAppRepo(database)
-	depRepo := db.NewDeploymentRepo(database)
-	domRepo := db.NewDomainRepo(database)
-	servicesRepo := db.NewServicesRepo(database, filepath.Join(*storageDir, "d1"))
-	githubRepo := db.NewSQLiteGitHubRepo(database)
+	// 2. Initialize Repositories (Module Data Access)
+	appRepo := appModule.NewRepository(database)
+	depRepo := depModule.NewRepository(database)
+	nodeRepo := nodeModule.NewRepository(database)
+	domRepo := domModule.NewRepository(database)
+	servicesRepo := srvModule.NewRepository(database, filepath.Join(*storageDir, "d1"))
+	githubRepo := ghModule.NewRepository(database)
 
 	// 3. Initialize Outbound Infrastructure Adapters
-	proxyAdapter := traefik.NewFileProvider(*traefikOut, "letsencrypt")
+	proxyProvider := traefik.NewFileProvider(*traefikOut, "letsencrypt")
+	routeSyncer := traefik.NewRouteSyncer(proxyProvider, appRepo, domRepo, nodeRepo)
 	storageAdapter, err := storage.NewLocalStorageAdapter(*storageDir, string(storage.DriverGarageLocal))
 	if err != nil {
 		log.Fatalf("Fatal: Storage initialization failed: %v", err)
 	}
 	dockerSupervisor := docker.NewCelldSupervisor("ghcr.io/denoland/celld")
 
-	// 4. Initialize Use Cases (Application Layer)
-	nodeUsecase := usecase.NewNodeUsecase(nodeRepo, dockerSupervisor, fmt.Sprintf("s3://%s", *bucketName))
-	appUsecase := usecase.NewAppUsecase(appRepo, depRepo, nodeRepo, domRepo, storageAdapter, proxyAdapter, *bucketName)
-	domainUsecase := usecase.NewDomainUsecase(domRepo, appRepo, appUsecase)
-	runtimeUsecase := usecase.NewRuntimeUsecase(nodeRepo, dockerSupervisor, storageAdapter, fmt.Sprintf("s3://%s", *bucketName), domain.DefaultCelldVersion)
-	servicesUsecase := usecase.NewServicesUsecase(servicesRepo, appRepo, appUsecase, storageAdapter, *bucketName)
-	githubUsecase := usecase.NewGitHubUsecase(githubRepo, appRepo, appUsecase)
+	// 4. Initialize Modular Domain Services
+	nodeService := nodeModule.NewService(nodeRepo, dockerSupervisor, fmt.Sprintf("s3://%s", *bucketName))
+	appService := appModule.NewService(appRepo, storageAdapter, routeSyncer, *bucketName)
+	depService := depModule.NewService(depRepo, appService, storageAdapter, routeSyncer, *bucketName)
+	domainService := domModule.NewService(domRepo, appRepo, routeSyncer)
+	runtimeService := runtimeModule.NewService(nodeRepo, dockerSupervisor, storageAdapter, fmt.Sprintf("s3://%s", *bucketName), domain.DefaultCelldVersion)
+	servicesService := srvModule.NewService(servicesRepo, appRepo, appService, storageAdapter, *bucketName)
+	githubService := ghModule.NewService(githubRepo, appRepo, depService)
 
-	// 5. Initialize Inbound HTTP Adapter
-	apiHandler := http_adapter.NewAPIHandler(nodeUsecase, appUsecase, domainUsecase, runtimeUsecase, depRepo)
-	servicesHandler := http_adapter.NewServicesHandler(servicesUsecase)
-	githubHandler := http_adapter.NewGitHubHandler(githubUsecase)
-	sseStreamer := http_adapter.NewSSELogStreamer(depRepo)
+	// 5. Initialize Modular HTTP Handlers
+	nodeHandler := nodeModule.NewHandler(nodeService)
+	appHandler := appModule.NewHandler(appService)
+	depHandler := depModule.NewHandler(depService)
+	domHandler := domModule.NewHandler(domainService)
+	runtimeHandler := runtimeModule.NewHandler(runtimeService)
+	servicesHandler := srvModule.NewHandler(servicesService)
+	githubHandler := ghModule.NewHandler(githubService)
 
-	// 6. Configure Chi Router
-	r := chi.NewRouter()
-	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
+	// 6. Configure Gin Engine and Middlewares
+	gin.SetMode(gin.ReleaseMode)
+	r := gin.New()
+	r.Use(middleware.Logger())
+	r.Use(gin.Recovery())
+	r.Use(middleware.CORS())
+	r.Use(middleware.SubdomainRouter(appService))
 
-	// CORS for frontend web dashboard
-	r.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, X-CSRF-Token")
-			if r.Method == "OPTIONS" {
-				w.WriteHeader(http.StatusOK)
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
+	// Health check endpoint
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
-	// Subdomain routing middleware: routes requests with *.localhost or *.cubit.local to deployed worker
-	r.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			host := req.Host
-			if h, _, err := net.SplitHostPort(host); err == nil {
-				host = h
-			}
-
-			var subdomain string
-			if strings.HasSuffix(host, ".localhost") {
-				subdomain = strings.TrimSuffix(host, ".localhost")
-			} else if strings.HasSuffix(host, ".cubit.local") {
-				subdomain = strings.TrimSuffix(host, ".cubit.local")
-			}
-
-			// If request is directed to a subdomain application (e.g. hello-world-api.localhost)
-			if subdomain != "" && subdomain != "api" && subdomain != "dashboard" && subdomain != "localhost" {
-				app, err := appUsecase.GetApplicationBySubdomain(req.Context(), subdomain)
-				if err == nil && app != nil {
-					if app.ActiveDeploymentID == "" {
-						http.Error(w, fmt.Sprintf("Application %q has no active deployment", app.Name), http.StatusServiceUnavailable)
-						return
-					}
-
-					reqBody, _ := io.ReadAll(req.Body)
-					headers := make(map[string]string)
-					for k, v := range req.Header {
-						if len(v) > 0 {
-							headers[k] = v[0]
-						}
-					}
-
-					status, respHeaders, respBody, err := appUsecase.InvokeApplication(req.Context(), app.ID, req.Method, req.URL.RequestURI(), headers, reqBody)
-					if err != nil {
-						http.Error(w, fmt.Sprintf("Worker invocation error: %v", err), http.StatusInternalServerError)
-						return
-					}
-
-					for k, v := range respHeaders {
-						w.Header().Set(k, v)
-					}
-					w.WriteHeader(status)
-					_, _ = w.Write(respBody)
-					return
-				}
-			}
-
-			next.ServeHTTP(w, req)
-		})
-	})
-
-	// Health check
-	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
-	})
-
-	// Mount Generated OpenAPI Routes under /api/v1
-	r.Route("/api/v1", func(sub chi.Router) {
-		http_adapter.HandlerFromMux(apiHandler, sub)
-		servicesHandler.RegisterRoutes(sub)
-		githubHandler.RegisterRoutes(sub)
-		sub.Get("/deployments/{id}/logs/stream", sseStreamer.HandleStream)
-	})
-
-	// Static SPA file server
-	staticDir := *webDir
-	if staticDir == "" {
-		staticDir = os.Getenv("CUBIT_WEB_DIR")
+	// 7. Mount Module Routes under /api/v1
+	api := r.Group("/api/v1")
+	{
+		nodeHandler.RegisterRoutes(api)
+		appHandler.RegisterRoutes(api)
+		depHandler.RegisterRoutes(api)
+		domHandler.RegisterRoutes(api)
+		runtimeHandler.RegisterRoutes(api)
+		servicesHandler.RegisterRoutes(api)
+		githubHandler.RegisterRoutes(api)
 	}
-	if staticDir == "" {
-		if _, err := os.Stat("./web/dist"); err == nil {
-			staticDir = "./web/dist"
-		}
-	}
-	if staticDir != "" {
-		absDir, err := filepath.Abs(staticDir)
-		if err == nil {
-			if _, err := os.Stat(absDir); err == nil {
-				r.Get("/*", func(w http.ResponseWriter, req *http.Request) {
-					if strings.HasPrefix(req.URL.Path, "/api") || req.URL.Path == "/health" {
-						http.NotFound(w, req)
-						return
-					}
-					cleanPath := filepath.Clean(req.URL.Path)
-					fpath := filepath.Join(absDir, cleanPath)
 
-					info, err := os.Stat(fpath)
-					if os.IsNotExist(err) || (err == nil && info.IsDir()) {
-						fpath = filepath.Join(absDir, "index.html")
-					}
-
-					data, err := os.ReadFile(fpath)
-					if err != nil {
-						http.NotFound(w, req)
-						return
-					}
-
-					w.Header().Set("Content-Type", getMimeType(fpath))
-					w.Header().Set("Content-Length", strconv.Itoa(len(data)))
-					w.WriteHeader(http.StatusOK)
-					_, _ = w.Write(data)
-				})
-				log.Printf("Serving web dashboard from %s", absDir)
-			}
-		}
-	}
+	// 8. Static SPA file server
+	middleware.ServeSPA(r, *webDir)
 
 	srv := &http.Server{
 		Addr:        fmt.Sprintf(":%d", *port),
@@ -237,26 +141,3 @@ func main() {
 
 	log.Println("Cubit Control Plane cleanly stopped.")
 }
-
-func getMimeType(path string) string {
-	ext := filepath.Ext(path)
-	switch ext {
-	case ".html":
-		return "text/html; charset=utf-8"
-	case ".js", ".mjs":
-		return "application/javascript; charset=utf-8"
-	case ".css":
-		return "text/css; charset=utf-8"
-	case ".svg":
-		return "image/svg+xml"
-	case ".json":
-		return "application/json"
-	case ".png":
-		return "image/png"
-	case ".ico":
-		return "image/x-icon"
-	default:
-		return "application/octet-stream"
-	}
-}
-

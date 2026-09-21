@@ -8,11 +8,17 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ishaf/cubit/internal/usecase"
 	"gopkg.in/yaml.v3"
 )
 
-var _ usecase.ProxyPort = (*FileProvider)(nil)
+// RouteRule encapsulates an ingress route rule for Traefik.
+type RouteRule struct {
+	AppName    string
+	Hostname   string
+	PathPrefix string
+	TargetURLs []string
+	EnableTLS  bool
+}
 
 // TraefikConfig represents the YAML dynamic configuration structure for Traefik v3.
 type TraefikConfig struct {
@@ -72,7 +78,7 @@ func NewFileProvider(outputPath, certResolver string) *FileProvider {
 }
 
 // SyncRoutes generates and writes the dynamic configuration for Traefik.
-func (p *FileProvider) SyncRoutes(ctx context.Context, routes []usecase.RouteRule) error {
+func (p *FileProvider) SyncRoutes(ctx context.Context, routes []RouteRule) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
