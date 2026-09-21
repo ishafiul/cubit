@@ -75,3 +75,61 @@ type ContainerSupervisor interface {
 	StopCelld(ctx context.Context, node *domain.Node) error
 	GracefulRestartCelld(ctx context.Context, node *domain.Node, newVersion string, bucketURL string) error
 }
+
+// ServicesRepository defines the persistence contract for all celld services.
+type ServicesRepository interface {
+	// KV
+	SaveKVNamespace(ctx context.Context, ns *domain.KVNamespace) error
+	ListKVNamespaces(ctx context.Context) ([]*domain.KVNamespace, error)
+	GetKVNamespace(ctx context.Context, id string) (*domain.KVNamespace, error)
+	DeleteKVNamespace(ctx context.Context, id string) error
+	PutKVPair(ctx context.Context, pair *domain.KVPair) error
+	GetKVPair(ctx context.Context, namespaceID, key string) (*domain.KVPair, error)
+	ListKVPairs(ctx context.Context, namespaceID string) ([]*domain.KVPair, error)
+	DeleteKVPair(ctx context.Context, namespaceID, key string) error
+
+	// D1
+	SaveD1Database(ctx context.Context, db *domain.D1Database) error
+	ListD1Databases(ctx context.Context) ([]*domain.D1Database, error)
+	GetD1Database(ctx context.Context, id string) (*domain.D1Database, error)
+	DeleteD1Database(ctx context.Context, id string) error
+	ExecuteD1Query(ctx context.Context, id, query string) (*domain.D1QueryResult, error)
+
+	// Queues
+	SaveQueue(ctx context.Context, q *domain.Queue) error
+	ListQueues(ctx context.Context) ([]*domain.Queue, error)
+	DeleteQueue(ctx context.Context, id string) error
+	EnqueueMessage(ctx context.Context, msg *domain.QueueMessage) error
+	ListQueueMessages(ctx context.Context, queueID string, limit int) ([]*domain.QueueMessage, error)
+
+	// Cron Triggers
+	SaveCronTrigger(ctx context.Context, trigger *domain.CronTrigger) error
+	ListCronTriggers(ctx context.Context) ([]*domain.CronTrigger, error)
+	DeleteCronTrigger(ctx context.Context, id string) error
+	RecordCronRun(ctx context.Context, run *domain.CronRun) error
+	ListCronRuns(ctx context.Context, triggerID string) ([]*domain.CronRun, error)
+
+	// Workflows
+	SaveWorkflow(ctx context.Context, wf *domain.Workflow) error
+	ListWorkflows(ctx context.Context) ([]*domain.Workflow, error)
+	DeleteWorkflow(ctx context.Context, id string) error
+	SaveWorkflowRun(ctx context.Context, run *domain.WorkflowRun) error
+	ListWorkflowRuns(ctx context.Context, workflowID string) ([]*domain.WorkflowRun, error)
+
+	// Durable Objects
+	SaveDurableObjectClass(ctx context.Context, doc *domain.DurableObjectClass) error
+	ListDurableObjectClasses(ctx context.Context) ([]*domain.DurableObjectClass, error)
+	DeleteDurableObjectClass(ctx context.Context, id string) error
+	SaveDOInstance(ctx context.Context, inst *domain.DurableObjectInstance) error
+	ListDOInstances(ctx context.Context, classID string) ([]*domain.DurableObjectInstance, error)
+
+	// Containers
+	SaveContainer(ctx context.Context, ct *domain.ContainerWorkload) error
+	ListContainers(ctx context.Context) ([]*domain.ContainerWorkload, error)
+	DeleteContainer(ctx context.Context, id string) error
+
+	// Static Assets
+	SaveStaticSite(ctx context.Context, site *domain.StaticSite) error
+	ListStaticSites(ctx context.Context) ([]*domain.StaticSite, error)
+	DeleteStaticSite(ctx context.Context, id string) error
+}
