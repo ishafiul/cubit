@@ -77,15 +77,31 @@ type ApplicationMetrics struct {
 	P99DurationMs float64 `json:"p99DurationMs"`
 }
 
+// ConsoleLogEntry represents an isolate console log output.
+type ConsoleLogEntry struct {
+	Level     string `json:"level"` // "log", "info", "warn", "error"
+	Message   string `json:"message"`
+	Timestamp int64  `json:"timestamp"`
+}
+
 // RequestLogEvent represents a live streaming event from a worker isolate request.
 type RequestLogEvent struct {
-	Timestamp  time.Time `json:"timestamp"`
-	Method     string    `json:"method"`
-	Path       string    `json:"path"`
-	StatusCode int       `json:"statusCode"`
-	DurationMs float64   `json:"durationMs"`
-	ClientIP   string    `json:"clientIp"`
-	Message    string    `json:"message"`
+	ID              string            `json:"id"`
+	Timestamp       time.Time         `json:"timestamp"`
+	Method          string            `json:"method"`
+	Path            string            `json:"path"`
+	URL             string            `json:"url"`
+	StatusCode      int               `json:"statusCode"`
+	DurationMs      float64           `json:"durationMs"`
+	ClientIP        string            `json:"clientIp"`
+	Message         string            `json:"message"`
+	Outcome         string            `json:"outcome"`
+	RequestHeaders  map[string]string `json:"requestHeaders"`
+	RequestBody     string            `json:"requestBody,omitempty"`
+	ResponseHeaders map[string]string `json:"responseHeaders"`
+	ResponseBody    string            `json:"responseBody,omitempty"`
+	Logs            []ConsoleLogEntry `json:"logs,omitempty"`
+	Exceptions      []string          `json:"exceptions,omitempty"`
 }
 
 // Application represents a Cloudflare Worker application running on the celld fleet.

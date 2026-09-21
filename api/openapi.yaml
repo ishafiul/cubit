@@ -864,6 +864,88 @@ components:
           format: float
           example: 45.2
 
+    ConsoleLogEntry:
+      type: object
+      required:
+        - level
+        - message
+        - timestamp
+      properties:
+        level:
+          type: string
+          example: log
+        message:
+          type: string
+          example: Handling request for /api/users
+        timestamp:
+          type: integer
+          format: int64
+          example: 1726974900000
+
+    RequestLogEvent:
+      type: object
+      required:
+        - id
+        - timestamp
+        - method
+        - path
+        - url
+        - statusCode
+        - durationMs
+        - clientIp
+      properties:
+        id:
+          type: string
+          example: ray_9fa28bc3a120
+        timestamp:
+          type: string
+          format: date-time
+        method:
+          type: string
+          example: GET
+        path:
+          type: string
+          example: /api/users
+        url:
+          type: string
+          example: http://hello-world.localhost:8000/api/users
+        statusCode:
+          type: integer
+          example: 200
+        durationMs:
+          type: number
+          format: float
+          example: 12.4
+        clientIp:
+          type: string
+          example: 127.0.0.1
+        message:
+          type: string
+          example: Worker isolate request executed
+        outcome:
+          type: string
+          example: ok
+        requestHeaders:
+          type: object
+          additionalProperties:
+            type: string
+        requestBody:
+          type: string
+        responseHeaders:
+          type: object
+          additionalProperties:
+            type: string
+        responseBody:
+          type: string
+        logs:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConsoleLogEntry'
+        exceptions:
+          type: array
+          items:
+            type: string
+
     CreateApplicationRequest:
       type: object
       required:

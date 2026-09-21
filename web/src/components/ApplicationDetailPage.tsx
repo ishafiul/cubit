@@ -35,8 +35,14 @@ import {
   Flame,
   AlertTriangle,
   Sliders,
+  ChevronDown,
+  ChevronRight,
+  Search,
+  FileText,
+  Braces,
+  ListFilter,
 } from 'lucide-react';
-import type { Application, ResourceBinding, ResourceBindingType, ApplicationMetrics } from '../api/model';
+import type { Application, ResourceBinding, ResourceBindingType, ApplicationMetrics, RequestLogEvent } from '../api/model';
 import type { ActiveTab } from '../App';
 import { useListDeployments } from '../api/generated/deployments/deployments';
 import { useUpdateApplication, useDeleteApplication, useGetApplicationMetrics } from '../api/generated/applications/applications';
@@ -159,16 +165,43 @@ export function ApplicationDetailPage({
 
   // Builds & Live Logs Sub-View State
   const [buildsViewMode, setBuildsViewMode] = useState<'history' | 'tail'>('history');
-  const [liveLogs, setLiveLogs] = useState<Array<{
-    timestamp: string;
-    method: string;
-    path: string;
-    status: number;
-    durationMs: number;
-    clientIp: string;
-  }>>([]);
+  const [liveLogs, setLiveLogs] = useState<RequestLogEvent[]>([]);
   const [isLiveStreaming, setIsLiveStreaming] = useState(true);
   const [liveConnected, setLiveConnected] = useState(false);
+  const [logSearchTerm, setLogSearchTerm] = useState('');
+  const [logMethodFilter, setLogMethodFilter] = useState<'ALL' | 'GET' | 'POST' | 'PUT' | 'DELETE'>('ALL');
+  const [logStatusFilter, setLogStatusFilter] = useState<'ALL' | '2xx' | '4xx' | '5xx'>('ALL');
+  const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
+  const [activeLogDetailTab, setActiveLogDetailTab] = useState<'headers' | 'payload' | 'logs' | 'json'>('headers');
+  const [copiedLogSection, setCopiedLogSection] = useState<string | null>(null);
+
+  const handleCopyLogSection = (text: string, sectionKey: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedLogSection(sectionKey);
+    setTimeout(() => {
+      setCopiedLogSection(prev => (prev === sectionKey ? null : prev));
+    }, 2000);
+  };
+
+  const formatJsonPayload = (raw: any): string => {
+    if (raw === undefined || raw === null) return '';
+    if (typeof raw === 'object') {
+      try {
+        return JSON.stringify(raw, null, 2);
+      } catch {
+        return String(raw);
+      }
+    }
+    if (typeof raw === 'string') {
+      try {
+        const parsed = JSON.parse(raw);
+        return JSON.stringify(parsed, null, 2);
+      } catch {
+        return raw;
+      }
+    }
+    return String(raw);
+  };
 
   useEffect(() => {
     if (activeTab !== 'builds' || buildsViewMode !== 'tail' || !isLiveStreaming) {
@@ -181,7 +214,7 @@ export function ApplicationDetailPage({
     };
     es.onmessage = (e) => {
       try {
-        const item = JSON.parse(e.data);
+        const item: RequestLogEvent = JSON.parse(e.data);
         setLiveLogs(prev => [item, ...prev].slice(0, 200));
       } catch (err) {
         console.error('Error parsing live log event:', err);
@@ -1223,73 +1256,663 @@ export function ApplicationDetailPage({
                 </div>
               </div>
             ) : (
-              /* Live Request Tail Console */
-              <div className="bg-black/95 rounded-xl border border-zinc-800 p-5 space-y-3 font-mono text-xs shadow-inner min-h-[500px] flex flex-col">
-                <div className="flex items-center justify-between pb-3 border-b border-zinc-900 text-zinc-400 text-[11px]">
-                  <span>TIME</span>
-                  <div className="flex items-center gap-6">
-                    <span>METHOD</span>
-                    <span>PATH</span>
-                    <span>STATUS</span>
-                    <span>DURATION</span>
-                    <span>CLIENT IP</span>
+              /* Cloudflare-Style Live Request Tail Console */
+              <div className="bg-zinc-950/90 rounded-xl border border-zinc-800 p-4 space-y-3 font-mono text-xs shadow-inner min-h-[550px] flex flex-col">
+                {/* Search & Filter Bar */}
+                <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-zinc-900/60 rounded-lg border border-zinc-800/80">
+                  <div className="flex flex-wrap items-center gap-2.5 flex-1 min-w-[280px]">
+                    <div className="relative flex-1 max-w-sm">
+                      <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={logSearchTerm}
+                        onChange={e => setLogSearchTerm(e.target.value)}
+                        placeholder="Search path, URL, ray ID, IP, or status..."
+                        className="w-full pl-8 pr-3 py-1.5 bg-black/70 border border-zinc-700/80 rounded-md text-zinc-200 placeholder-zinc-500 text-xs focus:outline-none focus:border-emerald-500 font-sans"
+                      />
+                      {logSearchTerm && (
+                        <button
+                          type="button"
+                          onClick={() => setLogSearchTerm('')}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-200"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Method Filter Pills */}
+                    <div className="flex items-center gap-1 bg-black/60 p-0.5 rounded-md border border-zinc-800 text-[11px] font-sans">
+                      {(['ALL', 'GET', 'POST', 'PUT', 'DELETE'] as const).map(m => (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => setLogMethodFilter(m)}
+                          className={`px-2 py-0.5 rounded font-semibold transition ${
+                            logMethodFilter === m
+                              ? 'bg-zinc-800 text-zinc-100 shadow-xs'
+                              : 'text-zinc-400 hover:text-zinc-200'
+                          }`}
+                        >
+                          {m}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Status Code Filter Pills */}
+                    <div className="flex items-center gap-1 bg-black/60 p-0.5 rounded-md border border-zinc-800 text-[11px] font-sans">
+                      {(['ALL', '2xx', '4xx', '5xx'] as const).map(st => (
+                        <button
+                          key={st}
+                          type="button"
+                          onClick={() => setLogStatusFilter(st)}
+                          className={`px-2 py-0.5 rounded font-semibold transition ${
+                            logStatusFilter === st
+                              ? st === '2xx' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                                : st === '4xx' ? 'bg-amber-950 text-amber-400 border border-amber-800'
+                                : st === '5xx' ? 'bg-rose-950 text-rose-400 border border-rose-800'
+                                : 'bg-zinc-800 text-zinc-100'
+                              : 'text-zinc-400 hover:text-zinc-200'
+                          }`}
+                        >
+                          {st}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 text-[11px] text-zinc-400 font-sans">
+                    <span>Showing {liveLogs.filter(log => {
+                      if (logMethodFilter !== 'ALL' && log.method.toUpperCase() !== logMethodFilter) return false;
+                      const code = log.statusCode ?? (log as any).status ?? 200;
+                      if (logStatusFilter === '2xx' && (code < 200 || code >= 300)) return false;
+                      if (logStatusFilter === '4xx' && (code < 400 || code >= 500)) return false;
+                      if (logStatusFilter === '5xx' && code < 500) return false;
+                      if (logSearchTerm.trim()) {
+                        const q = logSearchTerm.toLowerCase().trim();
+                        const path = (log.path || '').toLowerCase();
+                        const url = (log.url || '').toLowerCase();
+                        const id = (log.id || '').toLowerCase();
+                        const ip = (log.clientIp || '').toLowerCase();
+                        const codeStr = String(code);
+                        return path.includes(q) || url.includes(q) || id.includes(q) || ip.includes(q) || codeStr.includes(q);
+                      }
+                      return true;
+                    }).length} of {liveLogs.length} events</span>
+                    {(logSearchTerm || logMethodFilter !== 'ALL' || logStatusFilter !== 'ALL') && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLogSearchTerm('');
+                          setLogMethodFilter('ALL');
+                          setLogStatusFilter('ALL');
+                        }}
+                        className="text-xs text-sky-400 hover:underline ml-1"
+                      >
+                        Reset filters
+                      </button>
+                    )}
                   </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto space-y-1.5 max-h-[550px]">
-                  {liveLogs.length === 0 ? (
-                    <div className="py-16 text-center space-y-3 text-zinc-500">
-                      <Radio className="w-8 h-8 mx-auto text-emerald-500 animate-pulse" />
-                      <p className="text-xs font-semibold text-zinc-300">Live Request Tail Active</p>
-                      <p className="text-[11px] text-zinc-500 max-w-sm mx-auto">
-                        Waiting for incoming HTTP requests to <code className="text-emerald-400">{testUrl}</code>. Invocations will stream here in real time.
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => onTestApp(app)}
-                        className="mt-2 inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-emerald-900/60 bg-emerald-950/40 hover:bg-emerald-950/70 text-emerald-400 text-xs font-semibold transition"
-                      >
-                        <Send className="w-3.5 h-3.5" /> Send Test Request
-                      </button>
-                    </div>
-                  ) : (
-                    liveLogs.map((entry, idx) => (
-                      <div
-                        key={idx}
-                        className="flex items-center justify-between py-1.5 px-3 rounded hover:bg-zinc-900/60 transition border border-transparent hover:border-zinc-800/80"
-                      >
-                        <span className="text-zinc-500 text-[11px]">
-                          {new Date(entry.timestamp).toLocaleTimeString()}
-                        </span>
-                        <div className="flex items-center gap-4">
-                          <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${
-                            entry.method === 'GET' ? 'bg-sky-950 text-sky-400 border border-sky-800' :
-                            entry.method === 'POST' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' :
-                            entry.method === 'DELETE' ? 'bg-rose-950 text-rose-400 border border-rose-800' :
-                            'bg-zinc-800 text-zinc-300'
-                          }`}>
-                            {entry.method}
-                          </span>
-                          <span className="font-mono text-zinc-200 text-xs max-w-[200px] truncate" title={entry.path}>
-                            {entry.path}
-                          </span>
-                          <span className={`text-xs font-bold ${
-                            entry.status >= 200 && entry.status < 300 ? 'text-emerald-400' :
-                            entry.status >= 400 && entry.status < 500 ? 'text-amber-400' :
-                            entry.status >= 500 ? 'text-rose-400' : 'text-zinc-400'
-                          }`}>
-                            {entry.status}
-                          </span>
-                          <span className="text-zinc-400 text-[11px]">
-                            {Math.round(entry.durationMs)}ms
-                          </span>
-                          <span className="text-zinc-600 text-[10px]">
-                            {entry.clientIp}
-                          </span>
+                {/* Table Header */}
+                <div className="grid grid-cols-12 gap-2 px-3 py-2 border-b border-zinc-800/80 text-zinc-500 text-[11px] font-semibold uppercase tracking-wider">
+                  <span className="col-span-2">TIMESTAMP</span>
+                  <span className="col-span-1">METHOD</span>
+                  <span className="col-span-4">PATH / URL</span>
+                  <span className="col-span-1 text-center">STATUS</span>
+                  <span className="col-span-1 text-right">LATENCY</span>
+                  <span className="col-span-1 text-center">CLIENT IP</span>
+                  <span className="col-span-2 text-right">RAY ID</span>
+                </div>
+
+                {/* Log Event Stream */}
+                <div className="flex-1 overflow-y-auto space-y-2 max-h-[600px] pr-1">
+                  {(() => {
+                    const filtered = liveLogs.filter(log => {
+                      if (logMethodFilter !== 'ALL' && log.method.toUpperCase() !== logMethodFilter) return false;
+                      const code = log.statusCode ?? (log as any).status ?? 200;
+                      if (logStatusFilter === '2xx' && (code < 200 || code >= 300)) return false;
+                      if (logStatusFilter === '4xx' && (code < 400 || code >= 500)) return false;
+                      if (logStatusFilter === '5xx' && code < 500) return false;
+                      if (logSearchTerm.trim()) {
+                        const q = logSearchTerm.toLowerCase().trim();
+                        const path = (log.path || '').toLowerCase();
+                        const url = (log.url || '').toLowerCase();
+                        const id = (log.id || '').toLowerCase();
+                        const ip = (log.clientIp || '').toLowerCase();
+                        const codeStr = String(code);
+                        return path.includes(q) || url.includes(q) || id.includes(q) || ip.includes(q) || codeStr.includes(q);
+                      }
+                      return true;
+                    });
+
+                    if (filtered.length === 0) {
+                      return (
+                        <div className="py-16 text-center space-y-3 text-zinc-500 font-sans">
+                          <Radio className="w-8 h-8 mx-auto text-emerald-500 animate-pulse" />
+                          <p className="text-sm font-semibold text-zinc-300">
+                            {liveLogs.length === 0 ? 'Live Request Tail Active' : 'No requests matched your filter'}
+                          </p>
+                          <p className="text-xs text-zinc-500 max-w-md mx-auto">
+                            {liveLogs.length === 0
+                              ? `Waiting for incoming HTTP requests to ${testUrl}. Invocations will stream here in real time.`
+                              : 'Try adjusting your search query, HTTP method, or response code filter.'}
+                          </p>
+                          {liveLogs.length === 0 && (
+                            <button
+                              type="button"
+                              onClick={() => onTestApp(app)}
+                              className="mt-3 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-emerald-800 bg-emerald-950/60 hover:bg-emerald-950 text-emerald-400 text-xs font-semibold transition"
+                            >
+                              <Send className="w-3.5 h-3.5" /> Send Test Request
+                            </button>
+                          )}
                         </div>
-                      </div>
-                    ))
-                  )}
+                      );
+                    }
+
+                    return filtered.map((entry, idx) => {
+                      const logId = entry.id || `log-${idx}`;
+                      const isExpanded = expandedLogId === logId;
+                      const code = entry.statusCode ?? (entry as any).status ?? 200;
+                      const reqHeaders = (entry.requestHeaders || {}) as Record<string, string>;
+                      const respHeaders = (entry.responseHeaders || {}) as Record<string, string>;
+                      const reqHeaderCount = Object.keys(reqHeaders).length;
+                      const respHeaderCount = Object.keys(respHeaders).length;
+                      const totalLogsCount = (entry.logs?.length || 0) + (entry.exceptions?.length || 0);
+
+                      return (
+                        <div
+                          key={logId}
+                          className={`rounded-lg border transition ${
+                            isExpanded
+                              ? 'bg-zinc-900/90 border-emerald-500/80 shadow-md'
+                              : 'bg-zinc-950/70 border-zinc-800/80 hover:border-zinc-700 hover:bg-zinc-900/40'
+                          }`}
+                        >
+                          {/* Row Summary */}
+                          <div
+                            onClick={() => setExpandedLogId(isExpanded ? null : logId)}
+                            className="grid grid-cols-12 gap-2 items-center px-3 py-2 cursor-pointer select-none text-[11px]"
+                          >
+                            <div className="col-span-2 flex items-center gap-1.5 text-zinc-400">
+                              {isExpanded ? (
+                                <ChevronDown className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                              ) : (
+                                <ChevronRight className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                              )}
+                              <span className="text-zinc-400 font-mono">
+                                {new Date(entry.timestamp).toLocaleTimeString()}
+                              </span>
+                            </div>
+
+                            <div className="col-span-1">
+                              <span
+                                className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase ${
+                                  entry.method === 'GET'
+                                    ? 'bg-sky-950 text-sky-400 border border-sky-800'
+                                    : entry.method === 'POST'
+                                      ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                                      : entry.method === 'PUT' || entry.method === 'PATCH'
+                                        ? 'bg-amber-950 text-amber-400 border border-amber-800'
+                                        : entry.method === 'DELETE'
+                                          ? 'bg-rose-950 text-rose-400 border border-rose-800'
+                                          : 'bg-zinc-800 text-zinc-300'
+                                }`}
+                              >
+                                {entry.method}
+                              </span>
+                            </div>
+
+                            <div className="col-span-4 truncate font-mono text-zinc-200" title={entry.url || entry.path}>
+                              <span>{entry.path || '/'}</span>
+                            </div>
+
+                            <div className="col-span-1 text-center font-bold">
+                              <span
+                                className={`${
+                                  code >= 200 && code < 300
+                                    ? 'text-emerald-400'
+                                    : code >= 400 && code < 500
+                                      ? 'text-amber-400'
+                                      : code >= 500
+                                        ? 'text-rose-400'
+                                        : 'text-zinc-400'
+                                }`}
+                              >
+                                {code}
+                              </span>
+                            </div>
+
+                            <div className="col-span-1 text-right text-zinc-400 font-mono">
+                              {Math.round(entry.durationMs)}ms
+                            </div>
+
+                            <div className="col-span-1 text-center text-zinc-500 truncate" title={entry.clientIp}>
+                              {entry.clientIp || '127.0.0.1'}
+                            </div>
+
+                            <div className="col-span-2 text-right text-zinc-500 font-mono text-[10px] truncate" title={entry.id}>
+                              {entry.id ? entry.id.replace('ray_', '') : 'N/A'}
+                            </div>
+                          </div>
+
+                          {/* Expanded Cloudflare-Style Log Inspector */}
+                          {isExpanded && (
+                            <div className="p-4 border-t border-zinc-800/80 bg-black/80 space-y-4 font-sans text-xs">
+                              {/* Inspector Top Info Bar */}
+                              <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-zinc-900/70 rounded-lg border border-zinc-800">
+                                <div className="flex flex-wrap items-center gap-3">
+                                  {/* Ray ID */}
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[11px] text-zinc-500 font-semibold uppercase">Ray ID:</span>
+                                    <code className="text-zinc-200 font-mono text-[11px] bg-zinc-950 px-2 py-0.5 rounded border border-zinc-800">
+                                      {entry.id || 'N/A'}
+                                    </code>
+                                    {entry.id && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleCopyLogSection(entry.id!, `ray-${logId}`)}
+                                        className="text-zinc-400 hover:text-zinc-200 transition"
+                                        title="Copy Ray ID"
+                                      >
+                                        {copiedLogSection === `ray-${logId}` ? (
+                                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                        ) : (
+                                          <Copy className="w-3.5 h-3.5" />
+                                        )}
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  {/* Full URL */}
+                                  <div className="flex items-center gap-1.5 max-w-md truncate">
+                                    <span className="text-[11px] text-zinc-500 font-semibold uppercase">URL:</span>
+                                    <code className="text-emerald-400 font-mono text-[11px] truncate" title={entry.url || entry.path}>
+                                      {entry.url || entry.path}
+                                    </code>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCopyLogSection(entry.url || entry.path, `url-${logId}`)}
+                                      className="text-zinc-400 hover:text-zinc-200 transition"
+                                      title="Copy URL"
+                                    >
+                                      {copiedLogSection === `url-${logId}` ? (
+                                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                      ) : (
+                                        <Copy className="w-3.5 h-3.5" />
+                                      )}
+                                    </button>
+                                  </div>
+
+                                  {/* Outcome */}
+                                  <span
+                                    className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
+                                      entry.outcome === 'exception' || code >= 500
+                                        ? 'bg-rose-950 text-rose-400 border border-rose-800'
+                                        : 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                                    }`}
+                                  >
+                                    {entry.outcome || (code >= 500 ? 'exception' : 'ok')}
+                                  </span>
+                                </div>
+
+                                {/* Action Buttons: Copy JSON */}
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCopyLogSection(JSON.stringify(entry, null, 2), `json-${logId}`)}
+                                    className="px-3 py-1.5 bg-emerald-950 hover:bg-emerald-900/80 text-emerald-400 border border-emerald-800 rounded-md font-semibold text-xs transition flex items-center gap-1.5"
+                                    title="Copy raw Cloudflare JSON event"
+                                  >
+                                    {copiedLogSection === `json-${logId}` ? (
+                                      <>
+                                        <Check className="w-3.5 h-3.5 text-emerald-300" />
+                                        <span>Copied JSON!</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Copy className="w-3.5 h-3.5" />
+                                        <span>Copy JSON</span>
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Inspector Sub-Tabs */}
+                              <div className="flex items-center gap-2 border-b border-zinc-800 pb-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setActiveLogDetailTab('headers')}
+                                  className={`px-3 py-1.5 rounded-md font-semibold text-xs transition flex items-center gap-1.5 ${
+                                    activeLogDetailTab === 'headers'
+                                      ? 'bg-zinc-800 text-zinc-100 border border-zinc-700'
+                                      : 'text-zinc-400 hover:text-zinc-200'
+                                  }`}
+                                >
+                                  <ListFilter className="w-3.5 h-3.5" />
+                                  <span>Headers</span>
+                                  <span className="text-[10px] bg-zinc-950 px-1.5 py-0.2 rounded border border-zinc-800 text-zinc-400">
+                                    {reqHeaderCount + respHeaderCount}
+                                  </span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => setActiveLogDetailTab('payload')}
+                                  className={`px-3 py-1.5 rounded-md font-semibold text-xs transition flex items-center gap-1.5 ${
+                                    activeLogDetailTab === 'payload'
+                                      ? 'bg-zinc-800 text-zinc-100 border border-zinc-700'
+                                      : 'text-zinc-400 hover:text-zinc-200'
+                                  }`}
+                                >
+                                  <FileText className="w-3.5 h-3.5" />
+                                  <span>Payload</span>
+                                  {(entry.requestBody || entry.responseBody) && (
+                                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                                  )}
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => setActiveLogDetailTab('logs')}
+                                  className={`px-3 py-1.5 rounded-md font-semibold text-xs transition flex items-center gap-1.5 ${
+                                    activeLogDetailTab === 'logs'
+                                      ? 'bg-zinc-800 text-zinc-100 border border-zinc-700'
+                                      : 'text-zinc-400 hover:text-zinc-200'
+                                  }`}
+                                >
+                                  <Terminal className="w-3.5 h-3.5" />
+                                  <span>Console Logs</span>
+                                  {totalLogsCount > 0 && (
+                                    <span className="text-[10px] bg-sky-950 text-sky-400 px-1.5 py-0.2 rounded border border-sky-800">
+                                      {totalLogsCount}
+                                    </span>
+                                  )}
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => setActiveLogDetailTab('json')}
+                                  className={`px-3 py-1.5 rounded-md font-semibold text-xs transition flex items-center gap-1.5 ${
+                                    activeLogDetailTab === 'json'
+                                      ? 'bg-zinc-800 text-zinc-100 border border-zinc-700'
+                                      : 'text-zinc-400 hover:text-zinc-200'
+                                  }`}
+                                >
+                                  <Braces className="w-3.5 h-3.5" />
+                                  <span>Raw JSON</span>
+                                </button>
+                              </div>
+
+                              {/* Tab Content: Headers */}
+                              {activeLogDetailTab === 'headers' && (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                  {/* Request Headers */}
+                                  <div className="bg-zinc-950 rounded-lg border border-zinc-800/80 p-3.5 space-y-3">
+                                    <div className="flex items-center justify-between border-b border-zinc-900 pb-2">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-xs font-bold text-zinc-200">Request Headers</span>
+                                        <span className="text-[10px] bg-zinc-900 px-1.5 py-0.5 rounded text-zinc-400 font-mono">
+                                          {reqHeaderCount}
+                                        </span>
+                                      </div>
+                                      {reqHeaderCount > 0 && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleCopyLogSection(JSON.stringify(reqHeaders, null, 2), `reqh-${logId}`)}
+                                          className="text-[11px] text-zinc-400 hover:text-zinc-200 flex items-center gap-1 transition"
+                                        >
+                                          {copiedLogSection === `reqh-${logId}` ? (
+                                            <span className="text-emerald-400 flex items-center gap-1">
+                                              <Check className="w-3 h-3" /> Copied
+                                            </span>
+                                          ) : (
+                                            <>
+                                              <Copy className="w-3 h-3" /> Copy
+                                            </>
+                                          )}
+                                        </button>
+                                      )}
+                                    </div>
+
+                                    {reqHeaderCount === 0 ? (
+                                      <div className="text-xs text-zinc-500 italic py-2">No request headers recorded</div>
+                                    ) : (
+                                      <div className="space-y-1.5 max-h-[300px] overflow-y-auto pr-1">
+                                        {Object.entries(reqHeaders).map(([key, val]) => (
+                                          <div
+                                            key={key}
+                                            className="p-1.5 rounded bg-zinc-900/50 hover:bg-zinc-900 transition flex flex-col font-mono text-[11px]"
+                                          >
+                                            <span className="text-sky-400 font-semibold">{key}:</span>
+                                            <span className="text-zinc-300 break-all pl-2">{val}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {/* Response Headers */}
+                                  <div className="bg-zinc-950 rounded-lg border border-zinc-800/80 p-3.5 space-y-3">
+                                    <div className="flex items-center justify-between border-b border-zinc-900 pb-2">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-xs font-bold text-zinc-200">Response Headers</span>
+                                        <span className="text-[10px] bg-zinc-900 px-1.5 py-0.5 rounded text-zinc-400 font-mono">
+                                          {respHeaderCount}
+                                        </span>
+                                      </div>
+                                      {respHeaderCount > 0 && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleCopyLogSection(JSON.stringify(respHeaders, null, 2), `resph-${logId}`)}
+                                          className="text-[11px] text-zinc-400 hover:text-zinc-200 flex items-center gap-1 transition"
+                                        >
+                                          {copiedLogSection === `resph-${logId}` ? (
+                                            <span className="text-emerald-400 flex items-center gap-1">
+                                              <Check className="w-3 h-3" /> Copied
+                                            </span>
+                                          ) : (
+                                            <>
+                                              <Copy className="w-3 h-3" /> Copy
+                                            </>
+                                          )}
+                                        </button>
+                                      )}
+                                    </div>
+
+                                    {respHeaderCount === 0 ? (
+                                      <div className="text-xs text-zinc-500 italic py-2">No response headers recorded</div>
+                                    ) : (
+                                      <div className="space-y-1.5 max-h-[300px] overflow-y-auto pr-1">
+                                        {Object.entries(respHeaders).map(([key, val]) => (
+                                          <div
+                                            key={key}
+                                            className="p-1.5 rounded bg-zinc-900/50 hover:bg-zinc-900 transition flex flex-col font-mono text-[11px]"
+                                          >
+                                            <span className="text-emerald-400 font-semibold">{key}:</span>
+                                            <span className="text-zinc-300 break-all pl-2">{val}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Tab Content: Payload */}
+                              {activeLogDetailTab === 'payload' && (
+                                <div className="space-y-4">
+                                  {/* Request Body */}
+                                  <div className="bg-zinc-950 rounded-lg border border-zinc-800/80 p-3.5 space-y-2">
+                                    <div className="flex items-center justify-between border-b border-zinc-900 pb-2">
+                                      <span className="text-xs font-bold text-zinc-200">
+                                        Request Body {entry.requestBody ? `(${entry.requestBody.length} bytes)` : ''}
+                                      </span>
+                                      {entry.requestBody && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleCopyLogSection(entry.requestBody!, `reqb-${logId}`)}
+                                          className="text-[11px] text-zinc-400 hover:text-zinc-200 flex items-center gap-1 transition"
+                                        >
+                                          {copiedLogSection === `reqb-${logId}` ? (
+                                            <span className="text-emerald-400 flex items-center gap-1">
+                                              <Check className="w-3 h-3" /> Copied
+                                            </span>
+                                          ) : (
+                                            <>
+                                              <Copy className="w-3 h-3" /> Copy
+                                            </>
+                                          )}
+                                        </button>
+                                      )}
+                                    </div>
+
+                                    {entry.requestBody ? (
+                                      <pre className="text-[11px] font-mono text-zinc-300 bg-zinc-900/70 p-3 rounded overflow-x-auto max-h-[250px] whitespace-pre-wrap">
+                                        {formatJsonPayload(entry.requestBody)}
+                                      </pre>
+                                    ) : (
+                                      <p className="text-xs text-zinc-500 italic py-2">
+                                        (No request body payload sent)
+                                      </p>
+                                    )}
+                                  </div>
+
+                                  {/* Response Body */}
+                                  <div className="bg-zinc-950 rounded-lg border border-zinc-800/80 p-3.5 space-y-2">
+                                    <div className="flex items-center justify-between border-b border-zinc-900 pb-2">
+                                      <span className="text-xs font-bold text-zinc-200">
+                                        Response Body {entry.responseBody ? `(${entry.responseBody.length} bytes)` : ''}
+                                      </span>
+                                      {entry.responseBody && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleCopyLogSection(entry.responseBody!, `respb-${logId}`)}
+                                          className="text-[11px] text-zinc-400 hover:text-zinc-200 flex items-center gap-1 transition"
+                                        >
+                                          {copiedLogSection === `respb-${logId}` ? (
+                                            <span className="text-emerald-400 flex items-center gap-1">
+                                              <Check className="w-3 h-3" /> Copied
+                                            </span>
+                                          ) : (
+                                            <>
+                                              <Copy className="w-3 h-3" /> Copy
+                                            </>
+                                          )}
+                                        </button>
+                                      )}
+                                    </div>
+
+                                    {entry.responseBody ? (
+                                      <pre className="text-[11px] font-mono text-emerald-300/90 bg-zinc-900/70 p-3 rounded overflow-x-auto max-h-[250px] whitespace-pre-wrap">
+                                        {formatJsonPayload(entry.responseBody)}
+                                      </pre>
+                                    ) : (
+                                      <p className="text-xs text-zinc-500 italic py-2">
+                                        (Empty response body returned by worker)
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Tab Content: Console Logs & Exceptions */}
+                              {activeLogDetailTab === 'logs' && (
+                                <div className="space-y-3">
+                                  {/* Exceptions */}
+                                  {entry.exceptions && entry.exceptions.length > 0 && (
+                                    <div className="p-3 bg-rose-950/60 border border-rose-900/80 rounded-lg space-y-2">
+                                      <div className="flex items-center gap-2 text-rose-400 font-bold text-xs">
+                                        <AlertTriangle className="w-4 h-4" />
+                                        <span>Uncaught Runtime Exceptions ({entry.exceptions.length})</span>
+                                      </div>
+                                      {entry.exceptions.map((exc, eIdx) => (
+                                        <pre
+                                          key={eIdx}
+                                          className="text-[11px] font-mono text-rose-300 bg-rose-950/40 p-2.5 rounded border border-rose-900/50 overflow-x-auto whitespace-pre-wrap"
+                                        >
+                                          {exc}
+                                        </pre>
+                                      ))}
+                                    </div>
+                                  )}
+
+                                  {/* Console Logs */}
+                                  <div className="bg-zinc-950 rounded-lg border border-zinc-800/80 p-3.5 space-y-2">
+                                    <span className="text-xs font-bold text-zinc-200 block border-b border-zinc-900 pb-2">
+                                      Isolate Console Output ({entry.logs?.length || 0})
+                                    </span>
+
+                                    {!entry.logs || entry.logs.length === 0 ? (
+                                      <p className="text-xs text-zinc-500 italic py-2">
+                                        No console.log(), console.info(), or console.error() statements executed for this request.
+                                      </p>
+                                    ) : (
+                                      <div className="space-y-1.5 font-mono text-[11px] max-h-[300px] overflow-y-auto">
+                                        {entry.logs.map((log, lIdx) => (
+                                          <div
+                                            key={lIdx}
+                                            className="flex items-start gap-2.5 p-1.5 rounded bg-zinc-900/60 hover:bg-zinc-900"
+                                          >
+                                            <span
+                                              className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase shrink-0 ${
+                                                log.level === 'error'
+                                                  ? 'bg-rose-950 text-rose-400 border border-rose-800'
+                                                  : log.level === 'warn'
+                                                    ? 'bg-amber-950 text-amber-400 border border-amber-800'
+                                                    : log.level === 'info'
+                                                      ? 'bg-sky-950 text-sky-400 border border-sky-800'
+                                                      : 'bg-zinc-800 text-zinc-300'
+                                              }`}
+                                            >
+                                              {log.level}
+                                            </span>
+                                            <span className="text-zinc-300 whitespace-pre-wrap flex-1 break-all">
+                                              {log.message}
+                                            </span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Tab Content: Raw JSON */}
+                              {activeLogDetailTab === 'json' && (
+                                <div className="space-y-2">
+                                  <div className="flex items-center justify-between text-xs text-zinc-400">
+                                    <span>Cloudflare Structured Telemetry JSON</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCopyLogSection(JSON.stringify(entry, null, 2), `rawjson-${logId}`)}
+                                      className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded font-semibold text-xs transition flex items-center gap-1"
+                                    >
+                                      {copiedLogSection === `rawjson-${logId}` ? (
+                                        <span className="text-emerald-400 flex items-center gap-1">
+                                          <Check className="w-3 h-3" /> Copied JSON
+                                        </span>
+                                      ) : (
+                                        <>
+                                          <Copy className="w-3 h-3" /> Copy JSON
+                                        </>
+                                      )}
+                                    </button>
+                                  </div>
+                                  <pre className="text-[11px] font-mono text-zinc-300 bg-zinc-950 p-4 rounded-lg border border-zinc-800/80 overflow-x-auto max-h-[400px] whitespace-pre-wrap">
+                                    {JSON.stringify(entry, null, 2)}
+                                  </pre>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    });
+                  })()}
                 </div>
               </div>
             )}

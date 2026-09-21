@@ -46,8 +46,17 @@ func SubdomainRouter(invoker WorkerInvoker) gin.HandlerFunc {
 				headers := make(map[string]string)
 				for k, v := range c.Request.Header {
 					if len(v) > 0 {
-						headers[k] = v[0]
+						headers[k] = strings.Join(v, ", ")
 					}
+				}
+				if _, ok := headers["Host"]; !ok && c.Request.Host != "" {
+					headers["Host"] = c.Request.Host
+				}
+				if _, ok := headers["CF-Connecting-IP"]; !ok {
+					headers["CF-Connecting-IP"] = c.ClientIP()
+				}
+				if _, ok := headers["X-Forwarded-For"]; !ok {
+					headers["X-Forwarded-For"] = c.ClientIP()
 				}
 
 				status, respHeaders, respBody, err := invoker.InvokeApplication(c.Request.Context(), app.ID, c.Request.Method, c.Request.URL.RequestURI(), headers, reqBody)

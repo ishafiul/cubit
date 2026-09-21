@@ -41,6 +41,7 @@ type Service interface {
 	SetActiveDeployment(ctx context.Context, appID, deploymentID string) error
 	GetMetrics(ctx context.Context, appID string) (*domain.ApplicationMetrics, error)
 	RecordExecution(appID string, method, path string, statusCode int, durationMs float64, clientIP, message string)
+	RecordExecutionEvent(appID string, event domain.RequestLogEvent)
 	SubscribeLiveLogs(appID string) (<-chan domain.RequestLogEvent, func())
 }
 
@@ -266,8 +267,8 @@ func (s *ApplicationService) SetActiveDeployment(ctx context.Context, appID, dep
 	return s.repo.Update(ctx, app)
 }
 
-// RecordExecution records metrics and broadcasts a live log event.
-func (s *ApplicationService) RecordExecution(appID string, method, path string, statusCode int, durationMs float64, clientIP, message string) {
+// RecordExecutionEvent records metrics and broadcasts a rich live log event.
+func (s *ApplicationService) RecordExecutionEvent(appID string, event domain.RequestLogEvent) {
 	s.metricsMu.Lock()
 	tracker, ok := s.metrics[appID]
 	if !ok {
@@ -276,17 +277,7 @@ func (s *ApplicationService) RecordExecution(appID string, method, path string, 
 	}
 	s.metricsMu.Unlock()
 
-	tracker.record(statusCode, durationMs)
-
-	event := domain.RequestLogEvent{
-		Timestamp:  time.Now().UTC(),
-		Method:     method,
-		Path:       path,
-		StatusCode: statusCode,
-		DurationMs: durationMs,
-		ClientIP:   clientIP,
-		Message:    message,
-	}
+	tracker.record(event.StatusCode, event.DurationMs)
 
 	s.subscribersMu.RLock()
 	if subs, ok := s.subscribers[appID]; ok {
@@ -298,6 +289,26 @@ func (s *ApplicationService) RecordExecution(appID string, method, path string, 
 		}
 	}
 	s.subscribersMu.RUnlock()
+}
+
+// RecordExecution records metrics and broadcasts a live log event (backwards-compatible).
+func (s *ApplicationService) RecordExecution(appID string, method, path string, statusCode int, durationMs float64, clientIP, message string) {
+	outcome := "ok"
+	if statusCode >= 500 {
+		outcome = "exception"
+	}
+	s.RecordExecutionEvent(appID, domain.RequestLogEvent{
+		ID:         generateRayID(),
+		Timestamp:  time.Now().UTC(),
+		Method:     method,
+		Path:       path,
+		URL:        path,
+		StatusCode: statusCode,
+		DurationMs: durationMs,
+		ClientIP:   clientIP,
+		Message:    message,
+		Outcome:    outcome,
+	})
 }
 
 // GetMetrics returns execution metrics for an application.
@@ -370,18 +381,53 @@ func (s *ApplicationService) Invoke(ctx context.Context, appID string, method, p
 	}
 
 	start := time.Now()
-	status, respHeaders, respBody, err := RunWorkerBundle(ctx, bundleData, method, path, headers, body)
+	clientIP := "127.0.0.1"
+	if ip, ok := headers["CF-Connecting-IP"]; ok && ip != "" {
+		clientIP = ip
+	} else if xff, ok := headers["X-Forwarded-For"]; ok && xff != "" {
+		clientIP = strings.TrimSpace(strings.Split(xff, ",")[0])
+	}
+
+	host := headers["Host"]
+	if host == "" {
+		host = fmt.Sprintf("%s.localhost:8000", app.Subdomain)
+	}
+	urlStr := fmt.Sprintf("http://%s%s", host, path)
+
+	res, err := RunWorkerBundleDetailed(ctx, bundleData, method, path, headers, body)
 	durationMs := float64(time.Since(start).Microseconds()) / 1000.0
 
 	msg := "Worker isolate request executed"
+	outcome := "ok"
 	if err != nil {
 		msg = "Worker isolate execution error: " + err.Error()
-	} else if status >= 500 {
+		outcome = "exception"
+	} else if res.Status >= 500 {
 		msg = "Worker returned internal server error"
+		outcome = "exception"
 	}
-	s.RecordExecution(appID, method, path, status, durationMs, "127.0.0.1", msg)
 
-	return status, respHeaders, respBody, err
+	event := domain.RequestLogEvent{
+		ID:              generateRayID(),
+		Timestamp:       time.Now().UTC(),
+		Method:          method,
+		Path:            path,
+		URL:             urlStr,
+		StatusCode:      res.Status,
+		DurationMs:      durationMs,
+		ClientIP:        clientIP,
+		Message:         msg,
+		Outcome:         outcome,
+		RequestHeaders:  headers,
+		RequestBody:     string(body),
+		ResponseHeaders: res.Headers,
+		ResponseBody:    string(res.Body),
+		Logs:            res.Logs,
+		Exceptions:      res.Exceptions,
+	}
+	s.RecordExecutionEvent(appID, event)
+
+	return res.Status, res.Headers, res.Body, err
 }
 
 // InvokeApplication is an alias for Invoke.
@@ -389,8 +435,23 @@ func (s *ApplicationService) InvokeApplication(ctx context.Context, appID string
 	return s.Invoke(ctx, appID, method, path, headers, body)
 }
 
-// RunWorkerBundle executes a JavaScript worker bundle using Node or fallback runner.
+// WorkerExecutionResult contains the full isolate output including headers, payloads, console logs, and exceptions.
+type WorkerExecutionResult struct {
+	Status     int                      `json:"status"`
+	Headers    map[string]string        `json:"headers"`
+	Body       []byte                   `json:"body"`
+	Logs       []domain.ConsoleLogEntry `json:"logs"`
+	Exceptions []string                 `json:"exceptions"`
+}
+
+// RunWorkerBundle executes a JavaScript worker bundle using Node or fallback runner (backwards compatible).
 func RunWorkerBundle(ctx context.Context, bundle []byte, method, path string, headers map[string]string, reqBody []byte) (int, map[string]string, []byte, error) {
+	res, err := RunWorkerBundleDetailed(ctx, bundle, method, path, headers, reqBody)
+	return res.Status, res.Headers, res.Body, err
+}
+
+// RunWorkerBundleDetailed executes a JavaScript worker bundle and collects console logs and exceptions.
+func RunWorkerBundleDetailed(ctx context.Context, bundle []byte, method, path string, headers map[string]string, reqBody []byte) (WorkerExecutionResult, error) {
 	if method == "" {
 		method = "GET"
 	}
@@ -411,6 +472,18 @@ const method = %q;
 const path = %q;
 const headers = %s;
 const reqBody = %q;
+
+const logs = [];
+const formatArg = (a) => {
+    if (typeof a === "object" && a !== null) {
+        try { return JSON.stringify(a); } catch (_) { return String(a); }
+    }
+    return String(a);
+};
+console.log = (...args) => logs.push({ level: "log", message: args.map(formatArg).join(" "), timestamp: Date.now() });
+console.info = (...args) => logs.push({ level: "info", message: args.map(formatArg).join(" "), timestamp: Date.now() });
+console.warn = (...args) => logs.push({ level: "warn", message: args.map(formatArg).join(" "), timestamp: Date.now() });
+console.error = (...args) => logs.push({ level: "error", message: args.map(formatArg).join(" "), timestamp: Date.now() });
 
 try {
     const mod = await import("data:text/javascript;base64," + b64);
@@ -447,13 +520,17 @@ try {
     process.stdout.write(JSON.stringify({
         status: response.status || 200,
         headers: respHeaders,
-        body: respText
+        body: respText,
+        logs: logs,
+        exceptions: []
     }));
 } catch (err) {
     process.stdout.write(JSON.stringify({
         status: 500,
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ error: err.message, stack: err.stack })
+        body: JSON.stringify({ error: err.message, stack: err.stack }),
+        logs: logs,
+        exceptions: [err.stack || err.message]
     }));
 }
 `, b64Bundle, method, path, string(headersJSON), bodyStr)
@@ -464,21 +541,63 @@ try {
 		// Fallback: If node execution failed, return default response
 		respHeaders := map[string]string{"Content-Type": "application/json"}
 		if strings.Contains(string(bundle), "Hello from Cubit") {
-			return 200, map[string]string{"Content-Type": "text/plain"}, []byte("Hello from Cubit! Running on celld isolate."), nil
+			return WorkerExecutionResult{
+				Status:     200,
+				Headers:    map[string]string{"Content-Type": "text/plain"},
+				Body:       []byte("Hello from Cubit! Running on celld isolate."),
+				Logs:       []domain.ConsoleLogEntry{},
+				Exceptions: []string{},
+			}, nil
 		}
-		return 200, respHeaders, []byte(`{"message":"Hello from Cubit worker"}`), nil
+		return WorkerExecutionResult{
+			Status:     200,
+			Headers:    respHeaders,
+			Body:       []byte(`{"message":"Hello from Cubit worker"}`),
+			Logs:       []domain.ConsoleLogEntry{},
+			Exceptions: []string{},
+		}, nil
 	}
 
 	var parsed struct {
-		Status  int               `json:"status"`
-		Headers map[string]string `json:"headers"`
-		Body    string            `json:"body"`
+		Status     int                      `json:"status"`
+		Headers    map[string]string        `json:"headers"`
+		Body       string                   `json:"body"`
+		Logs       []domain.ConsoleLogEntry `json:"logs"`
+		Exceptions []string                 `json:"exceptions"`
 	}
 	if err := json.Unmarshal(out, &parsed); err != nil {
-		return 200, map[string]string{"Content-Type": "text/plain"}, out, nil
+		return WorkerExecutionResult{
+			Status:     200,
+			Headers:    map[string]string{"Content-Type": "text/plain"},
+			Body:       out,
+			Logs:       []domain.ConsoleLogEntry{},
+			Exceptions: []string{},
+		}, nil
 	}
 
-	return parsed.Status, parsed.Headers, []byte(parsed.Body), nil
+	if parsed.Headers == nil {
+		parsed.Headers = make(map[string]string)
+	}
+	if parsed.Logs == nil {
+		parsed.Logs = []domain.ConsoleLogEntry{}
+	}
+	if parsed.Exceptions == nil {
+		parsed.Exceptions = []string{}
+	}
+
+	return WorkerExecutionResult{
+		Status:     parsed.Status,
+		Headers:    parsed.Headers,
+		Body:       []byte(parsed.Body),
+		Logs:       parsed.Logs,
+		Exceptions: parsed.Exceptions,
+	}, nil
+}
+
+func generateRayID() string {
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	return fmt.Sprintf("ray_%x", b)
 }
 
 func generateID() string {

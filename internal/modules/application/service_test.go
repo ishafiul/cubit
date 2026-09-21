@@ -3,6 +3,7 @@ package application_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/ishaf/cubit/internal/domain"
 	"github.com/ishaf/cubit/internal/modules/application"
@@ -203,13 +204,43 @@ func TestApplicationService(t *testing.T) {
 			logsChan, unsubscribe := svc.SubscribeLiveLogs(app.ID)
 			defer unsubscribe()
 
-			svc.RecordExecution(app.ID, "GET", "/live", 200, 5.0, "127.0.0.1", "live test")
+			svc.RecordExecutionEvent(app.ID, domain.RequestLogEvent{
+				ID:              "ray_test123",
+				Timestamp:       time.Now().UTC(),
+				Method:          "POST",
+				Path:            "/api/test",
+				URL:             "http://logs-worker.localhost:8000/api/test",
+				StatusCode:      200,
+				DurationMs:      8.5,
+				ClientIP:        "192.168.1.50",
+				Message:         "Worker executed",
+				Outcome:         "ok",
+				RequestHeaders:  map[string]string{"User-Agent": "CubitClient/1.0", "Host": "logs-worker.localhost:8000"},
+				RequestBody:     `{"hello":"world"}`,
+				ResponseHeaders: map[string]string{"Content-Type": "application/json"},
+				ResponseBody:    `{"status":"ok"}`,
+				Logs: []domain.ConsoleLogEntry{
+					{Level: "log", Message: "handled request", Timestamp: time.Now().UnixMilli()},
+				},
+			})
 
-			t.Run("Then subscriber receives live log event", func(t *testing.T) {
+			t.Run("Then subscriber receives rich live log event", func(t *testing.T) {
 				select {
 				case event := <-logsChan:
-					if event.Method != "GET" || event.Path != "/live" || event.StatusCode != 200 {
+					if event.ID != "ray_test123" {
+						t.Errorf("expected ray_test123, got %s", event.ID)
+					}
+					if event.Method != "POST" || event.Path != "/api/test" || event.StatusCode != 200 {
 						t.Fatalf("unexpected event: %+v", event)
+					}
+					if event.RequestHeaders["User-Agent"] != "CubitClient/1.0" {
+						t.Errorf("expected User-Agent CubitClient/1.0, got %s", event.RequestHeaders["User-Agent"])
+					}
+					if event.ResponseHeaders["Content-Type"] != "application/json" {
+						t.Errorf("expected Content-Type application/json, got %s", event.ResponseHeaders["Content-Type"])
+					}
+					if len(event.Logs) != 1 || event.Logs[0].Message != "handled request" {
+						t.Errorf("expected 1 console log, got %+v", event.Logs)
 					}
 				default:
 					t.Fatal("expected to receive live log event, but channel was empty")
