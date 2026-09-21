@@ -1,0 +1,103 @@
+services:
+  # ============================================================================
+  # Cubit Control Plane Daemon
+  # Provides OpenAPI 3.1 REST API, SSE live build logs, and React 19 web dashboard
+  # ============================================================================
+  cubitd:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: cubit/cubitd:latest
+    container_name: cubitd
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - CUBIT_PORT=8000
+      - CUBIT_DB_PATH=/var/lib/cubit/cubit.db
+      - CUBIT_TRAEFIK_DYNAMIC_PATH=/etc/traefik/dynamic/cubit.yaml
+      - CUBIT_STORAGE_BACKEND=garage_s3
+      - CUBIT_STORAGE_DIR=/var/lib/cubit/storage
+      - CUBIT_CELLD_IMAGE=ghcr.io/denoland/celld:latest
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - cubit_data:/var/lib/cubit
+      - traefik_dynamic:/etc/traefik/dynamic
+    depends_on:
+      - traefik
+      - garage
+    networks:
+      - cubit_net
+
+  # ============================================================================
+  # Traefik v3 Reverse Proxy & Ingress Controller
+  # Automates dynamic routing, SSL/TLS certificates, and load balancing
+  # ============================================================================
+  traefik:
+    image: traefik:v3.3
+    container_name: cubit-traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8081:8080" # Traefik Dashboard
+    volumes:
+      - ./traefik.yaml:/etc/traefik/traefik.yaml:ro
+      - traefik_dynamic:/etc/traefik/dynamic
+      - traefik_certs:/etc/traefik/certs
+    networks:
+      - cubit_net
+
+  # ============================================================================
+  # Garage S3 Distributed Object Storage Engine
+  # Lightweight Rust-based distributed storage for Worker bundles and Durable Objects
+  # ============================================================================
+  garage:
+    image: dxflrs/garage:v1.0.1
+    container_name: cubit-garage
+    restart: unless-stopped
+    ports:
+      - "3900:3900" # S3 API
+      - "3901:3901" # RPC
+      - "3902:3902" # S3 Web
+    volumes:
+      - ./garage.toml:/etc/garage.toml:ro
+      - garage_meta:/var/lib/garage/meta
+      - garage_data:/var/lib/garage/data
+    networks:
+      - cubit_net
+
+  # ============================================================================
+  # celld Edge Worker & Durable Object Daemon
+  # High-performance V8 isolate runtime powered by Deno Land
+  # ============================================================================
+  celld:
+    image: ghcr.io/denoland/celld:latest
+    container_name: celld
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - CELLD_STORAGE_ENDPOINT=http://garage:3900
+      - CELLD_STORAGE_BUCKET=cubit-fleet
+      - CELLD_STORAGE_REGION=cubit-local
+    networks:
+      - cubit_net
+
+networks:
+  cubit_net:
+    name: cubit_net
+    driver: bridge
+
+volumes:
+  cubit_data:
+    name: cubit_data
+  traefik_dynamic:
+    name: traefik_dynamic
+  traefik_certs:
+    name: traefik_certs
+  garage_meta:
+    name: garage_meta
+  garage_data:
+    name: garage_data

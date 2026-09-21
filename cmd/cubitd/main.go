@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -27,6 +29,7 @@ func main() {
 	traefikOut := flag.String("traefik-config", "/etc/traefik/dynamic/cubit.yaml", "Traefik dynamic configuration output path")
 	storageDir := flag.String("storage-dir", ".data/storage", "Storage directory for local S3 / Garage")
 	bucketName := flag.String("bucket", "cubit-fleet", "Default fleet bucket name")
+	webDir := flag.String("web-dir", "", "Directory containing compiled frontend SPA assets (defaults to CUBIT_WEB_DIR or ./web/dist)")
 	flag.Parse()
 
 	log.Printf("Starting Cubit Control Plane on port %d...", *port)
@@ -98,6 +101,36 @@ func main() {
 		http_adapter.HandlerFromMux(apiHandler, sub)
 		sub.Get("/deployments/{id}/logs/stream", sseStreamer.HandleStream)
 	})
+
+	// Static SPA file server
+	staticDir := *webDir
+	if staticDir == "" {
+		staticDir = os.Getenv("CUBIT_WEB_DIR")
+	}
+	if staticDir == "" {
+		if _, err := os.Stat("./web/dist"); err == nil {
+			staticDir = "./web/dist"
+		}
+	}
+	if staticDir != "" {
+		if _, err := os.Stat(staticDir); err == nil {
+			fileServer := http.FileServer(http.Dir(staticDir))
+			r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasPrefix(r.URL.Path, "/api") || r.URL.Path == "/health" {
+					http.NotFound(w, r)
+					return
+				}
+				fpath := filepath.Join(staticDir, filepath.Clean(r.URL.Path))
+				info, err := os.Stat(fpath)
+				if os.IsNotExist(err) || (err == nil && info.IsDir() && r.URL.Path != "/") {
+					http.ServeFile(w, r, filepath.Join(staticDir, "index.html"))
+					return
+				}
+				fileServer.ServeHTTP(w, r)
+			})
+			log.Printf("Serving web dashboard from %s", staticDir)
+		}
+	}
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", *port),

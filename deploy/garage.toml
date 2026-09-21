@@ -1,0 +1,30 @@
+# Garage S3 Configuration for Cubit Bare-Metal Cluster
+# Lightweight distributed object storage written in Rust
+
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+db_engine = "sqlite"
+
+replication_factor = 1
+
+# RPC Settings for inter-node communication
+rpc_bind_addr = "[::]:3901"
+rpc_public_addr = "127.0.0.1:3901"
+rpc_secret = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+# S3 API Endpoint for Worker Bundles & Durable Objects state
+[s3_api]
+api_bind_addr = "[::]:3900"
+s3_region = "cubit-local"
+root_domain = ".s3.garage.localhost"
+
+# S3 Web Endpoint for static site hosting
+[s3_web]
+bind_addr = "[::]:3902"
+root_domain = ".web.garage.localhost"
+index = "index.html"
+
+# Admin API for automated key & bucket provisioning
+[admin]
+api_bind_addr = "[::]:3903"
+admin_token = "cubit-garage-admin-secret-token"
