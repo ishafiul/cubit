@@ -120,6 +120,15 @@ func toResponse(app *domain.Application) applicationResponse {
 		dur = 50
 	}
 
+	envVars := app.EnvVars
+	if envVars == nil {
+		envVars = []domain.EnvironmentVariable{}
+	}
+	bindings := app.Bindings
+	if bindings == nil {
+		bindings = []domain.ResourceBinding{}
+	}
+
 	return applicationResponse{
 		ID:                 app.ID,
 		Name:               app.Name,
@@ -131,8 +140,8 @@ func toResponse(app *domain.Application) applicationResponse {
 		InlineCode:         inlineCode,
 		AutoDeploy:         app.AutoDeploy,
 		Status:             string(app.Status),
-		EnvVars:            app.EnvVars,
-		Bindings:           app.Bindings,
+		EnvVars:            envVars,
+		Bindings:           bindings,
 		ActiveDeploymentID: activeDep,
 		CompatibilityDate:  compatDate,
 		CompatibilityFlags: flags,
@@ -398,6 +407,18 @@ func (h *Handler) Test(c *gin.Context) {
 		"headers": respHeaders,
 		"body":    string(respBody),
 	})
+}
+
+// GetBundle returns the compiled JavaScript worker bundle.
+func (h *Handler) GetBundle(c *gin.Context) {
+	id := c.Param("id")
+	deploymentID := c.Query("deploymentId")
+	data, err := h.service.GetBundle(c.Request.Context(), id, deploymentID)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.Data(http.StatusOK, "application/javascript; charset=utf-8", data)
 }
 
 func respondError(c *gin.Context, err error) {

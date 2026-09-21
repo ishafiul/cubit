@@ -39,6 +39,7 @@ type Service interface {
 	GetApplicationBySubdomain(ctx context.Context, subdomain string) (*domain.Application, error)
 	InvokeApplication(ctx context.Context, appID string, method, path string, headers map[string]string, body []byte) (int, map[string]string, []byte, error)
 	SetActiveDeployment(ctx context.Context, appID, deploymentID string) error
+	GetBundle(ctx context.Context, appID, deploymentID string) ([]byte, error)
 	GetMetrics(ctx context.Context, appID string) (*domain.ApplicationMetrics, error)
 	RecordExecution(appID string, method, path string, statusCode int, durationMs float64, clientIP, message string)
 	RecordExecutionEvent(appID string, event domain.RequestLogEvent)
@@ -267,6 +268,35 @@ func (s *ApplicationService) SetActiveDeployment(ctx context.Context, appID, dep
 	return s.repo.Update(ctx, app)
 }
 
+// GetBundle retrieves the compiled worker JavaScript bundle for an application.
+func (s *ApplicationService) GetBundle(ctx context.Context, appID, deploymentID string) ([]byte, error) {
+	app, err := s.repo.GetByID(ctx, appID)
+	if err != nil {
+		return nil, err
+	}
+	targetDepID := deploymentID
+	if targetDepID == "" {
+		targetDepID = app.ActiveDeploymentID
+	}
+	if targetDepID == "" {
+		return nil, domain.NewValidationError("application has no active deployment")
+	}
+
+	if app.SourceType == domain.SourceTypeInline && app.InlineCode != "" {
+		return []byte(app.InlineCode), nil
+	}
+
+	if s.storage != nil {
+		objectKey := fmt.Sprintf("deployments/%s/%s/bundle.js", app.Name, targetDepID)
+		data, err := s.storage.DownloadBundle(ctx, s.fleetBucket, objectKey)
+		if err == nil && len(data) > 0 {
+			return data, nil
+		}
+	}
+
+	return []byte(domain.DefaultHelloWorldWorker), nil
+}
+
 // RecordExecutionEvent records metrics and broadcasts a rich live log event.
 func (s *ApplicationService) RecordExecutionEvent(appID string, event domain.RequestLogEvent) {
 	s.metricsMu.Lock()
@@ -394,7 +424,12 @@ func (s *ApplicationService) Invoke(ctx context.Context, appID string, method, p
 	}
 	urlStr := fmt.Sprintf("http://%s%s", host, path)
 
-	res, err := RunWorkerBundleDetailed(ctx, bundleData, method, path, headers, body)
+	envMap := make(map[string]string)
+	for _, ev := range app.EnvVars {
+		envMap[ev.Key] = ev.Value
+	}
+
+	res, err := RunWorkerBundleWithEnv(ctx, bundleData, method, path, headers, body, envMap)
 	durationMs := float64(time.Since(start).Microseconds()) / 1000.0
 
 	msg := "Worker isolate request executed"
@@ -452,6 +487,11 @@ func RunWorkerBundle(ctx context.Context, bundle []byte, method, path string, he
 
 // RunWorkerBundleDetailed executes a JavaScript worker bundle and collects console logs and exceptions.
 func RunWorkerBundleDetailed(ctx context.Context, bundle []byte, method, path string, headers map[string]string, reqBody []byte) (WorkerExecutionResult, error) {
+	return RunWorkerBundleWithEnv(ctx, bundle, method, path, headers, reqBody, nil)
+}
+
+// RunWorkerBundleWithEnv executes a JavaScript worker bundle injecting environment variables and collecting console logs.
+func RunWorkerBundleWithEnv(ctx context.Context, bundle []byte, method, path string, headers map[string]string, reqBody []byte, envVars map[string]string) (WorkerExecutionResult, error) {
 	if method == "" {
 		method = "GET"
 	}
@@ -461,9 +501,13 @@ func RunWorkerBundleDetailed(ctx context.Context, bundle []byte, method, path st
 	if headers == nil {
 		headers = make(map[string]string)
 	}
+	if envVars == nil {
+		envVars = make(map[string]string)
+	}
 
 	b64Bundle := base64.StdEncoding.EncodeToString(bundle)
 	headersJSON, _ := json.Marshal(headers)
+	envJSON, _ := json.Marshal(envVars)
 	bodyStr := string(reqBody)
 
 	runnerScript := fmt.Sprintf(`
@@ -472,6 +516,7 @@ const method = %q;
 const path = %q;
 const headers = %s;
 const reqBody = %q;
+const env = %s;
 
 const logs = [];
 const formatArg = (a) => {
@@ -496,7 +541,6 @@ try {
         reqInit.body = reqBody;
     }
     const request = new Request("http://localhost" + path, reqInit);
-    const env = {};
     const ctx = {
         waitUntil: () => {},
         passThroughOnException: () => {}
@@ -533,7 +577,7 @@ try {
         exceptions: [err.stack || err.message]
     }));
 }
-`, b64Bundle, method, path, string(headersJSON), bodyStr)
+`, b64Bundle, method, path, string(headersJSON), bodyStr, string(envJSON))
 
 	cmd := exec.CommandContext(ctx, "node", "--input-type=module", "-e", runnerScript)
 	out, err := cmd.Output()

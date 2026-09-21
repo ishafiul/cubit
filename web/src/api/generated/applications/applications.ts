@@ -30,6 +30,7 @@ import type {
   BadRequestResponse,
   ConflictResponse,
   CreateApplicationRequest,
+  GetApplicationBundleParams,
   InternalErrorResponse,
   NotFoundResponse,
   TestApplicationRequest,
@@ -494,6 +495,105 @@ export function useGetApplicationMetrics<TData = Awaited<ReturnType<typeof getAp
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getGetApplicationMetricsQueryOptions(id,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+/**
+ * @summary Download the compiled JavaScript worker bundle
+ */
+export const getApplicationBundle = (
+    id: string,
+    params?: GetApplicationBundleParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return customInstance<string>(
+      {url: `/applications/${id}/bundle`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetApplicationBundleQueryKey = (id?: string,
+    params?: GetApplicationBundleParams,) => {
+    return [
+    `/applications/${id}/bundle`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getGetApplicationBundleQueryOptions = <TData = Awaited<ReturnType<typeof getApplicationBundle>>, TError = NotFoundResponse | InternalErrorResponse>(id: string,
+    params?: GetApplicationBundleParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApplicationBundle>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetApplicationBundleQueryKey(id,params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getApplicationBundle>>> = ({ signal }) => getApplicationBundle(id,params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getApplicationBundle>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetApplicationBundleQueryResult = NonNullable<Awaited<ReturnType<typeof getApplicationBundle>>>
+export type GetApplicationBundleQueryError = NotFoundResponse | InternalErrorResponse
+
+
+export function useGetApplicationBundle<TData = Awaited<ReturnType<typeof getApplicationBundle>>, TError = NotFoundResponse | InternalErrorResponse>(
+ id: string,
+    params: undefined |  GetApplicationBundleParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApplicationBundle>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getApplicationBundle>>,
+          TError,
+          Awaited<ReturnType<typeof getApplicationBundle>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetApplicationBundle<TData = Awaited<ReturnType<typeof getApplicationBundle>>, TError = NotFoundResponse | InternalErrorResponse>(
+ id: string,
+    params?: GetApplicationBundleParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApplicationBundle>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getApplicationBundle>>,
+          TError,
+          Awaited<ReturnType<typeof getApplicationBundle>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetApplicationBundle<TData = Awaited<ReturnType<typeof getApplicationBundle>>, TError = NotFoundResponse | InternalErrorResponse>(
+ id: string,
+    params?: GetApplicationBundleParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApplicationBundle>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Download the compiled JavaScript worker bundle
+ */
+
+export function useGetApplicationBundle<TData = Awaited<ReturnType<typeof getApplicationBundle>>, TError = NotFoundResponse | InternalErrorResponse>(
+ id: string,
+    params?: GetApplicationBundleParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApplicationBundle>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetApplicationBundleQueryOptions(id,params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

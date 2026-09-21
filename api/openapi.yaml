@@ -325,6 +325,70 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /applications/{id}/rollback:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      summary: Rollback application to a specific past deployment
+      operationId: rollbackApplication
+      tags:
+        - deployments
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RollbackApplicationRequest'
+      responses:
+        '200':
+          description: Application rolled back successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deployment'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /applications/{id}/bundle:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: deploymentId
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: Download the compiled JavaScript worker bundle
+      operationId: getApplicationBundle
+      tags:
+        - applications
+      responses:
+        '200':
+          description: Compiled JavaScript bundle code
+          content:
+            application/javascript:
+              schema:
+                type: string
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /applications/{id}/test:
     parameters:
       - name: id
@@ -1097,6 +1161,16 @@ components:
         forceRebuild:
           type: boolean
           default: false
+
+    RollbackApplicationRequest:
+      type: object
+      required:
+        - deploymentId
+      properties:
+        deploymentId:
+          type: string
+          format: uuid
+          example: "018f9e61-9c12-7000-8111-c91836a94f09"
 
     DeploymentLogEntry:
       type: object

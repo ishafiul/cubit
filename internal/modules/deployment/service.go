@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ishaf/cubit/internal/domain"
@@ -30,6 +31,7 @@ type RouteSyncer interface {
 type Service interface {
 	Deploy(ctx context.Context, appID string, commitHash string) (*domain.Deployment, error)
 	DeployWithDetails(ctx context.Context, appID, commitHash, commitMessage string) (*domain.Deployment, error)
+	Rollback(ctx context.Context, appID, deploymentID string) (*domain.Deployment, error)
 	GetByID(ctx context.Context, id string) (*domain.Deployment, error)
 	ListByApp(ctx context.Context, appID string) ([]*domain.Deployment, error)
 	GetLogs(ctx context.Context, depID string) ([]domain.DeploymentLog, error)
@@ -166,6 +168,68 @@ func (s *DeploymentService) DeployWithDetails(ctx context.Context, appID, commit
 	}
 
 	return dep, nil
+}
+
+// Rollback switches the application's active live deployment to a specified past deployment.
+func (s *DeploymentService) Rollback(ctx context.Context, appID, deploymentID string) (*domain.Deployment, error) {
+	app, err := s.appMgr.GetByID(ctx, appID)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(deploymentID) == "" {
+		return nil, domain.NewValidationError("deploymentId is required")
+	}
+
+	targetDep, err := s.repo.GetByID(ctx, deploymentID)
+	if err != nil {
+		return nil, err
+	}
+	if targetDep.ApplicationID != app.ID {
+		return nil, domain.NewValidationError("deployment does not belong to application")
+	}
+	if targetDep.Status == domain.DeploymentStatusFailed {
+		return nil, domain.NewValidationError("cannot rollback to a failed deployment")
+	}
+
+	// Supersede any existing active deployments
+	allDeps, _ := s.repo.ListByAppID(ctx, app.ID)
+	for _, oldDep := range allDeps {
+		if oldDep.ID != targetDep.ID && oldDep.Status == domain.DeploymentStatusActive {
+			oldDep.MarkSuperseded()
+			_ = s.repo.Update(ctx, oldDep)
+		}
+	}
+
+	// Activate target deployment
+	targetDep.Status = domain.DeploymentStatusActive
+	now := time.Now().UTC()
+	targetDep.FinishedAt = &now
+	if err := s.repo.Update(ctx, targetDep); err != nil {
+		return nil, err
+	}
+
+	_ = s.repo.AppendLog(ctx, targetDep.ID, domain.DeploymentLog{
+		Timestamp: now,
+		Step:      domain.LogStepCelldDeploy,
+		Message:   fmt.Sprintf("Rolled back to %s (%s) as primary live deployment", targetDep.VersionTag(), targetDep.CommitHash),
+		Level:     domain.LogLevelInfo,
+	})
+
+	if err := s.appMgr.SetActiveDeployment(ctx, app.ID, targetDep.ID); err != nil {
+		return nil, err
+	}
+
+	if s.routeSyncer != nil {
+		_ = s.routeSyncer.SyncRoutes(ctx)
+		_ = s.repo.AppendLog(ctx, targetDep.ID, domain.DeploymentLog{
+			Timestamp: time.Now().UTC(),
+			Step:      domain.LogStepRouteSync,
+			Message:   fmt.Sprintf("Synchronized Traefik routing rules for %s (%s)", app.Name, targetDep.VersionTag()),
+			Level:     domain.LogLevelInfo,
+		})
+	}
+
+	return targetDep, nil
 }
 
 // GetByID retrieves a deployment by ID.

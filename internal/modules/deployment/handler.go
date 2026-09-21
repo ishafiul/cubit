@@ -27,6 +27,10 @@ type createDeploymentRequest struct {
 	ForceRebuild *bool   `json:"forceRebuild,omitempty"`
 }
 
+type rollbackApplicationRequest struct {
+	DeploymentID string `json:"deploymentId" binding:"required"`
+}
+
 type deploymentResponse struct {
 	ID            string  `json:"id"`
 	ApplicationID string  `json:"applicationId"`
@@ -103,6 +107,24 @@ func (h *Handler) Deploy(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, toDeploymentResponse(dep))
+}
+
+// Rollback POST /applications/:id/rollback
+func (h *Handler) Rollback(c *gin.Context) {
+	appID := c.Param("id")
+	var req rollbackApplicationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "deploymentId is required"})
+		return
+	}
+
+	dep, err := h.service.Rollback(c.Request.Context(), appID, req.DeploymentID)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, toDeploymentResponse(dep))
 }
 
 // ListByApp GET /applications/:id/deployments

@@ -25,11 +25,13 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  BadRequestResponse,
   CreateDeploymentRequest,
   Deployment,
   DeploymentLogEntry,
   InternalErrorResponse,
-  NotFoundResponse
+  NotFoundResponse,
+  RollbackApplicationRequest
 } from '../../model';
 
 import { customInstance } from '../../custom-instance';
@@ -194,6 +196,71 @@ export function useListDeployments<TData = Awaited<ReturnType<typeof listDeploym
 
 
 /**
+ * @summary Rollback application to a specific past deployment
+ */
+export const rollbackApplication = (
+    id: string,
+    rollbackApplicationRequest: RollbackApplicationRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return customInstance<Deployment>(
+      {url: `/applications/${id}/rollback`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: rollbackApplicationRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getRollbackApplicationMutationOptions = <TError = BadRequestResponse | NotFoundResponse | InternalErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rollbackApplication>>, TError,{id: string;data: RollbackApplicationRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof rollbackApplication>>, TError,{id: string;data: RollbackApplicationRequest}, TContext> => {
+
+const mutationKey = ['rollbackApplication'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof rollbackApplication>>, {id: string;data: RollbackApplicationRequest}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  rollbackApplication(id,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RollbackApplicationMutationResult = NonNullable<Awaited<ReturnType<typeof rollbackApplication>>>
+    export type RollbackApplicationMutationBody = RollbackApplicationRequest
+    export type RollbackApplicationMutationError = BadRequestResponse | NotFoundResponse | InternalErrorResponse
+
+    /**
+ * @summary Rollback application to a specific past deployment
+ */
+export const useRollbackApplication = <TError = BadRequestResponse | NotFoundResponse | InternalErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rollbackApplication>>, TError,{id: string;data: RollbackApplicationRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof rollbackApplication>>,
+        TError,
+        {id: string;data: RollbackApplicationRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getRollbackApplicationMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
  * @summary Get deployment details and status
  */
 export const getDeployment = (

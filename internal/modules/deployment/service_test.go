@@ -133,5 +133,54 @@ func TestDeploymentService(t *testing.T) {
 				}
 			})
 		})
+
+		t.Run("When rolling back to a previous deployment version", func(t *testing.T) {
+			deps, _ := svc.ListByApp(context.Background(), "app-1")
+			var dep1ID string
+			for _, d := range deps {
+				if d.BuildVersion == 1 {
+					dep1ID = d.ID
+					break
+				}
+			}
+
+			rolledBack, err := svc.Rollback(context.Background(), "app-1", dep1ID)
+
+			t.Run("Then deployment becomes active and app active deployment matches", func(t *testing.T) {
+				if err != nil {
+					t.Fatalf("expected no error, got %v", err)
+				}
+				if rolledBack.ID != dep1ID {
+					t.Fatalf("expected rolled back ID %s, got %s", dep1ID, rolledBack.ID)
+				}
+				if rolledBack.Status != domain.DeploymentStatusActive {
+					t.Fatalf("expected status active, got %s", rolledBack.Status)
+				}
+				if app.ActiveDeploymentID != dep1ID {
+					t.Fatalf("expected app active deployment to be %s, got %s", dep1ID, app.ActiveDeploymentID)
+				}
+
+				allDeps, _ := svc.ListByApp(context.Background(), "app-1")
+				for _, d := range allDeps {
+					if d.BuildVersion == 2 && d.Status != domain.DeploymentStatusSuperseded {
+						t.Fatalf("expected version 2 to be superseded, got %s", d.Status)
+					}
+				}
+			})
+		})
+
+		t.Run("When rolling back to a failed deployment", func(t *testing.T) {
+			failedDep, _ := domain.NewDeploymentWithVersion("failed-dep", "app-1", "bad-hash", "failed", 3)
+			failedDep.MarkFailed("syntax error")
+			_ = repo.Save(context.Background(), failedDep)
+
+			_, err := svc.Rollback(context.Background(), "app-1", "failed-dep")
+
+			t.Run("Then rollback is rejected with validation error", func(t *testing.T) {
+				if err == nil {
+					t.Fatal("expected error rolling back to failed deployment, got nil")
+				}
+			})
+		})
 	})
 }

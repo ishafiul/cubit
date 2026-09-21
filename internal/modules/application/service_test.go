@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -244,6 +245,73 @@ func TestApplicationService(t *testing.T) {
 					}
 				default:
 					t.Fatal("expected to receive live log event, but channel was empty")
+				}
+			})
+		})
+
+		t.Run("When getting the bundle for an inline application", func(t *testing.T) {
+			inlineCode := "export default { fetch: () => new Response('bundle test') };"
+			app, _ := svc.Create(
+				context.Background(),
+				"bundle-worker",
+				domain.SourceTypeInline,
+				"",
+				"",
+				inlineCode,
+				true,
+				nil,
+				nil,
+			)
+			_ = svc.SetActiveDeployment(context.Background(), app.ID, "dep-123")
+
+			bundle, err := svc.GetBundle(context.Background(), app.ID, "")
+
+			t.Run("Then bundle content matches inline code", func(t *testing.T) {
+				if err != nil {
+					t.Fatalf("expected no error, got %v", err)
+				}
+				if string(bundle) != inlineCode {
+					t.Fatalf("expected %q, got %q", inlineCode, string(bundle))
+				}
+			})
+		})
+
+		t.Run("When invoking a worker bundle with injected environment variables", func(t *testing.T) {
+			workerScript := []byte(`
+export default {
+    async fetch(req, env) {
+        return new Response(JSON.stringify({ key: env.SECRET_KEY, mode: env.APP_MODE }), {
+            headers: { "Content-Type": "application/json" }
+        });
+    }
+};
+`)
+			res, err := application.RunWorkerBundleWithEnv(
+				context.Background(),
+				workerScript,
+				"GET",
+				"/test",
+				nil,
+				nil,
+				map[string]string{
+					"SECRET_KEY": "supersecret123",
+					"APP_MODE":   "production",
+				},
+			)
+
+			t.Run("Then isolate receives and returns env variables", func(t *testing.T) {
+				if err != nil {
+					t.Fatalf("expected no error, got %v", err)
+				}
+				if res.Status != 200 {
+					t.Fatalf("expected status 200, got %d", res.Status)
+				}
+				body := string(res.Body)
+				if !strings.Contains(body, "supersecret123") {
+					t.Errorf("expected body to contain supersecret123, got %s", body)
+				}
+				if !strings.Contains(body, "production") {
+					t.Errorf("expected body to contain production, got %s", body)
 				}
 			})
 		})

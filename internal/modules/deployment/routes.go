@@ -8,6 +8,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	apps := rg.Group("/applications")
 	{
 		apps.POST("/:id/deploy", h.Deploy)
+		apps.POST("/:id/rollback", h.Rollback)
 		apps.GET("/:id/deployments", h.ListByApp)
 	}
 

@@ -41,10 +41,14 @@ import {
   FileText,
   Braces,
   ListFilter,
+  RotateCcw,
+  Download,
+  Lock,
+  Edit2,
 } from 'lucide-react';
-import type { Application, ResourceBinding, ResourceBindingType, ApplicationMetrics, RequestLogEvent } from '../api/model';
+import type { Application, ResourceBinding, ResourceBindingType, ApplicationMetrics, RequestLogEvent, Deployment } from '../api/model';
 import type { ActiveTab } from '../App';
-import { useListDeployments } from '../api/generated/deployments/deployments';
+import { useListDeployments, useRollbackApplication } from '../api/generated/deployments/deployments';
 import { useUpdateApplication, useDeleteApplication, useGetApplicationMetrics } from '../api/generated/applications/applications';
 import { useListDomains, useCreateDomain } from '../api/generated/domains/domains';
 import { CodeEditor } from './CodeEditor';
@@ -125,6 +129,15 @@ export function ApplicationDetailPage({
   const [depLogs, setDepLogs] = useState<Array<{ timestamp: string; step: string; message: string; level: string }>>([]);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
 
+  // Rollback and Bundle states
+  const rollbackMutation = useRollbackApplication();
+  const [showRollbackModal, setShowRollbackModal] = useState(false);
+  const [rollbackTargetDep, setRollbackTargetDep] = useState<Deployment | null>(null);
+  const [isRollingBack, setIsRollingBack] = useState(false);
+  const [rollbackStatus, setRollbackStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [rollbackError, setRollbackError] = useState('');
+  const [isDownloadingBundle, setIsDownloadingBundle] = useState(false);
+
   // Code editor state
   const [editedCode, setEditedCode] = useState(app.inlineCode || '');
   const [isSavingCode, setIsSavingCode] = useState(false);
@@ -142,13 +155,38 @@ export function ApplicationDetailPage({
   const [isCreatingDomain, setIsCreatingDomain] = useState(false);
   const createDomainMutation = useCreateDomain();
 
-  // Environment variables state
+  // Environment variables & Secrets suite state
   const [envVars, setEnvVars] = useState<Array<{ key: string; value: string; isSecret: boolean }>>(
     app.envVars ? app.envVars.map(e => ({ key: e.key || (e as any).Key || '', value: e.value || (e as any).Value || '', isSecret: !!(e.isSecret || (e as any).IsSecret) })) : []
   );
   const [showSecretValues, setShowSecretValues] = useState<Record<number, boolean>>({});
   const [isSavingEnv, setIsSavingEnv] = useState(false);
   const [envSaveStatus, setEnvSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
+
+  // Enhanced Variables & Secrets suite filters and modals
+  const [varSearchTerm, setVarSearchTerm] = useState('');
+  const [varTypeFilter, setVarTypeFilter] = useState<'ALL' | 'PLAIN' | 'SECRET'>('ALL');
+  const [showAddVarModal, setShowAddVarModal] = useState(false);
+  const [newVarKey, setNewVarKey] = useState('');
+  const [newVarValue, setNewVarValue] = useState('');
+  const [newVarIsSecret, setNewVarIsSecret] = useState(false);
+  const [showNewVarValue, setShowNewVarValue] = useState(false);
+  const [editingVarIndex, setEditingVarIndex] = useState<number | null>(null);
+  const [copiedVarKey, setCopiedVarKey] = useState<string | null>(null);
+  const [copiedVarValue, setCopiedVarValue] = useState<string | null>(null);
+  const [varDeleteConfirmIndex, setVarDeleteConfirmIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (app.envVars) {
+      setEnvVars(
+        app.envVars.map(e => ({
+          key: e.key || (e as any).Key || '',
+          value: e.value || (e as any).Value || '',
+          isSecret: !!(e.isSecret || (e as any).IsSecret),
+        }))
+      );
+    }
+  }, [app.envVars, app.id]);
 
   const updateAppMutation = useUpdateApplication();
   const deleteAppMutation = useDeleteApplication();
@@ -590,12 +628,12 @@ export function ApplicationDetailPage({
     }
   };
 
-  // Save Environment Variables
-  const handleSaveEnvVars = async () => {
+  // Save Environment Variables list helper
+  const handleSaveEnvVarsList = async (updatedList: Array<{ key: string; value: string; isSecret: boolean }>) => {
     setIsSavingEnv(true);
     setEnvSaveStatus('idle');
     try {
-      const validEnvs = envVars.filter(e => e.key.trim() !== '');
+      const validEnvs = updatedList.filter(e => e.key.trim() !== '');
       await updateAppMutation.mutateAsync({
         id: app.id,
         data: {
@@ -606,27 +644,125 @@ export function ApplicationDetailPage({
           })),
         },
       });
+      setEnvVars(validEnvs);
       setEnvSaveStatus('saved');
       onRefreshApps();
       setTimeout(() => setEnvSaveStatus('idle'), 3000);
+      return true;
     } catch (err) {
       console.error('Failed saving env vars:', err);
       setEnvSaveStatus('error');
+      return false;
     } finally {
       setIsSavingEnv(false);
     }
   };
 
-  const addEnvVarRow = () => {
-    setEnvVars([...envVars, { key: '', value: '', isSecret: false }]);
+  const handleSaveEnvVars = async () => {
+    await handleSaveEnvVarsList(envVars);
   };
 
-  const removeEnvVarRow = (index: number) => {
-    setEnvVars(envVars.filter((_, i) => i !== index));
+  const handleCopyVar = (text: string, type: 'key' | 'value', id: string) => {
+    navigator.clipboard.writeText(text);
+    if (type === 'key') {
+      setCopiedVarKey(id);
+      setTimeout(() => setCopiedVarKey(null), 2000);
+    } else {
+      setCopiedVarValue(id);
+      setTimeout(() => setCopiedVarValue(null), 2000);
+    }
+  };
+
+  const handleAddVariableSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanKey = newVarKey.trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_');
+    if (!cleanKey) return;
+    const existingIndex = envVars.findIndex(v => v.key.toUpperCase() === cleanKey);
+    let updated: Array<{ key: string; value: string; isSecret: boolean }>;
+    if (existingIndex >= 0) {
+      updated = envVars.map((v, i) =>
+        i === existingIndex ? { key: cleanKey, value: newVarValue, isSecret: newVarIsSecret } : v
+      );
+    } else {
+      updated = [...envVars, { key: cleanKey, value: newVarValue, isSecret: newVarIsSecret }];
+    }
+    const success = await handleSaveEnvVarsList(updated);
+    if (success) {
+      setShowAddVarModal(false);
+      setNewVarKey('');
+      setNewVarValue('');
+      setNewVarIsSecret(false);
+      setShowNewVarValue(false);
+    }
+  };
+
+  const handleDeleteVariable = async (index: number) => {
+    const updated = envVars.filter((_, i) => i !== index);
+    await handleSaveEnvVarsList(updated);
+    setVarDeleteConfirmIndex(null);
   };
 
   const updateEnvVarRow = (index: number, field: 'key' | 'value' | 'isSecret', val: any) => {
     setEnvVars(envVars.map((row, i) => (i === index ? { ...row, [field]: val } : row)));
+  };
+
+  // Rollback Deployment Execution
+  const handleRollback = async () => {
+    if (!rollbackTargetDep) return;
+    setIsRollingBack(true);
+    setRollbackStatus('idle');
+    setRollbackError('');
+    try {
+      await rollbackMutation.mutateAsync({
+        id: app.id,
+        data: {
+          deploymentId: rollbackTargetDep.id,
+        },
+      });
+      setRollbackStatus('success');
+      await refetchDeployments();
+      onRefreshApps();
+      setTimeout(() => {
+        setShowRollbackModal(false);
+        setRollbackStatus('idle');
+        setRollbackTargetDep(null);
+      }, 1200);
+    } catch (err: any) {
+      console.error('Failed to rollback deployment:', err);
+      setRollbackStatus('error');
+      setRollbackError(err?.message || 'Failed to rollback deployment');
+    } finally {
+      setIsRollingBack(false);
+    }
+  };
+
+  // Download Compiled Bundle
+  const handleDownloadBundle = async (depId?: string, versionNum?: number) => {
+    setIsDownloadingBundle(true);
+    try {
+      const targetId = depId || app.activeDeploymentId || '';
+      const url = targetId
+        ? `/api/v1/applications/${app.id}/bundle?deploymentId=${targetId}`
+        : `/api/v1/applications/${app.id}/bundle`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('Failed to fetch bundle');
+      const text = await res.text();
+      const blob = new Blob([text], { type: 'application/javascript' });
+      const downloadUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      const v = versionNum ? `v${versionNum}` : 'bundle';
+      a.download = `${app.name}-${v}.js`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(downloadUrl);
+    } catch (err) {
+      console.error('Download bundle error:', err);
+      alert('Failed to download compiled worker bundle');
+    } finally {
+      setIsDownloadingBundle(false);
+    }
   };
 
   return (
@@ -1170,6 +1306,7 @@ export function ApplicationDetailPage({
                   ) : (
                     deployments.map(dep => {
                       const isSelected = selectedDepId === dep.id;
+                      const isLive = app.activeDeploymentId === dep.id;
                       const d = new Date(dep.createdAt);
                       const dateStr = isNaN(d.getTime()) ? '' : d.toLocaleString();
                       return (
@@ -1182,10 +1319,17 @@ export function ApplicationDetailPage({
                               : 'bg-zinc-950/60 border-zinc-800/80 hover:border-zinc-700 text-zinc-300'
                           }`}
                         >
-                          <div className="flex items-center justify-between">
-                            <span className="font-bold text-xs text-emerald-400 font-mono">
-                              v{dep.buildVersion || 1}
-                            </span>
+                          <div className="flex items-center justify-between gap-1.5 flex-wrap">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-bold text-xs text-emerald-400 font-mono">
+                                v{dep.buildVersion || 1}
+                              </span>
+                              {isLive && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 flex items-center gap-1">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> LIVE
+                                </span>
+                              )}
+                            </div>
                             <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${getDeploymentStatusBadge(dep.status)}`}>
                               {dep.status}
                             </span>
@@ -1193,9 +1337,14 @@ export function ApplicationDetailPage({
                           <div className="text-[11px] text-zinc-400 truncate font-mono">
                             {dep.commitHash ? dep.commitHash.slice(0, 7) : 'HEAD'} - {dep.commitMessage || 'Manual deployment'}
                           </div>
-                          <div className="flex items-center gap-1.5 text-[10px] text-zinc-500 font-mono">
-                            <Clock className="w-3 h-3 text-zinc-600" />
-                            <span>{dateStr}</span>
+                          <div className="flex items-center justify-between text-[10px] text-zinc-500 font-mono">
+                            <div className="flex items-center gap-1.5">
+                              <Clock className="w-3 h-3 text-zinc-600" />
+                              <span>{dateStr}</span>
+                            </div>
+                            {dep.bundleSize != null && dep.bundleSize > 0 && (
+                              <span>{((dep.bundleSize) / 1024).toFixed(1)} KB</span>
+                            )}
                           </div>
                         </div>
                       );
@@ -1205,20 +1354,59 @@ export function ApplicationDetailPage({
 
                 {/* Build Logs Console (Right Column) */}
                 <div className="col-span-8 flex flex-col space-y-2 min-h-0">
-                  <div className="flex items-center justify-between text-xs text-zinc-400">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-400 pb-1">
                     <div className="flex items-center gap-2.5">
                       <span className="font-semibold uppercase tracking-wider">
                         {selectedDep ? `Build Output (v${selectedDep.buildVersion || 1})` : 'Build Output'}
                       </span>
                       {selectedDep && (
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${getDeploymentStatusBadge(selectedDep.status)}`}>
-                          {selectedDep.status}
-                        </span>
+                        selectedDep.id === app.activeDeploymentId ? (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> CURRENTLY ACTIVE
+                          </span>
+                        ) : (
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${getDeploymentStatusBadge(selectedDep.status)}`}>
+                            {selectedDep.status}
+                          </span>
+                        )
                       )}
                     </div>
-                    {selectedDepId && (
-                      <span className="font-mono text-[10px] text-zinc-500">{selectedDepId}</span>
-                    )}
+
+                    <div className="flex items-center gap-2">
+                      {/* Download Bundle button */}
+                      {selectedDep && (
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadBundle(selectedDep.id, selectedDep.buildVersion)}
+                          disabled={isDownloadingBundle}
+                          className="px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-700/80 text-xs font-semibold flex items-center gap-1.5 transition"
+                          title="Download compiled worker bundle"
+                        >
+                          <Download className="w-3.5 h-3.5 text-zinc-400" />
+                          <span>{isDownloadingBundle ? 'Downloading...' : 'Download Bundle'}</span>
+                        </button>
+                      )}
+
+                      {/* Rollback button if not active and not failed */}
+                      {selectedDep && selectedDep.id !== app.activeDeploymentId && selectedDep.status !== 'failed' && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRollbackTargetDep(selectedDep);
+                            setShowRollbackModal(true);
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/40 text-xs font-semibold flex items-center gap-1.5 transition"
+                          title="Rollback live isolate traffic to this deployment version"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Rollback to v{selectedDep.buildVersion || 1}</span>
+                        </button>
+                      )}
+
+                      {selectedDepId && (
+                        <span className="font-mono text-[10px] text-zinc-500 hidden sm:inline">{selectedDepId.slice(0, 8)}...</span>
+                      )}
+                    </div>
                   </div>
 
                   <div className="flex-1 bg-black/90 rounded-xl p-5 font-mono text-xs text-zinc-300 overflow-y-auto border border-zinc-900 space-y-2 shadow-inner min-h-[400px]">
@@ -2410,97 +2598,371 @@ export function ApplicationDetailPage({
               </div>
             </form>
 
-            {/* Environment Variables Editor */}
-            <div className="p-5 rounded-xl border border-zinc-800 bg-zinc-900/20 space-y-4">
-              <div className="flex items-center justify-between">
+            {/* Cloudflare-Style Variables & Secrets Suite */}
+            <div className="p-6 rounded-xl border border-zinc-800 bg-zinc-900/30 space-y-5">
+              {/* Header & Controls */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-800/80 pb-4">
                 <div>
-                  <h3 className="text-sm font-semibold text-zinc-200">Environment Variables</h3>
-                  <p className="text-xs text-zinc-400">
-                    Passed to the Cloudflare Worker <code className="text-emerald-400 font-mono">env</code> parameter.
+                  <div className="flex items-center gap-2.5">
+                    <h3 className="text-sm font-bold text-zinc-100 flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                      Variables & Secrets
+                    </h3>
+                    <span className="text-[11px] px-2 py-0.5 rounded-full font-medium bg-zinc-800 text-zinc-300 border border-zinc-700">
+                      {envVars.length} total
+                    </span>
+                    {envVars.filter(v => v.isSecret).length > 0 && (
+                      <span className="text-[11px] px-2 py-0.5 rounded-full font-medium bg-amber-950/80 text-amber-400 border border-amber-800/80 flex items-center gap-1">
+                        <Lock className="w-3 h-3" />
+                        {envVars.filter(v => v.isSecret).length} secrets
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-zinc-400 mt-1">
+                    Environment variables and encrypted secrets injected directly into your isolate runtime context via <code className="text-emerald-400 font-mono">env</code> in <code className="text-emerald-400 font-mono">worker.fetch(request, env, ctx)</code>.
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
+
+                <div className="flex items-center gap-2 shrink-0">
                   {envSaveStatus === 'saved' && (
                     <span className="text-xs text-emerald-400 font-semibold flex items-center gap-1">
                       <Check className="w-3.5 h-3.5" /> Variables Saved!
                     </span>
                   )}
+                  {envSaveStatus === 'error' && (
+                    <span className="text-xs text-rose-400 font-semibold">Failed to save variables</span>
+                  )}
                   <button
                     type="button"
-                    onClick={addEnvVarRow}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 text-xs font-medium transition"
+                    onClick={() => {
+                      setNewVarKey('');
+                      setNewVarValue('');
+                      setNewVarIsSecret(false);
+                      setShowNewVarValue(false);
+                      setShowAddVarModal(true);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-xs font-bold transition shadow-xs"
                   >
-                    <Plus className="w-3.5 h-3.5" /> Add Variable
+                    <Plus className="w-3.5 h-3.5" />
+                    Add Variable or Secret
                   </button>
                   <button
                     type="button"
                     onClick={handleSaveEnvVars}
                     disabled={isSavingEnv}
-                    className="px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-zinc-950 text-xs font-semibold transition"
+                    className="px-3 py-1.5 rounded-lg border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-zinc-200 text-xs font-medium transition"
                   >
-                    {isSavingEnv ? 'Saving...' : 'Save Variables'}
+                    {isSavingEnv ? 'Saving...' : 'Save Changes'}
                   </button>
                 </div>
               </div>
 
+              {/* Search & Type Filter Bar */}
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="relative flex-1 max-w-sm">
+                  <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={varSearchTerm}
+                    onChange={e => setVarSearchTerm(e.target.value)}
+                    placeholder="Filter by variable name..."
+                    className="w-full pl-8 pr-3 py-1.5 bg-black/60 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-500 text-xs focus:outline-none focus:border-emerald-500"
+                  />
+                  {varSearchTerm && (
+                    <button
+                      type="button"
+                      onClick={() => setVarSearchTerm('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-200"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1 bg-black/60 p-0.5 rounded-lg border border-zinc-800 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => setVarTypeFilter('ALL')}
+                    className={`px-2.5 py-1 rounded-md font-semibold transition ${
+                      varTypeFilter === 'ALL'
+                        ? 'bg-zinc-800 text-zinc-100 shadow-xs'
+                        : 'text-zinc-400 hover:text-zinc-200'
+                    }`}
+                  >
+                    All ({envVars.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVarTypeFilter('PLAIN')}
+                    className={`px-2.5 py-1 rounded-md font-semibold transition ${
+                      varTypeFilter === 'PLAIN'
+                        ? 'bg-zinc-800 text-zinc-100 shadow-xs'
+                        : 'text-zinc-400 hover:text-zinc-200'
+                    }`}
+                  >
+                    Plaintext ({envVars.filter(v => !v.isSecret).length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVarTypeFilter('SECRET')}
+                    className={`px-2.5 py-1 rounded-md font-semibold transition flex items-center gap-1 ${
+                      varTypeFilter === 'SECRET'
+                        ? 'bg-amber-950/80 text-amber-300 border border-amber-800/80 shadow-xs'
+                        : 'text-zinc-400 hover:text-zinc-200'
+                    }`}
+                  >
+                    <Lock className="w-3 h-3" />
+                    Secrets ({envVars.filter(v => v.isSecret).length})
+                  </button>
+                </div>
+              </div>
+
+              {/* Table or Empty State */}
               {envVars.length === 0 ? (
-                <div className="p-6 rounded-xl border border-dashed border-zinc-800 text-center text-xs text-zinc-500">
-                  No environment variables configured.
+                <div className="p-8 rounded-xl border border-dashed border-zinc-800 text-center space-y-3">
+                  <div className="w-10 h-10 rounded-full bg-zinc-800/60 border border-zinc-700/60 flex items-center justify-center mx-auto text-zinc-400">
+                    <ShieldCheck className="w-5 h-5" />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="text-xs font-bold text-zinc-200">No environment variables or secrets configured</div>
+                    <p className="text-[11px] text-zinc-500 max-w-md mx-auto">
+                      Variables and secrets configure your isolate runtime with API keys, database URLs, and service tokens.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewVarKey('');
+                      setNewVarValue('');
+                      setNewVarIsSecret(false);
+                      setShowNewVarValue(false);
+                      setShowAddVarModal(true);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-semibold transition"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Add your first variable
+                  </button>
                 </div>
               ) : (
-                <div className="space-y-2">
-                  {envVars.map((e, idx) => {
-                    const isSecretRevealed = showSecretValues[idx];
-                    return (
-                      <div key={idx} className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          placeholder="KEY"
-                          value={e.key}
-                          onChange={ev => updateEnvVarRow(idx, 'key', ev.target.value)}
-                          className="w-1/3 bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-xs font-mono text-zinc-200 outline-none focus:border-emerald-500 uppercase"
-                        />
-                        <div className="relative flex-1">
-                          <input
-                            type={e.isSecret && !isSecretRevealed ? 'password' : 'text'}
-                            placeholder="VALUE"
-                            value={e.value}
-                            onChange={ev => updateEnvVarRow(idx, 'value', ev.target.value)}
-                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 pr-8 text-xs font-mono text-zinc-200 outline-none focus:border-emerald-500"
-                          />
-                          {e.isSecret && (
-                            <button
-                              type="button"
-                              onClick={() => setShowSecretValues({ ...showSecretValues, [idx]: !isSecretRevealed })}
-                              className="absolute right-2 top-2.5 text-zinc-500 hover:text-zinc-300"
-                            >
-                              {isSecretRevealed ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                            </button>
-                          )}
-                        </div>
+                <div className="overflow-hidden border border-zinc-800/80 rounded-xl bg-black/40">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-zinc-800 bg-zinc-950/80 text-zinc-400 font-semibold uppercase tracking-wider text-[11px]">
+                        <th className="py-2.5 px-4">Variable Name</th>
+                        <th className="py-2.5 px-4 w-36">Type</th>
+                        <th className="py-2.5 px-4">Value</th>
+                        <th className="py-2.5 px-4 w-28 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-800/60">
+                      {envVars
+                        .map((e, originalIndex) => ({ ...e, originalIndex }))
+                        .filter(e => {
+                          if (varTypeFilter === 'PLAIN' && e.isSecret) return false;
+                          if (varTypeFilter === 'SECRET' && !e.isSecret) return false;
+                          if (varSearchTerm.trim()) {
+                            const q = varSearchTerm.toLowerCase().trim();
+                            return e.key.toLowerCase().includes(q) || (!e.isSecret && e.value.toLowerCase().includes(q));
+                          }
+                          return true;
+                        })
+                        .map((e) => {
+                          const idx = e.originalIndex;
+                          const isRevealed = showSecretValues[idx];
+                          const isEditing = editingVarIndex === idx;
+                          const isConfirmingDelete = varDeleteConfirmIndex === idx;
 
-                        <label className="flex items-center gap-1.5 text-xs text-zinc-400 select-none cursor-pointer px-2">
-                          <input
-                            type="checkbox"
-                            checked={e.isSecret}
-                            onChange={ev => updateEnvVarRow(idx, 'isSecret', ev.target.checked)}
-                            className="rounded bg-zinc-950 border-zinc-800 text-emerald-500 focus:ring-0"
-                          />
-                          <span>Secret</span>
-                        </label>
+                          if (isEditing) {
+                            return (
+                              <tr key={idx} className="bg-zinc-900/60">
+                                <td className="py-2 px-4">
+                                  <input
+                                    type="text"
+                                    value={e.key}
+                                    onChange={ev => updateEnvVarRow(idx, 'key', ev.target.value.toUpperCase())}
+                                    className="w-full bg-zinc-950 border border-zinc-700 rounded-lg p-1.5 text-xs font-mono text-zinc-100 uppercase outline-none focus:border-emerald-500"
+                                  />
+                                </td>
+                                <td className="py-2 px-4">
+                                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                                    <input
+                                      type="checkbox"
+                                      checked={e.isSecret}
+                                      onChange={ev => updateEnvVarRow(idx, 'isSecret', ev.target.checked)}
+                                      className="rounded bg-zinc-950 border-zinc-700 text-amber-500 focus:ring-0"
+                                    />
+                                    <span className="text-xs text-zinc-300">Secret</span>
+                                  </label>
+                                </td>
+                                <td className="py-2 px-4">
+                                  <input
+                                    type={e.isSecret && !isRevealed ? 'password' : 'text'}
+                                    value={e.value}
+                                    onChange={ev => updateEnvVarRow(idx, 'value', ev.target.value)}
+                                    className="w-full bg-zinc-950 border border-zinc-700 rounded-lg p-1.5 text-xs font-mono text-zinc-100 outline-none focus:border-emerald-500"
+                                  />
+                                </td>
+                                <td className="py-2 px-4 text-right">
+                                  <div className="flex items-center justify-end gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingVarIndex(null);
+                                        handleSaveEnvVars();
+                                      }}
+                                      className="p-1.5 rounded-md bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 transition"
+                                      title="Save row"
+                                    >
+                                      <Check className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingVarIndex(null)}
+                                      className="p-1.5 rounded-md bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition"
+                                      title="Done"
+                                    >
+                                      <X className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          }
 
-                        <button
-                          type="button"
-                          onClick={() => removeEnvVarRow(idx)}
-                          className="p-2 rounded-lg text-zinc-500 hover:text-rose-400 hover:bg-rose-950/40 transition"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    );
-                  })}
+                          return (
+                            <tr key={idx} className="hover:bg-zinc-900/40 transition">
+                              <td className="py-3 px-4">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-mono font-bold text-xs text-zinc-100 bg-zinc-800/80 px-2 py-1 rounded border border-zinc-700/60">
+                                    {e.key}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCopyVar(e.key, 'key', `k-${idx}`)}
+                                    className="text-zinc-500 hover:text-zinc-300 transition"
+                                    title="Copy variable name"
+                                  >
+                                    {copiedVarKey === `k-${idx}` ? (
+                                      <Check className="w-3 h-3 text-emerald-400" />
+                                    ) : (
+                                      <Copy className="w-3 h-3" />
+                                    )}
+                                  </button>
+                                </div>
+                              </td>
+
+                              <td className="py-3 px-4">
+                                {e.isSecret ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-950/80 text-amber-400 border border-amber-800/80">
+                                    <Lock className="w-2.5 h-2.5" />
+                                    Secret
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-zinc-800/80 text-zinc-300 border border-zinc-700/60">
+                                    <Code className="w-2.5 h-2.5 text-zinc-400" />
+                                    Plaintext
+                                  </span>
+                                )}
+                              </td>
+
+                              <td className="py-3 px-4">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-mono text-xs text-zinc-300 truncate max-w-sm">
+                                    {e.isSecret && !isRevealed ? '••••••••••••••••' : e.value || '<empty>'}
+                                  </span>
+                                  {e.isSecret && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setShowSecretValues({ ...showSecretValues, [idx]: !isRevealed })}
+                                      className="p-1 rounded text-zinc-500 hover:text-zinc-300 transition"
+                                      title={isRevealed ? 'Mask secret' : 'Reveal secret'}
+                                    >
+                                      {isRevealed ? <EyeOff className="w-3.5 h-3.5 text-amber-400" /> : <Eye className="w-3.5 h-3.5" />}
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCopyVar(e.value, 'value', `v-${idx}`)}
+                                    className="p-1 rounded text-zinc-500 hover:text-zinc-300 transition"
+                                    title="Copy value"
+                                  >
+                                    {copiedVarValue === `v-${idx}` ? (
+                                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                    ) : (
+                                      <Copy className="w-3.5 h-3.5" />
+                                    )}
+                                  </button>
+                                </div>
+                              </td>
+
+                              <td className="py-3 px-4 text-right">
+                                {isConfirmingDelete ? (
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    <span className="text-[10px] text-rose-400 font-semibold">Delete?</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteVariable(idx)}
+                                      className="px-2 py-0.5 rounded bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-bold transition"
+                                    >
+                                      Yes
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setVarDeleteConfirmIndex(null)}
+                                      className="px-1.5 py-0.5 rounded text-zinc-400 hover:text-zinc-200 text-[11px]"
+                                    >
+                                      No
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center justify-end gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingVarIndex(idx)}
+                                      className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition"
+                                      title="Edit variable"
+                                    >
+                                      <Edit2 className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setVarDeleteConfirmIndex(idx)}
+                                      className="p-1.5 rounded-lg text-zinc-400 hover:text-rose-400 hover:bg-rose-950/40 transition"
+                                      title="Delete variable"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
                 </div>
               )}
+
+              {/* Developer Code Snippet Guide */}
+              <div className="p-4 rounded-xl bg-black/60 border border-zinc-800/80 space-y-2 text-xs">
+                <div className="flex items-center justify-between text-zinc-400">
+                  <span className="font-semibold text-zinc-300 flex items-center gap-1.5">
+                    <Code className="w-3.5 h-3.5 text-emerald-400" />
+                    Runtime Access in Worker Code
+                  </span>
+                  <span className="text-[11px] text-zinc-500 font-mono">fetch(request, env, ctx)</span>
+                </div>
+                <pre className="font-mono text-[11px] text-zinc-300 bg-zinc-950 p-3 rounded-lg border border-zinc-800/80 overflow-x-auto">
+{`export default {
+  async fetch(request, env, ctx) {
+    const apiKey = env.API_KEY;         // Secrets & variables injected via env
+    const dbUrl = env.DATABASE_URL;
+    return new Response(\`Loaded API key: \${apiKey ? 'present' : 'none'}\`);
+  }
+};`}
+                </pre>
+              </div>
             </div>
 
             {/* Danger Zone: Delete Application */}
@@ -3085,6 +3547,240 @@ export function ApplicationDetailPage({
                   className="px-5 py-2 rounded-lg text-xs font-bold bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white transition shadow-sm"
                 >
                   {isCreatingCron ? 'Scheduling...' : 'Create Trigger'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Rollback Deployment Confirmation Modal */}
+      {showRollbackModal && rollbackTargetDep && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-zinc-900 border border-amber-900/60 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center gap-3 text-amber-400">
+              <div className="p-2.5 rounded-full bg-amber-950/80 border border-amber-800/80">
+                <RotateCcw className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-zinc-100">Rollback Deployment</h3>
+                <p className="text-xs text-zinc-400">Restore previous stable worker release</p>
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-500 font-medium">Target Version:</span>
+                <span className="font-bold text-emerald-400 font-mono text-sm">v{rollbackTargetDep.buildVersion || 1}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-500 font-medium">Commit:</span>
+                <span className="font-mono text-zinc-300">{rollbackTargetDep.commitHash?.slice(0, 7) || 'HEAD'}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-500 font-medium">Message:</span>
+                <span className="text-zinc-300 truncate max-w-[220px]">{rollbackTargetDep.commitMessage || 'Manual deployment'}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-500 font-medium">Created:</span>
+                <span className="text-zinc-400">{new Date(rollbackTargetDep.createdAt).toLocaleString()}</span>
+              </div>
+            </div>
+
+            <p className="text-xs text-zinc-400 leading-relaxed">
+              This will immediately re-point live HTTP isolate traffic for <code className="text-emerald-400 font-mono">{app.subdomain}.localhost:8000</code> to this compiled bundle. Zero downtime, no rebuild required.
+            </p>
+
+            {rollbackStatus === 'success' && (
+              <div className="p-3 rounded-lg bg-emerald-950/80 border border-emerald-800 text-emerald-300 text-xs font-semibold flex items-center gap-2">
+                <Check className="w-4 h-4 text-emerald-400" />
+                <span>Successfully rolled back to v{rollbackTargetDep.buildVersion || 1}!</span>
+              </div>
+            )}
+
+            {rollbackStatus === 'error' && (
+              <div className="p-3 rounded-lg bg-rose-950/80 border border-rose-800 text-rose-300 text-xs font-semibold flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-400" />
+                <span>{rollbackError || 'Failed to rollback deployment'}</span>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-zinc-800">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowRollbackModal(false);
+                  setRollbackTargetDep(null);
+                  setRollbackStatus('idle');
+                }}
+                className="px-4 py-2 rounded-lg text-xs font-semibold text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleRollback}
+                disabled={isRollingBack || rollbackStatus === 'success'}
+                className="px-5 py-2 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-zinc-950 transition shadow-sm flex items-center gap-1.5"
+              >
+                {isRollingBack ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Rolling back...</span>
+                  </>
+                ) : (
+                  <>
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Confirm Rollback</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Variable or Secret Modal */}
+      {showAddVarModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-lg bg-emerald-950/80 border border-emerald-800 text-emerald-400">
+                  <Lock className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-zinc-100">Add Environment Variable or Secret</h3>
+                  <p className="text-xs text-zinc-400">Injected into isolate runtime via <code className="text-emerald-400 font-mono">env</code></p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAddVarModal(false);
+                  setNewVarKey('');
+                  setNewVarValue('');
+                  setNewVarIsSecret(false);
+                }}
+                className="text-zinc-500 hover:text-zinc-300"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddVariableSubmit} className="space-y-4">
+              {/* Key Input */}
+              <div>
+                <label className="text-xs font-semibold text-zinc-300 block mb-1">
+                  Variable Name <span className="text-rose-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. API_KEY, DATABASE_URL, STRIPE_SECRET"
+                  value={newVarKey}
+                  onChange={e => setNewVarKey(e.target.value.toUpperCase())}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-xs font-mono text-zinc-200 outline-none focus:border-emerald-500 uppercase"
+                />
+                <span className="text-[11px] text-zinc-500 mt-1 block">
+                  Must contain only uppercase alphanumeric characters and underscores.
+                </span>
+              </div>
+
+              {/* Type Selection */}
+              <div>
+                <label className="text-xs font-semibold text-zinc-300 block mb-1.5">Variable Type</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div
+                    onClick={() => setNewVarIsSecret(false)}
+                    className={`p-3 rounded-xl border cursor-pointer transition flex items-start gap-2.5 ${
+                      !newVarIsSecret
+                        ? 'bg-zinc-800/80 border-emerald-500 text-zinc-100'
+                        : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:border-zinc-700'
+                    }`}
+                  >
+                    <Code className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                    <div>
+                      <div className="text-xs font-bold">Plaintext Variable</div>
+                      <div className="text-[10px] text-zinc-400 mt-0.5">Visible in dashboard and logs</div>
+                    </div>
+                  </div>
+
+                  <div
+                    onClick={() => setNewVarIsSecret(true)}
+                    className={`p-3 rounded-xl border cursor-pointer transition flex items-start gap-2.5 ${
+                      newVarIsSecret
+                        ? 'bg-zinc-800/80 border-amber-500 text-zinc-100'
+                        : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:border-zinc-700'
+                    }`}
+                  >
+                    <Lock className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <div>
+                      <div className="text-xs font-bold">Encrypted Secret</div>
+                      <div className="text-[10px] text-zinc-400 mt-0.5">Masked value for credentials & keys</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Value Input */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-semibold text-zinc-300">
+                    Value <span className="text-rose-400">*</span>
+                  </label>
+                  {newVarIsSecret && (
+                    <button
+                      type="button"
+                      onClick={() => setShowNewVarValue(!showNewVarValue)}
+                      className="text-[11px] text-zinc-400 hover:text-zinc-200 flex items-center gap-1"
+                    >
+                      {showNewVarValue ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                      <span>{showNewVarValue ? 'Hide' : 'Reveal'}</span>
+                    </button>
+                  )}
+                </div>
+                <div className="relative">
+                  <input
+                    type={newVarIsSecret && !showNewVarValue ? 'password' : 'text'}
+                    required
+                    placeholder={newVarIsSecret ? '••••••••••••••••' : 'Value string'}
+                    value={newVarValue}
+                    onChange={e => setNewVarValue(e.target.value)}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-xs font-mono text-zinc-200 outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddVarModal(false);
+                    setNewVarKey('');
+                    setNewVarValue('');
+                    setNewVarIsSecret(false);
+                  }}
+                  className="px-4 py-2 rounded-lg text-xs font-semibold text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingEnv || !newVarKey.trim()}
+                  className="px-5 py-2 rounded-lg text-xs font-bold bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-zinc-950 transition shadow-sm flex items-center gap-1.5"
+                >
+                  {isSavingEnv ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-3.5 h-3.5" />
+                      <span>Save Variable</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>
