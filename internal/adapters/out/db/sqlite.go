@@ -87,5 +87,16 @@ func OpenSQLite(dsn string) (*sql.DB, error) {
 		}
 	}
 
+	// Ensure that only each application's active_deployment_id retains 'active' status.
+	// Any older deployments previously marked 'active' are transitioned to 'superseded'.
+	_, _ = db.ExecContext(context.Background(), `
+		UPDATE deployments
+		SET status = 'superseded'
+		WHERE status = 'active'
+		  AND id NOT IN (
+		    SELECT active_deployment_id FROM applications WHERE active_deployment_id IS NOT NULL AND active_deployment_id != ''
+		  )
+	`)
+
 	return db, nil
 }

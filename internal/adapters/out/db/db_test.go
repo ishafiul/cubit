@@ -160,5 +160,39 @@ func TestSQLiteRepositories(t *testing.T) {
 				}
 			})
 		})
+
+		t.Run("When an application activates a newer deployment", func(t *testing.T) {
+			depOld, _ := domain.NewDeploymentWithVersion("d-act-1", "a-100", "h-1", "Dep 1", 1)
+			_ = depOld.StartBuilding()
+			_ = depOld.StartDeploying(100)
+			_ = depOld.MarkActive()
+			_ = depRepo.Save(ctx, depOld)
+
+			depNew, _ := domain.NewDeploymentWithVersion("d-act-2", "a-100", "h-2", "Dep 2", 2)
+			_ = depNew.StartBuilding()
+			_ = depNew.StartDeploying(200)
+			_ = depNew.MarkActive()
+			_ = depRepo.Save(ctx, depNew)
+
+			app, _ := appRepo.GetByID(ctx, "a-100")
+			app.SetActiveDeployment(depNew.ID)
+			_ = appRepo.Update(ctx, app)
+
+			// Mark old as superseded
+			depOld.MarkSuperseded()
+			_ = depRepo.Update(ctx, depOld)
+
+			t.Run("Then only the latest deployment has active status and older has superseded", func(t *testing.T) {
+				savedOld, _ := depRepo.GetByID(ctx, depOld.ID)
+				savedNew, _ := depRepo.GetByID(ctx, depNew.ID)
+
+				if savedOld.Status != domain.DeploymentStatusSuperseded {
+					t.Errorf("expected older deployment status superseded, got %s", savedOld.Status)
+				}
+				if savedNew.Status != domain.DeploymentStatusActive {
+					t.Errorf("expected newer deployment status active, got %s", savedNew.Status)
+				}
+			})
+		})
 	})
 }
