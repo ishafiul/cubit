@@ -118,7 +118,7 @@ func TestClientOperations(t *testing.T) {
 				w.WriteHeader(http.StatusCreated)
 				_ = json.NewEncoder(w).Encode(map[string]interface{}{
 					"id":            "dom-test-1",
-					"domainName":    req["domainName"],
+					"hostname":      req["hostname"],
 					"applicationId": req["applicationId"],
 					"tlsStatus":     "ready",
 				})
@@ -126,7 +126,7 @@ func TestClientOperations(t *testing.T) {
 				_ = json.NewEncoder(w).Encode([]map[string]interface{}{
 					{
 						"id":            "dom-test-1",
-						"domainName":    "api.cubit.local",
+						"hostname":      "api.cubit.local",
 						"applicationId": "app-test-1",
 						"tlsStatus":     "ready",
 					},

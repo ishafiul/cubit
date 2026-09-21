@@ -62,7 +62,7 @@ type ClientBinding struct {
 // ClientDomain represents a domain routing rule.
 type ClientDomain struct {
 	ID            string `json:"id,omitempty"`
-	DomainName    string `json:"domainName"`
+	DomainName    string `json:"hostname"`
 	ApplicationID string `json:"applicationId"`
 	PathPrefix    string `json:"pathPrefix,omitempty"`
 	TLSStatus     string `json:"tlsStatus,omitempty"`
@@ -182,7 +182,7 @@ func (c *CubitClient) DeleteApplication(ctx context.Context, id string) error {
 func (c *CubitClient) CreateDomain(ctx context.Context, domain *ClientDomain) (*ClientDomain, error) {
 	var result ClientDomain
 	req := map[string]interface{}{
-		"domainName":    domain.DomainName,
+		"hostname":      domain.DomainName,
 		"applicationId": domain.ApplicationID,
 		"pathPrefix":    domain.PathPrefix,
 	}
