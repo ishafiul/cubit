@@ -15,28 +15,36 @@ type ContainerSupervisor interface {
 	GracefulRestartCelld(ctx context.Context, node *domain.Node, newVersion string, bucketURL string) error
 }
 
+// RouteSyncer triggers Traefik routing rules refresh across the fleet.
+type RouteSyncer interface {
+	SyncRoutes(ctx context.Context) error
+}
+
 // Service defines fleet node business operations.
 type Service interface {
 	RegisterNode(ctx context.Context, name, ipAddress string, internalPort, workerPort int, celldVersion string) (*domain.Node, error)
 	GetNode(ctx context.Context, id string) (*domain.Node, error)
 	ListNodes(ctx context.Context) ([]*domain.Node, error)
 	DrainNode(ctx context.Context, id string) (*domain.Node, error)
+	ActivateNode(ctx context.Context, id string) (*domain.Node, error)
 	DeleteNode(ctx context.Context, id string) error
 }
 
 // NodeService coordinates fleet nodes.
 type NodeService struct {
-	repo       Repository
-	supervisor ContainerSupervisor
-	bucketURL  string
+	repo        Repository
+	supervisor  ContainerSupervisor
+	routeSyncer RouteSyncer
+	bucketURL   string
 }
 
 // NewService creates a new NodeService.
-func NewService(repo Repository, supervisor ContainerSupervisor, bucketURL string) *NodeService {
+func NewService(repo Repository, supervisor ContainerSupervisor, routeSyncer RouteSyncer, bucketURL string) *NodeService {
 	return &NodeService{
-		repo:       repo,
-		supervisor: supervisor,
-		bucketURL:  bucketURL,
+		repo:        repo,
+		supervisor:  supervisor,
+		routeSyncer: routeSyncer,
+		bucketURL:   bucketURL,
 	}
 }
 
@@ -64,6 +72,10 @@ func (s *NodeService) RegisterNode(ctx context.Context, name, ipAddress string, 
 			_ = s.repo.Update(ctx, node)
 			return nil, fmt.Errorf("failed to start celld on node: %w", err)
 		}
+	}
+
+	if s.routeSyncer != nil {
+		_ = s.routeSyncer.SyncRoutes(ctx)
 	}
 
 	return node, nil
@@ -94,6 +106,32 @@ func (s *NodeService) DrainNode(ctx context.Context, id string) (*domain.Node, e
 		return nil, err
 	}
 
+	if s.routeSyncer != nil {
+		_ = s.routeSyncer.SyncRoutes(ctx)
+	}
+
+	return node, nil
+}
+
+// ActivateNode restores a draining or offline node back to active status.
+func (s *NodeService) ActivateNode(ctx context.Context, id string) (*domain.Node, error) {
+	node, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := node.MarkActive(); err != nil {
+		return nil, err
+	}
+
+	if err := s.repo.Update(ctx, node); err != nil {
+		return nil, err
+	}
+
+	if s.routeSyncer != nil {
+		_ = s.routeSyncer.SyncRoutes(ctx)
+	}
+
 	return node, nil
 }
 
@@ -108,5 +146,9 @@ func (s *NodeService) DeleteNode(ctx context.Context, id string) error {
 		_ = s.supervisor.StopCelld(ctx, node)
 	}
 
-	return s.repo.Delete(ctx, id)
+	err = s.repo.Delete(ctx, id)
+	if err == nil && s.routeSyncer != nil {
+		_ = s.routeSyncer.SyncRoutes(ctx)
+	}
+	return err
 }

@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { DashboardProvider, useDashboard } from './context/DashboardContext';
 import { NewAppModal } from './components/modals/NewAppModal';
+import { AddNodeModal } from './components/modals/AddNodeModal';
 import { UpgradeModal } from './components/modals/UpgradeModal';
 import { NewDomainModal } from './components/modals/NewDomainModal';
 import { ViewCodeModal } from './components/modals/ViewCodeModal';
@@ -68,6 +69,7 @@ function DashboardLayout() {
     domains,
     runtimeStatus,
     setShowNewAppModal,
+    setShowAddNodeModal,
     setShowUpgradeModal,
     setShowNewDomainModal,
     testingApp,
@@ -337,6 +339,17 @@ function DashboardLayout() {
                   Add Domain
                 </button>
               )}
+
+              {pathname === '/nodes' && (
+                <button
+                  type="button"
+                  onClick={() => setShowAddNodeModal(true)}
+                  className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-zinc-950 text-sm font-semibold transition"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Fleet Node
+                </button>
+              )}
             </div>
           </header>
         )}
@@ -349,6 +362,7 @@ function DashboardLayout() {
 
       {/* Global Modals */}
       <NewAppModal />
+      <AddNodeModal />
       <UpgradeModal />
       <NewDomainModal />
       <ViewCodeModal />

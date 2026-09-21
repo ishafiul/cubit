@@ -11,5 +11,6 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		nodes.GET("/:id", h.GetByID)
 		nodes.DELETE("/:id", h.Delete)
 		nodes.POST("/:id/drain", h.Drain)
+		nodes.POST("/:id/activate", h.Activate)
 	}
 }

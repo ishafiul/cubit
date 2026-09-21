@@ -66,7 +66,7 @@ func main() {
 	dockerSupervisor := docker.NewCelldSupervisor("ghcr.io/denoland/celld")
 
 	// 4. Initialize Modular Domain Services
-	nodeService := nodeModule.NewService(nodeRepo, dockerSupervisor, fmt.Sprintf("s3://%s", *bucketName))
+	nodeService := nodeModule.NewService(nodeRepo, dockerSupervisor, routeSyncer, fmt.Sprintf("s3://%s", *bucketName))
 	appService := appModule.NewService(appRepo, storageAdapter, routeSyncer, *bucketName)
 	depService := depModule.NewService(depRepo, appService, storageAdapter, routeSyncer, *bucketName)
 	domainService := domModule.NewService(domRepo, appRepo, routeSyncer)

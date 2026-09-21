@@ -407,4 +407,66 @@ export const useDrainNode = <TError = NotFoundResponse | InternalErrorResponse,
 
       return useMutation(mutationOptions, queryClient);
     }
+    /**
+ * @summary Reactivate a drained node to accept workloads and traffic
+ */
+export const activateNode = (
+    id: string,
+ signal?: AbortSignal
+) => {
+      
+      
+      return customInstance<Node>(
+      {url: `/nodes/${id}/activate`, method: 'POST', signal
+    },
+      );
+    }
+  
+
+
+export const getActivateNodeMutationOptions = <TError = NotFoundResponse | InternalErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof activateNode>>, TError,{id: string}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof activateNode>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['activateNode'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof activateNode>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  activateNode(id,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ActivateNodeMutationResult = NonNullable<Awaited<ReturnType<typeof activateNode>>>
+    
+    export type ActivateNodeMutationError = NotFoundResponse | InternalErrorResponse
+
+    /**
+ * @summary Reactivate a drained node to accept workloads and traffic
+ */
+export const useActivateNode = <TError = NotFoundResponse | InternalErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof activateNode>>, TError,{id: string}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof activateNode>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+
+      const mutationOptions = getActivateNodeMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
     

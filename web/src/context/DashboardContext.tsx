@@ -1,6 +1,12 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import type { Application, Node, Domain } from '../api/model';
-import { useListNodes } from '../api/generated/nodes/nodes';
+import {
+  useListNodes,
+  useCreateNode,
+  useDrainNode,
+  useActivateNode,
+  useDeleteNode,
+} from '../api/generated/nodes/nodes';
 import {
   useListApplications,
   useCreateApplication,
@@ -30,6 +36,8 @@ export interface DashboardContextType {
   // Modals state
   showNewAppModal: boolean;
   setShowNewAppModal: (show: boolean) => void;
+  showAddNodeModal: boolean;
+  setShowAddNodeModal: (show: boolean) => void;
   showUpgradeModal: boolean;
   setShowUpgradeModal: (show: boolean) => void;
   showNewDomainModal: boolean;
@@ -53,6 +61,10 @@ export interface DashboardContextType {
   handleCreateApp: (e: React.FormEvent, data: { name: string; sourceType: 'inline' | 'git'; gitRepo: string; gitBranch: string; inlineCode: string; autoDeploy: boolean }) => Promise<string | undefined>;
   handleUpgradeCelld: (targetVersion: string) => Promise<void>;
   handleCreateDomain: (appId: string, host: string) => Promise<void>;
+  handleCreateNode: (data: { name: string; ipAddress: string; workerPort?: number; internalPort?: number }) => Promise<void>;
+  handleDrainNode: (nodeId: string) => Promise<void>;
+  handleActivateNode: (nodeId: string) => Promise<void>;
+  handleDeleteNode: (nodeId: string) => Promise<void>;
 }
 
 const DashboardContext = createContext<DashboardContextType | null>(null);
@@ -81,9 +93,14 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const deployApplicationMutation = useDeployApplication();
   const upgradeCelldMutation = useUpgradeCelldDaemon();
   const createDomainMutation = useCreateDomain();
+  const createNodeMutation = useCreateNode();
+  const drainNodeMutation = useDrainNode();
+  const activateNodeMutation = useActivateNode();
+  const deleteNodeMutation = useDeleteNode();
 
   // Modals state
   const [showNewAppModal, setShowNewAppModal] = useState(false);
+  const [showAddNodeModal, setShowAddNodeModal] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [showNewDomainModal, setShowNewDomainModal] = useState(false);
   const [testingApp, setTestingApp] = useState<Application | null>(null);
@@ -238,6 +255,34 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     refetchDomains();
   };
 
+  const handleCreateNode = async (data: { name: string; ipAddress: string; workerPort?: number; internalPort?: number }) => {
+    await createNodeMutation.mutateAsync({
+      data: {
+        name: data.name,
+        ipAddress: data.ipAddress,
+        workerPort: data.workerPort || 8080,
+        internalPort: data.internalPort || 8081,
+      },
+    });
+    setShowAddNodeModal(false);
+    refetchNodes();
+  };
+
+  const handleDrainNode = async (nodeId: string) => {
+    await drainNodeMutation.mutateAsync({ id: nodeId });
+    refetchNodes();
+  };
+
+  const handleActivateNode = async (nodeId: string) => {
+    await activateNodeMutation.mutateAsync({ id: nodeId });
+    refetchNodes();
+  };
+
+  const handleDeleteNode = async (nodeId: string) => {
+    await deleteNodeMutation.mutateAsync({ id: nodeId });
+    refetchNodes();
+  };
+
   const value: DashboardContextType = {
     nodes,
     apps,
@@ -250,6 +295,8 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     refetchRuntime,
     showNewAppModal,
     setShowNewAppModal,
+    showAddNodeModal,
+    setShowAddNodeModal,
     showUpgradeModal,
     setShowUpgradeModal,
     showNewDomainModal,
@@ -269,6 +316,10 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     handleCreateApp,
     handleUpgradeCelld,
     handleCreateDomain,
+    handleCreateNode,
+    handleDrainNode,
+    handleActivateNode,
+    handleDeleteNode,
   };
 
   return <DashboardContext.Provider value={value}>{children}</DashboardContext.Provider>;

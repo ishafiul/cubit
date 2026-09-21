@@ -52,15 +52,25 @@ func (m *mockNodeRepo) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+type mockRouteSyncer struct {
+	syncCount int
+}
+
+func (m *mockRouteSyncer) SyncRoutes(ctx context.Context) error {
+	m.syncCount++
+	return nil
+}
+
 func TestNodeService(t *testing.T) {
 	t.Run("Given a fresh NodeService", func(t *testing.T) {
 		repo := newMockNodeRepo()
-		svc := node.NewService(repo, nil, "s3://cubit-fleet")
+		syncer := &mockRouteSyncer{}
+		svc := node.NewService(repo, nil, syncer, "s3://cubit-fleet")
 
 		t.Run("When registering a new fleet node", func(t *testing.T) {
 			n, err := svc.RegisterNode(context.Background(), "baremetal-01", "192.168.1.10", 9090, 8080, "v0.5.1")
 
-			t.Run("Then registration succeeds with online status", func(t *testing.T) {
+			t.Run("Then registration succeeds with active status and routes synced", func(t *testing.T) {
 				if err != nil {
 					t.Fatalf("expected no error, got %v", err)
 				}
@@ -70,10 +80,13 @@ func TestNodeService(t *testing.T) {
 				if n.Status != domain.NodeStatusActive {
 					t.Fatalf("expected active status, got %s", n.Status)
 				}
+				if syncer.syncCount == 0 {
+					t.Errorf("expected route sync to be called")
+				}
 			})
 		})
 
-		t.Run("When draining a fleet node", func(t *testing.T) {
+		t.Run("When draining and reactivating a fleet node", func(t *testing.T) {
 			n, _ := svc.RegisterNode(context.Background(), "baremetal-02", "192.168.1.11", 9090, 8080, "v0.5.1")
 			drained, err := svc.DrainNode(context.Background(), n.ID)
 
@@ -83,6 +96,16 @@ func TestNodeService(t *testing.T) {
 				}
 				if drained.Status != domain.NodeStatusDraining {
 					t.Fatalf("expected status draining, got %s", drained.Status)
+				}
+			})
+
+			t.Run("Then activating restores status to active", func(t *testing.T) {
+				activated, err := svc.ActivateNode(context.Background(), n.ID)
+				if err != nil {
+					t.Fatalf("expected no error, got %v", err)
+				}
+				if activated.Status != domain.NodeStatusActive {
+					t.Fatalf("expected status active, got %s", activated.Status)
 				}
 			})
 		})

@@ -141,6 +141,17 @@ func (h *Handler) Drain(c *gin.Context) {
 	c.JSON(http.StatusOK, toNodeResponse(node))
 }
 
+// Activate POST /nodes/:id/activate
+func (h *Handler) Activate(c *gin.Context) {
+	id := c.Param("id")
+	node, err := h.service.ActivateNode(c.Request.Context(), id)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toNodeResponse(node))
+}
+
 func respondError(c *gin.Context, err error) {
 	var domErr *domain.DomainError
 	if errors.As(err, &domErr) {

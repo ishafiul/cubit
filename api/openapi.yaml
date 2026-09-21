@@ -114,6 +114,31 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /nodes/{id}/activate:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      summary: Reactivate a drained node to accept workloads and traffic
+      operationId: activateNode
+      tags:
+        - nodes
+      responses:
+        '200':
+          description: Node activated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Node'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /applications:
     get:
       summary: List all applications

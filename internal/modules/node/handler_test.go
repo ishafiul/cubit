@@ -26,8 +26,11 @@ func setupNodeRouter(svc node.Service) *gin.Engine {
 func TestNodeHandler(t *testing.T) {
 	t.Run("Given a node HTTP handler with an empty repository", func(t *testing.T) {
 		repo := newMockNodeRepo()
-		svc := node.NewService(repo, nil, "s3://cubit-fleet")
+		syncer := &mockRouteSyncer{}
+		svc := node.NewService(repo, nil, syncer, "s3://cubit-fleet")
 		router := setupNodeRouter(svc)
+
+		var createdID string
 
 		t.Run("When registering a node via POST /api/v1/nodes", func(t *testing.T) {
 			body := map[string]interface{}{
@@ -51,6 +54,11 @@ func TestNodeHandler(t *testing.T) {
 				if resp["name"] != "edge-node-1" {
 					t.Fatalf("expected name edge-node-1, got %v", resp["name"])
 				}
+				if id, ok := resp["id"].(string); ok {
+					createdID = id
+				} else {
+					t.Fatalf("expected id in response, got %v", resp["id"])
+				}
 			})
 		})
 
@@ -67,6 +75,55 @@ func TestNodeHandler(t *testing.T) {
 				_ = json.Unmarshal(w.Body.Bytes(), &list)
 				if len(list) != 1 {
 					t.Fatalf("expected 1 node, got %d", len(list))
+				}
+			})
+		})
+
+		t.Run("When draining a node via POST /api/v1/nodes/:id/drain", func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(http.MethodPost, "/api/v1/nodes/"+createdID+"/drain", nil)
+			router.ServeHTTP(w, req)
+
+			t.Run("Then it returns 200 OK with status draining", func(t *testing.T) {
+				if w.Code != http.StatusOK {
+					t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+				}
+				var resp map[string]interface{}
+				_ = json.Unmarshal(w.Body.Bytes(), &resp)
+				if resp["status"] != "draining" {
+					t.Fatalf("expected status draining, got %v", resp["status"])
+				}
+			})
+		})
+
+		t.Run("When activating a node via POST /api/v1/nodes/:id/activate", func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(http.MethodPost, "/api/v1/nodes/"+createdID+"/activate", nil)
+			router.ServeHTTP(w, req)
+
+			t.Run("Then it returns 200 OK with status active", func(t *testing.T) {
+				if w.Code != http.StatusOK {
+					t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+				}
+				var resp map[string]interface{}
+				_ = json.Unmarshal(w.Body.Bytes(), &resp)
+				if resp["status"] != "active" {
+					t.Fatalf("expected status active, got %v", resp["status"])
+				}
+			})
+		})
+
+		t.Run("When deleting a node via DELETE /api/v1/nodes/:id", func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(http.MethodDelete, "/api/v1/nodes/"+createdID, nil)
+			router.ServeHTTP(w, req)
+
+			t.Run("Then it returns 204 No Content and route syncer is triggered", func(t *testing.T) {
+				if w.Code != http.StatusNoContent {
+					t.Fatalf("expected status 204, got %d: %s", w.Code, w.Body.String())
+				}
+				if syncer.syncCount != 4 {
+					t.Fatalf("expected 4 syncs (create, drain, activate, delete), got %d", syncer.syncCount)
 				}
 			})
 		})
