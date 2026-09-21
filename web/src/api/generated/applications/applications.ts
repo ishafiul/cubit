@@ -26,6 +26,7 @@ import type {
 
 import type {
   Application,
+  ApplicationMetrics,
   BadRequestResponse,
   ConflictResponse,
   CreateApplicationRequest,
@@ -413,6 +414,97 @@ export const useDeleteApplication = <TError = NotFoundResponse | InternalErrorRe
       return useMutation(mutationOptions, queryClient);
     }
     /**
+ * @summary Get execution telemetry metrics for an application
+ */
+export const getApplicationMetrics = (
+    id: string,
+ signal?: AbortSignal
+) => {
+      
+      
+      return customInstance<ApplicationMetrics>(
+      {url: `/applications/${id}/metrics`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetApplicationMetricsQueryKey = (id?: string,) => {
+    return [
+    `/applications/${id}/metrics`
+    ] as const;
+    }
+
+    
+export const getGetApplicationMetricsQueryOptions = <TData = Awaited<ReturnType<typeof getApplicationMetrics>>, TError = NotFoundResponse | InternalErrorResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApplicationMetrics>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetApplicationMetricsQueryKey(id);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getApplicationMetrics>>> = ({ signal }) => getApplicationMetrics(id, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getApplicationMetrics>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetApplicationMetricsQueryResult = NonNullable<Awaited<ReturnType<typeof getApplicationMetrics>>>
+export type GetApplicationMetricsQueryError = NotFoundResponse | InternalErrorResponse
+
+
+export function useGetApplicationMetrics<TData = Awaited<ReturnType<typeof getApplicationMetrics>>, TError = NotFoundResponse | InternalErrorResponse>(
+ id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApplicationMetrics>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getApplicationMetrics>>,
+          TError,
+          Awaited<ReturnType<typeof getApplicationMetrics>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetApplicationMetrics<TData = Awaited<ReturnType<typeof getApplicationMetrics>>, TError = NotFoundResponse | InternalErrorResponse>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApplicationMetrics>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getApplicationMetrics>>,
+          TError,
+          Awaited<ReturnType<typeof getApplicationMetrics>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetApplicationMetrics<TData = Awaited<ReturnType<typeof getApplicationMetrics>>, TError = NotFoundResponse | InternalErrorResponse>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApplicationMetrics>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Get execution telemetry metrics for an application
+ */
+
+export function useGetApplicationMetrics<TData = Awaited<ReturnType<typeof getApplicationMetrics>>, TError = NotFoundResponse | InternalErrorResponse>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApplicationMetrics>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetApplicationMetricsQueryOptions(id,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+/**
  * @summary Send a test HTTP request to the active deployment of an application
  */
 export const testApplication = (

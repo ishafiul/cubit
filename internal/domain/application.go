@@ -50,6 +50,7 @@ const (
 	BindingTypeR2       BindingType = "r2_bucket"
 	BindingTypeQueue    BindingType = "queue"
 	BindingTypeWorkflow BindingType = "workflow"
+	BindingTypeService  BindingType = "service"
 )
 
 // EnvironmentVariable represents a key-value pair injected into a Worker isolate.
@@ -59,11 +60,32 @@ type EnvironmentVariable struct {
 	IsSecret bool
 }
 
-// ResourceBinding represents a cloud binding to a Worker (e.g. KV, R2, D1).
+// ResourceBinding represents a cloud binding to a Worker (e.g. KV, R2, D1, Service RPC).
 type ResourceBinding struct {
 	Type       BindingType
 	Name       string
 	ResourceID string
+}
+
+// ApplicationMetrics encapsulates real-time worker execution telemetry.
+type ApplicationMetrics struct {
+	TotalRequests int64   `json:"totalRequests"`
+	Status2xx     int64   `json:"status2xx"`
+	Status4xx     int64   `json:"status4xx"`
+	Status5xx     int64   `json:"status5xx"`
+	AvgDurationMs float64 `json:"avgDurationMs"`
+	P99DurationMs float64 `json:"p99DurationMs"`
+}
+
+// RequestLogEvent represents a live streaming event from a worker isolate request.
+type RequestLogEvent struct {
+	Timestamp  time.Time `json:"timestamp"`
+	Method     string    `json:"method"`
+	Path       string    `json:"path"`
+	StatusCode int       `json:"statusCode"`
+	DurationMs float64   `json:"durationMs"`
+	ClientIP   string    `json:"clientIp"`
+	Message    string    `json:"message"`
 }
 
 // Application represents a Cloudflare Worker application running on the celld fleet.
@@ -80,6 +102,10 @@ type Application struct {
 	EnvVars            []EnvironmentVariable
 	Bindings           []ResourceBinding
 	ActiveDeploymentID string
+	CompatibilityDate  string
+	CompatibilityFlags []string
+	MemoryLimitMB      int
+	MaxDurationMs      int
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 }
@@ -154,19 +180,23 @@ func NewApplicationWithSource(
 
 	now := time.Now().UTC()
 	return &Application{
-		ID:         id,
-		Name:       name,
-		SourceType: sourceType,
-		Subdomain:  SanitizeSubdomain(name),
-		GitRepo:    gitRepo,
-		Branch:     branch,
-		InlineCode: inlineCode,
-		AutoDeploy: true,
-		Status:     AppStatusCreated,
-		EnvVars:    envVars,
-		Bindings:   bindings,
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		ID:                 id,
+		Name:               name,
+		SourceType:         sourceType,
+		Subdomain:          SanitizeSubdomain(name),
+		GitRepo:            gitRepo,
+		Branch:             branch,
+		InlineCode:         inlineCode,
+		AutoDeploy:         true,
+		Status:             AppStatusCreated,
+		EnvVars:            envVars,
+		Bindings:           bindings,
+		CompatibilityDate:  "2024-09-23",
+		CompatibilityFlags: []string{},
+		MemoryLimitMB:      128,
+		MaxDurationMs:      50,
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	}, nil
 }
 
@@ -220,4 +250,21 @@ func (a *Application) UpdateConfig(branch, inlineCode string, envVars []Environm
 	}
 	a.UpdatedAt = time.Now().UTC()
 	return nil
+}
+
+// UpdateRuntimeConfig updates compatibility date, compatibility flags, memory limit, and execution timeout.
+func (a *Application) UpdateRuntimeConfig(compatDate string, flags []string, memoryLimitMB, maxDurationMs int) {
+	if strings.TrimSpace(compatDate) != "" {
+		a.CompatibilityDate = strings.TrimSpace(compatDate)
+	}
+	if flags != nil {
+		a.CompatibilityFlags = flags
+	}
+	if memoryLimitMB > 0 {
+		a.MemoryLimitMB = memoryLimitMB
+	}
+	if maxDurationMs > 0 {
+		a.MaxDurationMs = maxDurationMs
+	}
+	a.UpdatedAt = time.Now().UTC()
 }

@@ -26,6 +26,10 @@ export interface Application {
   bindings?: ResourceBinding[];
   /** @nullable */
   activeDeploymentId?: string | null;
+  compatibilityDate?: string;
+  compatibilityFlags?: string[];
+  memoryLimitMb?: number;
+  maxDurationMs?: number;
   createdAt: string;
   updatedAt: string;
 }

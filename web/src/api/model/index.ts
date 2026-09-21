@@ -7,6 +7,7 @@
  */
 
 export * from './application';
+export * from './applicationMetrics';
 export * from './applicationStatus';
 export * from './badRequestResponse';
 export * from './conflictResponse';

@@ -8,7 +8,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/ishaf/cubit/internal/domain"
 )
@@ -29,13 +32,77 @@ type Service interface {
 	GetByID(ctx context.Context, id string) (*domain.Application, error)
 	GetBySubdomain(ctx context.Context, subdomain string) (*domain.Application, error)
 	List(ctx context.Context) ([]*domain.Application, error)
-	Update(ctx context.Context, id, branch, inlineCode string, autoDeploy *bool, envVars []domain.EnvironmentVariable, bindings []domain.ResourceBinding) (*domain.Application, error)
+	Update(ctx context.Context, id, branch, inlineCode string, autoDeploy *bool, envVars []domain.EnvironmentVariable, bindings []domain.ResourceBinding, compatDate *string, compatFlags *[]string, memoryLimitMB *int, maxDurationMs *int) (*domain.Application, error)
 	UpdateInlineCode(ctx context.Context, appID, newCode string) (*domain.Application, error)
 	Delete(ctx context.Context, id string) error
 	Invoke(ctx context.Context, appID string, method, path string, headers map[string]string, body []byte) (int, map[string]string, []byte, error)
 	GetApplicationBySubdomain(ctx context.Context, subdomain string) (*domain.Application, error)
 	InvokeApplication(ctx context.Context, appID string, method, path string, headers map[string]string, body []byte) (int, map[string]string, []byte, error)
 	SetActiveDeployment(ctx context.Context, appID, deploymentID string) error
+	GetMetrics(ctx context.Context, appID string) (*domain.ApplicationMetrics, error)
+	RecordExecution(appID string, method, path string, statusCode int, durationMs float64, clientIP, message string)
+	SubscribeLiveLogs(appID string) (<-chan domain.RequestLogEvent, func())
+}
+
+type appMetricsTracker struct {
+	mu            sync.RWMutex
+	totalRequests int64
+	status2xx     int64
+	status4xx     int64
+	status5xx     int64
+	totalDuration float64
+	durations     []float64
+}
+
+func (t *appMetricsTracker) record(statusCode int, durationMs float64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.totalRequests++
+	t.totalDuration += durationMs
+	if statusCode >= 200 && statusCode < 300 {
+		t.status2xx++
+	} else if statusCode >= 400 && statusCode < 500 {
+		t.status4xx++
+	} else if statusCode >= 500 {
+		t.status5xx++
+	}
+
+	if len(t.durations) >= 500 {
+		t.durations = t.durations[1:]
+	}
+	t.durations = append(t.durations, durationMs)
+}
+
+func (t *appMetricsTracker) snapshot() domain.ApplicationMetrics {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	avg := 0.0
+	if t.totalRequests > 0 {
+		avg = t.totalDuration / float64(t.totalRequests)
+	}
+
+	p99 := 0.0
+	if len(t.durations) > 0 {
+		sorted := make([]float64, len(t.durations))
+		copy(sorted, t.durations)
+		sort.Float64s(sorted)
+		idx := int(float64(len(sorted)) * 0.99)
+		if idx >= len(sorted) {
+			idx = len(sorted) - 1
+		}
+		p99 = sorted[idx]
+	}
+
+	return domain.ApplicationMetrics{
+		TotalRequests: t.totalRequests,
+		Status2xx:     t.status2xx,
+		Status4xx:     t.status4xx,
+		Status5xx:     t.status5xx,
+		AvgDurationMs: avg,
+		P99DurationMs: p99,
+	}
 }
 
 // ApplicationService coordinates application entities.
@@ -44,6 +111,12 @@ type ApplicationService struct {
 	storage     StorageDownloader
 	routeSyncer RouteSyncer
 	fleetBucket string
+
+	metricsMu sync.RWMutex
+	metrics   map[string]*appMetricsTracker
+
+	subscribersMu sync.RWMutex
+	subscribers   map[string]map[chan domain.RequestLogEvent]struct{}
 }
 
 // NewService creates a new ApplicationService.
@@ -53,6 +126,8 @@ func NewService(repo Repository, storage StorageDownloader, routeSyncer RouteSyn
 		storage:     storage,
 		routeSyncer: routeSyncer,
 		fleetBucket: fleetBucket,
+		metrics:     make(map[string]*appMetricsTracker),
+		subscribers: make(map[string]map[chan domain.RequestLogEvent]struct{}),
 	}
 }
 
@@ -99,13 +174,17 @@ func (s *ApplicationService) List(ctx context.Context) ([]*domain.Application, e
 	return s.repo.List(ctx)
 }
 
-// Update modifies branch, inline code, autoDeploy, env vars, and bindings.
+// Update modifies branch, inline code, autoDeploy, env vars, bindings, and runtime settings.
 func (s *ApplicationService) Update(
 	ctx context.Context,
 	id, branch, inlineCode string,
 	autoDeploy *bool,
 	envVars []domain.EnvironmentVariable,
 	bindings []domain.ResourceBinding,
+	compatDate *string,
+	compatFlags *[]string,
+	memoryLimitMB *int,
+	maxDurationMs *int,
 ) (*domain.Application, error) {
 	app, err := s.repo.GetByID(ctx, id)
 	if err != nil {
@@ -118,6 +197,24 @@ func (s *ApplicationService) Update(
 	if autoDeploy != nil {
 		app.AutoDeploy = *autoDeploy
 	}
+
+	cDate := ""
+	if compatDate != nil {
+		cDate = *compatDate
+	}
+	var flags []string
+	if compatFlags != nil {
+		flags = *compatFlags
+	}
+	mem := 0
+	if memoryLimitMB != nil {
+		mem = *memoryLimitMB
+	}
+	dur := 0
+	if maxDurationMs != nil {
+		dur = *maxDurationMs
+	}
+	app.UpdateRuntimeConfig(cDate, flags, mem, dur)
 
 	if err := s.repo.Update(ctx, app); err != nil {
 		return nil, err
@@ -169,6 +266,84 @@ func (s *ApplicationService) SetActiveDeployment(ctx context.Context, appID, dep
 	return s.repo.Update(ctx, app)
 }
 
+// RecordExecution records metrics and broadcasts a live log event.
+func (s *ApplicationService) RecordExecution(appID string, method, path string, statusCode int, durationMs float64, clientIP, message string) {
+	s.metricsMu.Lock()
+	tracker, ok := s.metrics[appID]
+	if !ok {
+		tracker = &appMetricsTracker{}
+		s.metrics[appID] = tracker
+	}
+	s.metricsMu.Unlock()
+
+	tracker.record(statusCode, durationMs)
+
+	event := domain.RequestLogEvent{
+		Timestamp:  time.Now().UTC(),
+		Method:     method,
+		Path:       path,
+		StatusCode: statusCode,
+		DurationMs: durationMs,
+		ClientIP:   clientIP,
+		Message:    message,
+	}
+
+	s.subscribersMu.RLock()
+	if subs, ok := s.subscribers[appID]; ok {
+		for ch := range subs {
+			select {
+			case ch <- event:
+			default:
+			}
+		}
+	}
+	s.subscribersMu.RUnlock()
+}
+
+// GetMetrics returns execution metrics for an application.
+func (s *ApplicationService) GetMetrics(ctx context.Context, appID string) (*domain.ApplicationMetrics, error) {
+	if _, err := s.repo.GetByID(ctx, appID); err != nil {
+		return nil, err
+	}
+
+	s.metricsMu.RLock()
+	tracker, ok := s.metrics[appID]
+	s.metricsMu.RUnlock()
+
+	if !ok {
+		return &domain.ApplicationMetrics{}, nil
+	}
+
+	res := tracker.snapshot()
+	return &res, nil
+}
+
+// SubscribeLiveLogs registers a subscriber for real-time isolate request logs.
+func (s *ApplicationService) SubscribeLiveLogs(appID string) (<-chan domain.RequestLogEvent, func()) {
+	ch := make(chan domain.RequestLogEvent, 50)
+
+	s.subscribersMu.Lock()
+	if s.subscribers[appID] == nil {
+		s.subscribers[appID] = make(map[chan domain.RequestLogEvent]struct{})
+	}
+	s.subscribers[appID][ch] = struct{}{}
+	s.subscribersMu.Unlock()
+
+	unsubscribe := func() {
+		s.subscribersMu.Lock()
+		defer s.subscribersMu.Unlock()
+		if subs, ok := s.subscribers[appID]; ok {
+			delete(subs, ch)
+			if len(subs) == 0 {
+				delete(s.subscribers, appID)
+			}
+		}
+		close(ch)
+	}
+
+	return ch, unsubscribe
+}
+
 // Invoke executes the active worker deployment for an application and returns HTTP results.
 func (s *ApplicationService) Invoke(ctx context.Context, appID string, method, path string, headers map[string]string, body []byte) (int, map[string]string, []byte, error) {
 	app, err := s.repo.GetByID(ctx, appID)
@@ -194,7 +369,19 @@ func (s *ApplicationService) Invoke(ctx context.Context, appID string, method, p
 		bundleData = []byte(domain.DefaultHelloWorldWorker)
 	}
 
-	return RunWorkerBundle(ctx, bundleData, method, path, headers, body)
+	start := time.Now()
+	status, respHeaders, respBody, err := RunWorkerBundle(ctx, bundleData, method, path, headers, body)
+	durationMs := float64(time.Since(start).Microseconds()) / 1000.0
+
+	msg := "Worker isolate request executed"
+	if err != nil {
+		msg = "Worker isolate execution error: " + err.Error()
+	} else if status >= 500 {
+		msg = "Worker returned internal server error"
+	}
+	s.RecordExecution(appID, method, path, status, durationMs, "127.0.0.1", msg)
+
+	return status, respHeaders, respBody, err
 }
 
 // InvokeApplication is an alias for Invoke.

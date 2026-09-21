@@ -33,7 +33,7 @@ func OpenSQLite(dsn string) (*sql.DB, error) {
 	}
 
 	// Dynamic column migrations for existing SQLite databases
-	var hasSourceType, hasInlineCode, hasSubdomain, hasAutoDeploy bool
+	var hasSourceType, hasInlineCode, hasSubdomain, hasAutoDeploy, hasCompatDate, hasCompatFlags, hasMemLimit, hasMaxDuration bool
 	rows, err := db.QueryContext(context.Background(), "PRAGMA table_info(applications)")
 	if err == nil {
 		for rows.Next() {
@@ -54,6 +54,18 @@ func OpenSQLite(dsn string) (*sql.DB, error) {
 				if colName == "auto_deploy" {
 					hasAutoDeploy = true
 				}
+				if colName == "compatibility_date" {
+					hasCompatDate = true
+				}
+				if colName == "compatibility_flags" {
+					hasCompatFlags = true
+				}
+				if colName == "memory_limit_mb" {
+					hasMemLimit = true
+				}
+				if colName == "max_duration_ms" {
+					hasMaxDuration = true
+				}
 			}
 		}
 		rows.Close()
@@ -69,6 +81,18 @@ func OpenSQLite(dsn string) (*sql.DB, error) {
 		}
 		if !hasAutoDeploy {
 			_, _ = db.ExecContext(context.Background(), "ALTER TABLE applications ADD COLUMN auto_deploy INTEGER NOT NULL DEFAULT 1")
+		}
+		if !hasCompatDate {
+			_, _ = db.ExecContext(context.Background(), "ALTER TABLE applications ADD COLUMN compatibility_date TEXT NOT NULL DEFAULT '2024-09-23'")
+		}
+		if !hasCompatFlags {
+			_, _ = db.ExecContext(context.Background(), "ALTER TABLE applications ADD COLUMN compatibility_flags TEXT NOT NULL DEFAULT '[]'")
+		}
+		if !hasMemLimit {
+			_, _ = db.ExecContext(context.Background(), "ALTER TABLE applications ADD COLUMN memory_limit_mb INTEGER NOT NULL DEFAULT 128")
+		}
+		if !hasMaxDuration {
+			_, _ = db.ExecContext(context.Background(), "ALTER TABLE applications ADD COLUMN max_duration_ms INTEGER NOT NULL DEFAULT 50")
 		}
 	}
 

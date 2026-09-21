@@ -16,4 +16,5 @@ export const ResourceBindingType = {
   r2_bucket: 'r2_bucket',
   queue: 'queue',
   workflow: 'workflow',
+  service: 'service',
 } as const;

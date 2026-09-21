@@ -27,6 +27,10 @@ describe('Given resource binding type to dashboard service mappings', () => {
     it('Then workflow maps to workflows tab', () => {
       expect(getServiceTabForBindingType('workflow')).toBe('workflows');
     });
+
+    it('Then service maps to apps tab', () => {
+      expect(getServiceTabForBindingType('service')).toBe('apps');
+    });
   });
 
   describe('When formatting display labels and target page names', () => {
@@ -36,6 +40,7 @@ describe('Given resource binding type to dashboard service mappings', () => {
       expect(getServiceLabelForBindingType('r2_bucket')).toBe('R2 Bucket');
       expect(getServiceLabelForBindingType('queue')).toBe('Queue Producer');
       expect(getServiceLabelForBindingType('workflow')).toBe('Workflow');
+      expect(getServiceLabelForBindingType('service')).toBe('Worker RPC');
     });
 
     it('Then service control panel destination titles are accurately formatted', () => {
@@ -44,6 +49,7 @@ describe('Given resource binding type to dashboard service mappings', () => {
       expect(getServicePageName('r2_bucket')).toBe('R2 Buckets');
       expect(getServicePageName('queue')).toBe('Queues');
       expect(getServicePageName('workflow')).toBe('Workflows');
+      expect(getServicePageName('service')).toBe('Workers');
     });
   });
 });

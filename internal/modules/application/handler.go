@@ -1,7 +1,9 @@
 package application
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -42,11 +44,15 @@ type createApplicationRequest struct {
 }
 
 type updateApplicationRequest struct {
-	Branch     *string       `json:"branch,omitempty"`
-	InlineCode *string       `json:"inlineCode,omitempty"`
-	AutoDeploy *bool         `json:"autoDeploy,omitempty"`
-	EnvVars    *[]envVarReq  `json:"envVars,omitempty"`
-	Bindings   *[]bindingReq `json:"bindings,omitempty"`
+	Branch             *string       `json:"branch,omitempty"`
+	InlineCode         *string       `json:"inlineCode,omitempty"`
+	AutoDeploy         *bool         `json:"autoDeploy,omitempty"`
+	EnvVars            *[]envVarReq  `json:"envVars,omitempty"`
+	Bindings           *[]bindingReq `json:"bindings,omitempty"`
+	CompatibilityDate  *string       `json:"compatibilityDate,omitempty"`
+	CompatibilityFlags *[]string     `json:"compatibilityFlags,omitempty"`
+	MemoryLimitMB      *int          `json:"memoryLimitMb,omitempty"`
+	MaxDurationMs      *int          `json:"maxDurationMs,omitempty"`
 }
 
 type testApplicationRequest struct {
@@ -70,6 +76,10 @@ type applicationResponse struct {
 	EnvVars            []domain.EnvironmentVariable `json:"envVars,omitempty"`
 	Bindings           []domain.ResourceBinding     `json:"bindings,omitempty"`
 	ActiveDeploymentID *string                      `json:"activeDeploymentId,omitempty"`
+	CompatibilityDate  string                       `json:"compatibilityDate"`
+	CompatibilityFlags []string                     `json:"compatibilityFlags"`
+	MemoryLimitMB      int                          `json:"memoryLimitMb"`
+	MaxDurationMs      int                          `json:"maxDurationMs"`
 	CreatedAt          string                       `json:"createdAt"`
 	UpdatedAt          string                       `json:"updatedAt"`
 }
@@ -93,6 +103,23 @@ func toResponse(app *domain.Application) applicationResponse {
 		subdomain = domain.SanitizeSubdomain(app.Name)
 	}
 
+	flags := app.CompatibilityFlags
+	if flags == nil {
+		flags = []string{}
+	}
+	compatDate := app.CompatibilityDate
+	if compatDate == "" {
+		compatDate = "2024-09-23"
+	}
+	mem := app.MemoryLimitMB
+	if mem <= 0 {
+		mem = 128
+	}
+	dur := app.MaxDurationMs
+	if dur <= 0 {
+		dur = 50
+	}
+
 	return applicationResponse{
 		ID:                 app.ID,
 		Name:               app.Name,
@@ -107,6 +134,10 @@ func toResponse(app *domain.Application) applicationResponse {
 		EnvVars:            app.EnvVars,
 		Bindings:           app.Bindings,
 		ActiveDeploymentID: activeDep,
+		CompatibilityDate:  compatDate,
+		CompatibilityFlags: flags,
+		MemoryLimitMB:      mem,
+		MaxDurationMs:      dur,
 		CreatedAt:          app.CreatedAt.Format("2006-01-02T15:04:05.999999999Z"),
 		UpdatedAt:          app.UpdatedAt.Format("2006-01-02T15:04:05.999999999Z"),
 	}
@@ -254,13 +285,73 @@ func (h *Handler) Update(c *gin.Context) {
 		}
 	}
 
-	app, err := h.service.Update(c.Request.Context(), id, branch, inlineCode, req.AutoDeploy, envVars, bindings)
+	app, err := h.service.Update(
+		c.Request.Context(),
+		id,
+		branch,
+		inlineCode,
+		req.AutoDeploy,
+		envVars,
+		bindings,
+		req.CompatibilityDate,
+		req.CompatibilityFlags,
+		req.MemoryLimitMB,
+		req.MaxDurationMs,
+	)
 	if err != nil {
 		respondError(c, err)
 		return
 	}
 
 	c.JSON(http.StatusOK, toResponse(app))
+}
+
+// GetMetrics returns real-time execution telemetry for an application.
+func (h *Handler) GetMetrics(c *gin.Context) {
+	id := c.Param("id")
+	metrics, err := h.service.GetMetrics(c.Request.Context(), id)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, metrics)
+}
+
+// StreamLiveLogs streams real-time request log events via SSE.
+func (h *Handler) StreamLiveLogs(c *gin.Context) {
+	id := c.Param("id")
+
+	if _, err := h.service.GetByID(c.Request.Context(), id); err != nil {
+		respondError(c, err)
+		return
+	}
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("Transfer-Encoding", "chunked")
+	c.Writer.Flush()
+
+	logsChan, unsubscribe := h.service.SubscribeLiveLogs(id)
+	defer unsubscribe()
+
+	notify := c.Request.Context().Done()
+
+	for {
+		select {
+		case <-notify:
+			return
+		case event, ok := <-logsChan:
+			if !ok {
+				return
+			}
+			data, err := json.Marshal(event)
+			if err == nil {
+				_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", data)
+				c.Writer.Flush()
+			}
+		}
+	}
 }
 
 // Delete removes an application.

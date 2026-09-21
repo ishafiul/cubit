@@ -13,4 +13,8 @@ export interface UpdateApplicationRequest {
   inlineCode?: string;
   envVars?: EnvironmentVariable[];
   bindings?: ResourceBinding[];
+  compatibilityDate?: string;
+  compatibilityFlags?: string[];
+  memoryLimitMb?: number;
+  maxDurationMs?: number;
 }

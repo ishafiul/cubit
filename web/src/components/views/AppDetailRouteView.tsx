@@ -43,7 +43,8 @@ export function AppDetailRouteView() {
     <div className="h-full flex flex-col">
       <ApplicationDetailPage
         app={app}
-        initialTab={search.tab || 'builds'}
+        allApps={apps}
+        initialTab={search.tab || 'overview'}
         onTabChange={(newTab) => {
           navigate({
             to: '/apps/$appId',
@@ -60,6 +61,13 @@ export function AppDetailRouteView() {
         onTestApp={(targetApp) => setTestingApp(targetApp)}
         onRefreshApps={refetchApps}
         onNavigateToService={(targetTab, resourceId) => {
+          if (targetTab === 'apps' && resourceId) {
+            navigate({
+              to: '/apps/$appId',
+              params: { appId: resourceId },
+            });
+            return;
+          }
           (navigate as any)({
             to: `/${targetTab}`,
             search: resourceId ? { id: resourceId } : undefined,

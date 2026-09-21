@@ -242,6 +242,31 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /applications/{id}/metrics:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: Get execution telemetry metrics for an application
+      operationId: getApplicationMetrics
+      tags:
+        - applications
+      responses:
+        '200':
+          description: Application execution metrics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationMetrics'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /applications/{id}/deploy:
     parameters:
       - name: id
@@ -724,7 +749,7 @@ components:
       properties:
         type:
           type: string
-          enum: [kv_namespace, d1_database, r2_bucket, queue, workflow]
+          enum: [kv_namespace, d1_database, r2_bucket, queue, workflow, service]
         name:
           type: string
           example: "MY_KV"
@@ -787,12 +812,57 @@ components:
           type: string
           format: uuid
           nullable: true
+        compatibilityDate:
+          type: string
+          example: "2024-09-23"
+        compatibilityFlags:
+          type: array
+          items:
+            type: string
+          example: ["nodejs_compat"]
+        memoryLimitMb:
+          type: integer
+          example: 128
+        maxDurationMs:
+          type: integer
+          example: 50
         createdAt:
           type: string
           format: date-time
         updatedAt:
           type: string
           format: date-time
+
+    ApplicationMetrics:
+      type: object
+      required:
+        - totalRequests
+        - status2xx
+        - status4xx
+        - status5xx
+        - avgDurationMs
+        - p99DurationMs
+      properties:
+        totalRequests:
+          type: integer
+          example: 1240
+        status2xx:
+          type: integer
+          example: 1200
+        status4xx:
+          type: integer
+          example: 35
+        status5xx:
+          type: integer
+          example: 5
+        avgDurationMs:
+          type: number
+          format: float
+          example: 12.4
+        p99DurationMs:
+          type: number
+          format: float
+          example: 45.2
 
     CreateApplicationRequest:
       type: object
@@ -837,6 +907,19 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ResourceBinding'
+        compatibilityDate:
+          type: string
+          example: "2024-09-23"
+        compatibilityFlags:
+          type: array
+          items:
+            type: string
+        memoryLimitMb:
+          type: integer
+          example: 128
+        maxDurationMs:
+          type: integer
+          example: 50
 
     TestApplicationRequest:
       type: object

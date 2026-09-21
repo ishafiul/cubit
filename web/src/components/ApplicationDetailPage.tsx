@@ -29,11 +29,17 @@ import {
   Inbox,
   X,
   Cpu,
+  Activity,
+  Radio,
+  Pause,
+  Flame,
+  AlertTriangle,
+  Sliders,
 } from 'lucide-react';
-import type { Application, ResourceBinding, ResourceBindingType } from '../api/model';
+import type { Application, ResourceBinding, ResourceBindingType, ApplicationMetrics } from '../api/model';
 import type { ActiveTab } from '../App';
 import { useListDeployments } from '../api/generated/deployments/deployments';
-import { useUpdateApplication } from '../api/generated/applications/applications';
+import { useUpdateApplication, useDeleteApplication, useGetApplicationMetrics } from '../api/generated/applications/applications';
 import { useListDomains, useCreateDomain } from '../api/generated/domains/domains';
 import { CodeEditor } from './CodeEditor';
 
@@ -54,10 +60,11 @@ export function getDeploymentStatusBadge(status: string) {
   }
 }
 
-export type DetailTab = 'builds' | 'code' | 'domains' | 'bindings' | 'settings';
+export type DetailTab = 'overview' | 'code' | 'builds' | 'triggers' | 'bindings' | 'settings';
 
 export interface ApplicationDetailPageProps {
   app: Application;
+  allApps?: Application[];
   onBack: () => void;
   onDeploy: (appId: string) => Promise<void> | void;
   isDeploying: boolean;
@@ -70,6 +77,7 @@ export interface ApplicationDetailPageProps {
 
 export function ApplicationDetailPage({
   app,
+  allApps = [],
   onBack,
   onDeploy,
   isDeploying,
@@ -79,7 +87,7 @@ export function ApplicationDetailPage({
   initialTab,
   onTabChange,
 }: ApplicationDetailPageProps) {
-  const [activeTab, setActiveTab] = useState<DetailTab>(initialTab || 'builds');
+  const [activeTab, setActiveTab] = useState<DetailTab>(initialTab || 'overview');
 
   useEffect(() => {
     if (initialTab && initialTab !== activeTab) {
@@ -137,6 +145,156 @@ export function ApplicationDetailPage({
   const [envSaveStatus, setEnvSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
 
   const updateAppMutation = useUpdateApplication();
+  const deleteAppMutation = useDeleteApplication();
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeletingApp, setIsDeletingApp] = useState(false);
+
+  // Application Metrics Query (polled every 5s)
+  const { data: metricsData } = useGetApplicationMetrics(app.id, {
+    query: {
+      refetchInterval: 5000,
+    },
+  });
+  const metrics = metricsData as ApplicationMetrics | undefined;
+
+  // Builds & Live Logs Sub-View State
+  const [buildsViewMode, setBuildsViewMode] = useState<'history' | 'tail'>('history');
+  const [liveLogs, setLiveLogs] = useState<Array<{
+    timestamp: string;
+    method: string;
+    path: string;
+    status: number;
+    durationMs: number;
+    clientIp: string;
+  }>>([]);
+  const [isLiveStreaming, setIsLiveStreaming] = useState(true);
+  const [liveConnected, setLiveConnected] = useState(false);
+
+  useEffect(() => {
+    if (activeTab !== 'builds' || buildsViewMode !== 'tail' || !isLiveStreaming) {
+      setLiveConnected(false);
+      return;
+    }
+    const es = new EventSource(`/api/v1/applications/${app.id}/logs/stream`);
+    es.onopen = () => {
+      setLiveConnected(true);
+    };
+    es.onmessage = (e) => {
+      try {
+        const item = JSON.parse(e.data);
+        setLiveLogs(prev => [item, ...prev].slice(0, 200));
+      } catch (err) {
+        console.error('Error parsing live log event:', err);
+      }
+    };
+    es.onerror = () => {
+      setLiveConnected(false);
+    };
+    return () => {
+      es.close();
+      setLiveConnected(false);
+    };
+  }, [activeTab, buildsViewMode, isLiveStreaming, app.id]);
+
+  // Cron Triggers State
+  const [showAddCronModal, setShowAddCronModal] = useState(false);
+  const [newCronName, setNewCronName] = useState('');
+  const [newCronExpr, setNewCronExpr] = useState('*/15 * * * *');
+  const [isCreatingCron, setIsCreatingCron] = useState(false);
+  const [runningCronId, setRunningCronId] = useState<string | null>(null);
+
+  const handleCreateCron = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCronName.trim() || !newCronExpr.trim()) return;
+    setIsCreatingCron(true);
+    try {
+      const res = await fetch('/api/v1/cron', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newCronName.trim(),
+          cron: newCronExpr.trim(),
+          target_app_id: app.id,
+        }),
+      });
+      if (!res.ok) throw new Error('Failed to create cron trigger');
+      setShowAddCronModal(false);
+      setNewCronName('');
+      setNewCronExpr('*/15 * * * *');
+      await fetchFleetServices();
+    } catch (err: any) {
+      alert(err.message || 'Failed to create cron trigger');
+    } finally {
+      setIsCreatingCron(false);
+    }
+  };
+
+  const handleRunCronNow = async (cronId: string) => {
+    setRunningCronId(cronId);
+    try {
+      await fetch(`/api/v1/cron/${cronId}/run`, { method: 'POST' });
+      await fetchFleetServices();
+    } catch (err) {
+      console.error('Failed to trigger cron execution:', err);
+    } finally {
+      setRunningCronId(null);
+    }
+  };
+
+  // Runtime & Compatibility Settings State
+  const [compatDate, setCompatDate] = useState(app.compatibilityDate || '2024-04-03');
+  const [nodejsCompat, setNodejsCompat] = useState((app.compatibilityFlags || []).includes('nodejs_compat'));
+  const [memoryLimitMB, setMemoryLimitMB] = useState(app.memoryLimitMb || 128);
+  const [maxDurationMs, setMaxDurationMs] = useState(app.maxDurationMs || 50);
+  const [isSavingRuntime, setIsSavingRuntime] = useState(false);
+  const [runtimeSaveStatus, setRuntimeSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
+
+  useEffect(() => {
+    setCompatDate(app.compatibilityDate || '2024-04-03');
+    setNodejsCompat((app.compatibilityFlags || []).includes('nodejs_compat'));
+    setMemoryLimitMB(app.memoryLimitMb || 128);
+    setMaxDurationMs(app.maxDurationMs || 50);
+  }, [app.compatibilityDate, app.compatibilityFlags, app.memoryLimitMb, app.maxDurationMs]);
+
+  const handleSaveRuntime = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingRuntime(true);
+    setRuntimeSaveStatus('idle');
+    try {
+      await updateAppMutation.mutateAsync({
+        id: app.id,
+        data: {
+          compatibilityDate: compatDate.trim() || undefined,
+          compatibilityFlags: nodejsCompat ? ['nodejs_compat'] : [],
+          memoryLimitMb: Number(memoryLimitMB),
+          maxDurationMs: Number(maxDurationMs),
+        },
+      });
+      setRuntimeSaveStatus('saved');
+      onRefreshApps();
+      setTimeout(() => setRuntimeSaveStatus('idle'), 3000);
+    } catch (err) {
+      console.error('Failed saving runtime configuration:', err);
+      setRuntimeSaveStatus('error');
+    } finally {
+      setIsSavingRuntime(false);
+    }
+  };
+
+  const handleDeleteApp = async () => {
+    setIsDeletingApp(true);
+    try {
+      await deleteAppMutation.mutateAsync({ id: app.id });
+      onRefreshApps();
+      onBack();
+    } catch (err) {
+      console.error('Failed deleting application:', err);
+      alert('Failed to delete application');
+    } finally {
+      setIsDeletingApp(false);
+      setShowDeleteConfirm(false);
+    }
+  };
 
   // Service Bindings State
   const [bindings, setBindings] = useState<ResourceBinding[]>(app.bindings || []);
@@ -249,6 +407,10 @@ export function ApplicationDetailPage({
     } else if (t === 'workflow') {
       setNewBindingName('MY_WORKFLOW');
       setNewBindingResourceId(fleetWorkflows[0]?.name || fleetWorkflows[0]?.id || '');
+    } else if (t === 'service') {
+      setNewBindingName('MY_WORKER');
+      const other = allApps.find(a => a.id !== app.id);
+      setNewBindingResourceId(other?.name || other?.id || '');
     }
   };
 
@@ -545,27 +707,24 @@ export function ApplicationDetailPage({
         </div>
 
         {/* Tab Buttons */}
-        <div className="flex border-b border-zinc-800 pt-2 gap-6">
+        <div className="flex border-b border-zinc-800 pt-2 gap-6 overflow-x-auto">
           <button
             type="button"
-            onClick={() => switchTab('builds')}
-            className={`pb-3 text-xs font-semibold flex items-center gap-2 border-b-2 transition ${
-              activeTab === 'builds'
+            onClick={() => switchTab('overview')}
+            className={`pb-3 text-xs font-semibold flex items-center gap-2 border-b-2 transition shrink-0 ${
+              activeTab === 'overview'
                 ? 'border-emerald-500 text-emerald-400'
                 : 'border-transparent text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            <Terminal className="w-3.5 h-3.5" />
-            Builds
-            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-zinc-800 text-zinc-400">
-              {deployments.length}
-            </span>
+            <Activity className="w-3.5 h-3.5" />
+            Overview
           </button>
 
           <button
             type="button"
             onClick={() => switchTab('code')}
-            className={`pb-3 text-xs font-semibold flex items-center gap-2 border-b-2 transition ${
+            className={`pb-3 text-xs font-semibold flex items-center gap-2 border-b-2 transition shrink-0 ${
               activeTab === 'code'
                 ? 'border-emerald-500 text-emerald-400'
                 : 'border-transparent text-zinc-400 hover:text-zinc-200'
@@ -577,24 +736,40 @@ export function ApplicationDetailPage({
 
           <button
             type="button"
-            onClick={() => switchTab('domains')}
-            className={`pb-3 text-xs font-semibold flex items-center gap-2 border-b-2 transition ${
-              activeTab === 'domains'
+            onClick={() => switchTab('builds')}
+            className={`pb-3 text-xs font-semibold flex items-center gap-2 border-b-2 transition shrink-0 ${
+              activeTab === 'builds'
                 ? 'border-emerald-500 text-emerald-400'
                 : 'border-transparent text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            <Globe className="w-3.5 h-3.5" />
-            Domain Setup
+            <Terminal className="w-3.5 h-3.5" />
+            Builds & Logs
             <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-zinc-800 text-zinc-400">
-              {appDomains.length + 1}
+              {deployments.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => switchTab('triggers')}
+            className={`pb-3 text-xs font-semibold flex items-center gap-2 border-b-2 transition shrink-0 ${
+              activeTab === 'triggers'
+                ? 'border-emerald-500 text-emerald-400'
+                : 'border-transparent text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <Zap className="w-3.5 h-3.5" />
+            Triggers
+            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-zinc-800 text-zinc-400">
+              {appDomains.length + 1 + attachedCron.length + attachedQueues.length}
             </span>
           </button>
 
           <button
             type="button"
             onClick={() => switchTab('bindings')}
-            className={`pb-3 text-xs font-semibold flex items-center gap-2 border-b-2 transition ${
+            className={`pb-3 text-xs font-semibold flex items-center gap-2 border-b-2 transition shrink-0 ${
               activeTab === 'bindings'
                 ? 'border-emerald-500 text-emerald-400'
                 : 'border-transparent text-zinc-400 hover:text-zinc-200'
@@ -612,7 +787,7 @@ export function ApplicationDetailPage({
           <button
             type="button"
             onClick={() => switchTab('settings')}
-            className={`pb-3 text-xs font-semibold flex items-center gap-2 border-b-2 transition ${
+            className={`pb-3 text-xs font-semibold flex items-center gap-2 border-b-2 transition shrink-0 ${
               activeTab === 'settings'
                 ? 'border-emerald-500 text-emerald-400'
                 : 'border-transparent text-zinc-400 hover:text-zinc-200'
@@ -626,111 +801,498 @@ export function ApplicationDetailPage({
 
       {/* Tab Contents */}
       <div className="flex-1 overflow-y-auto p-8">
-        {/* Tab 1: Builds */}
-        {activeTab === 'builds' && (
-          <div className="grid grid-cols-12 gap-6 h-full min-h-[450px]">
-            {/* Deployments List (Left Column) */}
-            <div className="col-span-4 bg-zinc-900/30 border border-zinc-800/80 rounded-xl p-4 space-y-2.5 overflow-y-auto max-h-[600px]">
-              <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
-                <span>Deployment Versions ({deployments.length})</span>
+        {/* Tab 1: Overview */}
+        {activeTab === 'overview' && (
+          <div className="space-y-6 max-w-6xl">
+            {/* Top Metrics Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Total Invocations */}
+              <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-xl p-4 space-y-2">
+                <div className="flex items-center justify-between text-xs text-zinc-400">
+                  <span className="font-semibold uppercase tracking-wider">Total Requests</span>
+                  <Activity className="w-4 h-4 text-emerald-400" />
+                </div>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-2xl font-bold font-mono text-zinc-100">
+                    {(metrics?.totalRequests ?? 0).toLocaleString()}
+                  </span>
+                  <span className="text-[11px] text-zinc-500">invocations</span>
+                </div>
+                <p className="text-[11px] text-zinc-500">
+                  Telemetry tracked via celld runtime
+                </p>
+              </div>
+
+              {/* HTTP Status Breakdown */}
+              <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-xl p-4 space-y-2">
+                <div className="flex items-center justify-between text-xs text-zinc-400">
+                  <span className="font-semibold uppercase tracking-wider">Response Codes</span>
+                  <ShieldCheck className="w-4 h-4 text-sky-400" />
+                </div>
+                <div className="flex items-center gap-3 text-xs font-mono">
+                  <div className="flex items-center gap-1 text-emerald-400">
+                    <span className="font-bold">{metrics?.status2xx ?? 0}</span>
+                    <span className="text-[10px] text-zinc-500">2xx</span>
+                  </div>
+                  <div className="flex items-center gap-1 text-amber-400">
+                    <span className="font-bold">{metrics?.status4xx ?? 0}</span>
+                    <span className="text-[10px] text-zinc-500">4xx</span>
+                  </div>
+                  <div className="flex items-center gap-1 text-rose-400">
+                    <span className="font-bold">{metrics?.status5xx ?? 0}</span>
+                    <span className="text-[10px] text-zinc-500">5xx</span>
+                  </div>
+                </div>
+                <div className="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden flex">
+                  {(metrics?.totalRequests ?? 0) > 0 ? (
+                    <>
+                      <div
+                        style={{ width: `${((metrics?.status2xx ?? 0) / (metrics?.totalRequests || 1)) * 100}%` }}
+                        className="bg-emerald-500 h-full"
+                        title={`2xx: ${metrics?.status2xx ?? 0}`}
+                      />
+                      <div
+                        style={{ width: `${((metrics?.status4xx ?? 0) / (metrics?.totalRequests || 1)) * 100}%` }}
+                        className="bg-amber-500 h-full"
+                        title={`4xx: ${metrics?.status4xx ?? 0}`}
+                      />
+                      <div
+                        style={{ width: `${((metrics?.status5xx ?? 0) / (metrics?.totalRequests || 1)) * 100}%` }}
+                        className="bg-rose-500 h-full"
+                        title={`5xx: ${metrics?.status5xx ?? 0}`}
+                      />
+                    </>
+                  ) : (
+                    <div className="bg-zinc-700 h-full w-full" />
+                  )}
+                </div>
+              </div>
+
+              {/* Latency */}
+              <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-xl p-4 space-y-2">
+                <div className="flex items-center justify-between text-xs text-zinc-400">
+                  <span className="font-semibold uppercase tracking-wider">Latency</span>
+                  <Clock className="w-4 h-4 text-purple-400" />
+                </div>
+                <div className="flex items-baseline gap-3 font-mono">
+                  <div>
+                    <span className="text-xl font-bold text-zinc-100">
+                      {metrics?.avgDurationMs ? Math.round(metrics.avgDurationMs) : 0}ms
+                    </span>
+                    <span className="text-[10px] text-zinc-500 ml-1">avg</span>
+                  </div>
+                  <span className="text-zinc-600">/</span>
+                  <div>
+                    <span className="text-xl font-bold text-purple-400">
+                      {metrics?.p99DurationMs ? Math.round(metrics.p99DurationMs) : 0}ms
+                    </span>
+                    <span className="text-[10px] text-zinc-500 ml-1">p99</span>
+                  </div>
+                </div>
+                <p className="text-[11px] text-zinc-500">
+                  Isolate execution time
+                </p>
+              </div>
+
+              {/* Last Activity */}
+              <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-xl p-4 space-y-2">
+                <div className="flex items-center justify-between text-xs text-zinc-400">
+                  <span className="font-semibold uppercase tracking-wider">Last Invocation</span>
+                  <Flame className="w-4 h-4 text-amber-400" />
+                </div>
+                <div className="text-sm font-semibold font-mono text-zinc-200 truncate">
+                  {(metrics as any)?.lastInvokedAt
+                    ? new Date((metrics as any).lastInvokedAt).toLocaleTimeString()
+                    : app.updatedAt
+                      ? new Date(app.updatedAt).toLocaleTimeString()
+                      : 'Never'}
+                </div>
+                <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span>celld worker active</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Architecture & Quotas Card */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="md:col-span-2 bg-zinc-900/30 border border-zinc-800/80 rounded-xl p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-zinc-200">Worker Architecture & Configuration</h3>
+                  <span className="text-xs text-zinc-500 font-mono">ID: {app.id.substring(0, 8)}...</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 text-xs">
+                  <div className="p-3 bg-zinc-950/60 rounded-lg border border-zinc-800/60 space-y-1">
+                    <span className="text-[11px] text-zinc-500 uppercase tracking-wider block">Ingress Route</span>
+                    <span className="font-mono text-emerald-400 font-semibold truncate block">{testUrl}</span>
+                    <span className="text-[10px] text-zinc-500">Traefik mesh route</span>
+                  </div>
+
+                  <div className="p-3 bg-zinc-950/60 rounded-lg border border-zinc-800/60 space-y-1">
+                    <span className="text-[11px] text-zinc-500 uppercase tracking-wider block">Source Deployment</span>
+                    <span className="font-mono text-zinc-200 font-semibold block">
+                      {app.sourceType === 'inline' ? 'Inline Worker (Web IDE)' : `Git Repo (${app.branch || 'main'})`}
+                    </span>
+                    <span className="text-[10px] text-zinc-500">Active version: v{activeBuildVersion}</span>
+                  </div>
+
+                  <div className="p-3 bg-zinc-950/60 rounded-lg border border-zinc-800/60 space-y-1">
+                    <span className="text-[11px] text-zinc-500 uppercase tracking-wider block">Compatibility Date</span>
+                    <span className="font-mono text-zinc-200 font-semibold block">{app.compatibilityDate || '2024-04-03'}</span>
+                    <span className="text-[10px] text-zinc-500">
+                      {app.compatibilityFlags?.includes('nodejs_compat') ? 'nodejs_compat enabled' : 'standard V8 runtime'}
+                    </span>
+                  </div>
+
+                  <div className="p-3 bg-zinc-950/60 rounded-lg border border-zinc-800/60 space-y-1">
+                    <span className="text-[11px] text-zinc-500 uppercase tracking-wider block">Resource Quotas</span>
+                    <span className="font-mono text-zinc-200 font-semibold block">
+                      {app.memoryLimitMb || 128} MB RAM / {app.maxDurationMs || 50} ms CPU
+                    </span>
+                    <span className="text-[10px] text-zinc-500">Isolate execution limits</span>
+                  </div>
+                </div>
+
+                {/* Quick actions strip */}
+                <div className="pt-2 flex flex-wrap gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => switchTab('code')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold transition"
+                  >
+                    <Code className="w-3.5 h-3.5 text-emerald-400" />
+                    Edit Code
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      switchTab('builds');
+                      setBuildsViewMode('tail');
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold transition"
+                  >
+                    <Radio className="w-3.5 h-3.5 text-sky-400" />
+                    Live Tail
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => switchTab('triggers')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold transition"
+                  >
+                    <Zap className="w-3.5 h-3.5 text-amber-400" />
+                    Triggers ({appDomains.length + 1 + attachedCron.length + attachedQueues.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => switchTab('bindings')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold transition"
+                  >
+                    <Link2 className="w-3.5 h-3.5 text-indigo-400" />
+                    Bindings ({totalBindingsCount})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => switchTab('settings')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold transition"
+                  >
+                    <Settings className="w-3.5 h-3.5 text-zinc-400" />
+                    Settings
+                  </button>
+                </div>
+              </div>
+
+              {/* Connected Services Card */}
+              <div className="bg-zinc-900/30 border border-zinc-800/80 rounded-xl p-5 space-y-3 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-sm font-bold text-zinc-200">Connected Fleet</h3>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-950 text-indigo-300 border border-indigo-800">
+                      {totalBindingsCount} Bound
+                    </span>
+                  </div>
+                  <p className="text-xs text-zinc-400 leading-relaxed">
+                    Resources injected via <code className="font-mono text-emerald-400">env.*</code> or triggering this worker.
+                  </p>
+
+                  <div className="mt-4 space-y-2 text-xs">
+                    <div className="flex items-center justify-between p-2 rounded-lg bg-zinc-950/60 border border-zinc-800/60">
+                      <span className="text-zinc-400 flex items-center gap-1.5">
+                        <Database className="w-3.5 h-3.5 text-amber-400" /> Injected Resources
+                      </span>
+                      <span className="font-mono font-bold text-zinc-200">{bindings.length}</span>
+                    </div>
+                    <div className="flex items-center justify-between p-2 rounded-lg bg-zinc-950/60 border border-zinc-800/60">
+                      <span className="text-zinc-400 flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5 text-sky-400" /> Cron Triggers
+                      </span>
+                      <span className="font-mono font-bold text-zinc-200">{attachedCron.length}</span>
+                    </div>
+                    <div className="flex items-center justify-between p-2 rounded-lg bg-zinc-950/60 border border-zinc-800/60">
+                      <span className="text-zinc-400 flex items-center gap-1.5">
+                        <Inbox className="w-3.5 h-3.5 text-emerald-400" /> Queue Consumers
+                      </span>
+                      <span className="font-mono font-bold text-zinc-200">{attachedQueues.length}</span>
+                    </div>
+                    <div className="flex items-center justify-between p-2 rounded-lg bg-zinc-950/60 border border-zinc-800/60">
+                      <span className="text-zinc-400 flex items-center gap-1.5">
+                        <Globe className="w-3.5 h-3.5 text-purple-400" /> Custom Domains
+                      </span>
+                      <span className="font-mono font-bold text-zinc-200">{appDomains.length}</span>
+                    </div>
+                  </div>
+                </div>
+
                 <button
                   type="button"
-                  onClick={() => refetchDeployments()}
-                  className="text-zinc-400 hover:text-zinc-200 transition"
+                  onClick={() => onTestApp(app)}
+                  className="w-full mt-3 py-2 px-3 rounded-lg border border-emerald-900/60 bg-emerald-950/40 hover:bg-emerald-950/70 text-emerald-400 text-xs font-semibold transition flex items-center justify-center gap-1.5"
                 >
-                  <RefreshCw className="w-3.5 h-3.5" />
+                  <Send className="w-3.5 h-3.5" />
+                  Test Worker Invocation
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 2: Builds & Live Logs */}
+        {activeTab === 'builds' && (
+          <div className="space-y-4 max-w-6xl">
+            {/* View Mode Switcher */}
+            <div className="flex items-center justify-between border-b border-zinc-800/80 pb-3">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setBuildsViewMode('history')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 transition ${
+                    buildsViewMode === 'history'
+                      ? 'bg-zinc-800 text-zinc-100 border border-zinc-700'
+                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
+                  }`}
+                >
+                  <Terminal className="w-3.5 h-3.5" />
+                  Deployment History ({deployments.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBuildsViewMode('tail')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 transition ${
+                    buildsViewMode === 'tail'
+                      ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-800'
+                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
+                  }`}
+                >
+                  <Radio className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+                  Live Request Tail (Realtime SSE)
                 </button>
               </div>
 
-              {deployments.length === 0 ? (
-                <div className="text-xs text-zinc-500 italic p-3">No deployments found for this application.</div>
-              ) : (
-                deployments.map(dep => {
-                  const isSelected = selectedDepId === dep.id;
-                  const d = new Date(dep.createdAt);
-                  const dateStr = isNaN(d.getTime()) ? '' : d.toLocaleString();
-                  return (
-                    <div
-                      key={dep.id}
-                      onClick={() => setSelectedDepId(dep.id)}
-                      className={`p-3.5 rounded-xl border cursor-pointer transition space-y-1.5 ${
-                        isSelected
-                          ? 'bg-zinc-800 border-emerald-500 text-zinc-100 shadow-sm'
-                          : 'bg-zinc-950/60 border-zinc-800/80 hover:border-zinc-700 text-zinc-300'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-xs text-emerald-400 font-mono">
-                          v{dep.buildVersion || 1}
-                        </span>
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${getDeploymentStatusBadge(dep.status)}`}>
-                          {dep.status}
-                        </span>
-                      </div>
-                      <div className="text-[11px] text-zinc-400 truncate font-mono">
-                        {dep.commitHash ? dep.commitHash.slice(0, 7) : 'HEAD'} - {dep.commitMessage || 'Manual deployment'}
-                      </div>
-                      <div className="flex items-center gap-1.5 text-[10px] text-zinc-500 font-mono">
-                        <Clock className="w-3 h-3 text-zinc-600" />
-                        <span>{dateStr}</span>
-                      </div>
-                    </div>
-                  );
-                })
+              {buildsViewMode === 'tail' && (
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-1.5 text-[11px]">
+                    <span className={`w-2 h-2 rounded-full ${liveConnected ? 'bg-emerald-500 animate-ping' : 'bg-zinc-600'}`} />
+                    <span className={liveConnected ? 'text-emerald-400 font-mono' : 'text-zinc-500'}>
+                      {liveConnected ? 'Connected' : 'Connecting...'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsLiveStreaming(!isLiveStreaming)}
+                    className="px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-semibold transition flex items-center gap-1"
+                  >
+                    {isLiveStreaming ? <Pause className="w-3 h-3 text-amber-400" /> : <Play className="w-3 h-3 text-emerald-400" />}
+                    {isLiveStreaming ? 'Pause' : 'Resume'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLiveLogs([])}
+                    className="px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs font-semibold transition flex items-center gap-1"
+                    title="Clear live tail logs"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    Clear
+                  </button>
+                </div>
               )}
             </div>
 
-            {/* Build Logs Console (Right Column) */}
-            <div className="col-span-8 flex flex-col space-y-2 min-h-0">
-              <div className="flex items-center justify-between text-xs text-zinc-400">
-                <div className="flex items-center gap-2.5">
-                  <span className="font-semibold uppercase tracking-wider">
-                    {selectedDep ? `Build Output (v${selectedDep.buildVersion || 1})` : 'Build Output'}
-                  </span>
-                  {selectedDep && (
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${getDeploymentStatusBadge(selectedDep.status)}`}>
-                      {selectedDep.status}
-                    </span>
+            {buildsViewMode === 'history' ? (
+              <div className="grid grid-cols-12 gap-6 min-h-[450px]">
+                {/* Deployments List (Left Column) */}
+                <div className="col-span-4 bg-zinc-900/30 border border-zinc-800/80 rounded-xl p-4 space-y-2.5 overflow-y-auto max-h-[600px]">
+                  <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
+                    <span>Deployment Versions ({deployments.length})</span>
+                    <button
+                      type="button"
+                      onClick={() => refetchDeployments()}
+                      className="text-zinc-400 hover:text-zinc-200 transition"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  {deployments.length === 0 ? (
+                    <div className="text-xs text-zinc-500 italic p-3">No deployments found for this application.</div>
+                  ) : (
+                    deployments.map(dep => {
+                      const isSelected = selectedDepId === dep.id;
+                      const d = new Date(dep.createdAt);
+                      const dateStr = isNaN(d.getTime()) ? '' : d.toLocaleString();
+                      return (
+                        <div
+                          key={dep.id}
+                          onClick={() => setSelectedDepId(dep.id)}
+                          className={`p-3.5 rounded-xl border cursor-pointer transition space-y-1.5 ${
+                            isSelected
+                              ? 'bg-zinc-800 border-emerald-500 text-zinc-100 shadow-sm'
+                              : 'bg-zinc-950/60 border-zinc-800/80 hover:border-zinc-700 text-zinc-300'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-xs text-emerald-400 font-mono">
+                              v{dep.buildVersion || 1}
+                            </span>
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${getDeploymentStatusBadge(dep.status)}`}>
+                              {dep.status}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-zinc-400 truncate font-mono">
+                            {dep.commitHash ? dep.commitHash.slice(0, 7) : 'HEAD'} - {dep.commitMessage || 'Manual deployment'}
+                          </div>
+                          <div className="flex items-center gap-1.5 text-[10px] text-zinc-500 font-mono">
+                            <Clock className="w-3 h-3 text-zinc-600" />
+                            <span>{dateStr}</span>
+                          </div>
+                        </div>
+                      );
+                    })
                   )}
                 </div>
-                {selectedDepId && (
-                  <span className="font-mono text-[10px] text-zinc-500">{selectedDepId}</span>
-                )}
-              </div>
 
-              <div className="flex-1 bg-black/90 rounded-xl p-5 font-mono text-xs text-zinc-300 overflow-y-auto border border-zinc-900 space-y-2 shadow-inner min-h-[400px]">
-                {isLoadingLogs ? (
-                  <div className="flex items-center gap-2 text-zinc-500 py-4">
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-400" />
-                    <span>Loading build logs...</span>
+                {/* Build Logs Console (Right Column) */}
+                <div className="col-span-8 flex flex-col space-y-2 min-h-0">
+                  <div className="flex items-center justify-between text-xs text-zinc-400">
+                    <div className="flex items-center gap-2.5">
+                      <span className="font-semibold uppercase tracking-wider">
+                        {selectedDep ? `Build Output (v${selectedDep.buildVersion || 1})` : 'Build Output'}
+                      </span>
+                      {selectedDep && (
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${getDeploymentStatusBadge(selectedDep.status)}`}>
+                          {selectedDep.status}
+                        </span>
+                      )}
+                    </div>
+                    {selectedDepId && (
+                      <span className="font-mono text-[10px] text-zinc-500">{selectedDepId}</span>
+                    )}
                   </div>
-                ) : depLogs.length === 0 ? (
-                  <div className="text-zinc-600 italic">No log entries available for this build version.</div>
-                ) : (
-                  depLogs.map((l, idx) => {
-                    const timeStr = (() => {
-                      try {
-                        const d = new Date(l.timestamp);
-                        return isNaN(d.getTime()) ? new Date().toLocaleTimeString() : d.toLocaleTimeString();
-                      } catch (_) {
-                        return new Date().toLocaleTimeString();
-                      }
-                    })();
-                    return (
-                      <div key={idx} className="flex items-start gap-3 leading-relaxed">
-                        <span className="text-zinc-600 shrink-0 select-none">{timeStr}</span>
-                        <span className="text-emerald-500 font-bold uppercase text-[10px] shrink-0 select-none">
-                          [{l.step}]
-                        </span>
-                        <span className={l.level === 'error' ? 'text-rose-400 font-semibold' : 'text-zinc-200'}>
-                          {l.message}
-                        </span>
+
+                  <div className="flex-1 bg-black/90 rounded-xl p-5 font-mono text-xs text-zinc-300 overflow-y-auto border border-zinc-900 space-y-2 shadow-inner min-h-[400px]">
+                    {isLoadingLogs ? (
+                      <div className="flex items-center gap-2 text-zinc-500 py-4">
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+                        <span>Loading build logs...</span>
                       </div>
-                    );
-                  })
-                )}
+                    ) : depLogs.length === 0 ? (
+                      <div className="text-zinc-600 italic">No log entries available for this build version.</div>
+                    ) : (
+                      depLogs.map((l, idx) => {
+                        const timeStr = (() => {
+                          try {
+                            const d = new Date(l.timestamp);
+                            return isNaN(d.getTime()) ? new Date().toLocaleTimeString() : d.toLocaleTimeString();
+                          } catch (_) {
+                            return new Date().toLocaleTimeString();
+                          }
+                        })();
+                        return (
+                          <div key={idx} className="flex items-start gap-3 leading-relaxed">
+                            <span className="text-zinc-600 shrink-0 select-none">{timeStr}</span>
+                            <span className="text-emerald-500 font-bold uppercase text-[10px] shrink-0 select-none">
+                              [{l.step}]
+                            </span>
+                            <span className={l.level === 'error' ? 'text-rose-400 font-semibold' : 'text-zinc-200'}>
+                              {l.message}
+                            </span>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
               </div>
-            </div>
+            ) : (
+              /* Live Request Tail Console */
+              <div className="bg-black/95 rounded-xl border border-zinc-800 p-5 space-y-3 font-mono text-xs shadow-inner min-h-[500px] flex flex-col">
+                <div className="flex items-center justify-between pb-3 border-b border-zinc-900 text-zinc-400 text-[11px]">
+                  <span>TIME</span>
+                  <div className="flex items-center gap-6">
+                    <span>METHOD</span>
+                    <span>PATH</span>
+                    <span>STATUS</span>
+                    <span>DURATION</span>
+                    <span>CLIENT IP</span>
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto space-y-1.5 max-h-[550px]">
+                  {liveLogs.length === 0 ? (
+                    <div className="py-16 text-center space-y-3 text-zinc-500">
+                      <Radio className="w-8 h-8 mx-auto text-emerald-500 animate-pulse" />
+                      <p className="text-xs font-semibold text-zinc-300">Live Request Tail Active</p>
+                      <p className="text-[11px] text-zinc-500 max-w-sm mx-auto">
+                        Waiting for incoming HTTP requests to <code className="text-emerald-400">{testUrl}</code>. Invocations will stream here in real time.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => onTestApp(app)}
+                        className="mt-2 inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-emerald-900/60 bg-emerald-950/40 hover:bg-emerald-950/70 text-emerald-400 text-xs font-semibold transition"
+                      >
+                        <Send className="w-3.5 h-3.5" /> Send Test Request
+                      </button>
+                    </div>
+                  ) : (
+                    liveLogs.map((entry, idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-center justify-between py-1.5 px-3 rounded hover:bg-zinc-900/60 transition border border-transparent hover:border-zinc-800/80"
+                      >
+                        <span className="text-zinc-500 text-[11px]">
+                          {new Date(entry.timestamp).toLocaleTimeString()}
+                        </span>
+                        <div className="flex items-center gap-4">
+                          <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${
+                            entry.method === 'GET' ? 'bg-sky-950 text-sky-400 border border-sky-800' :
+                            entry.method === 'POST' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' :
+                            entry.method === 'DELETE' ? 'bg-rose-950 text-rose-400 border border-rose-800' :
+                            'bg-zinc-800 text-zinc-300'
+                          }`}>
+                            {entry.method}
+                          </span>
+                          <span className="font-mono text-zinc-200 text-xs max-w-[200px] truncate" title={entry.path}>
+                            {entry.path}
+                          </span>
+                          <span className={`text-xs font-bold ${
+                            entry.status >= 200 && entry.status < 300 ? 'text-emerald-400' :
+                            entry.status >= 400 && entry.status < 500 ? 'text-amber-400' :
+                            entry.status >= 500 ? 'text-rose-400' : 'text-zinc-400'
+                          }`}>
+                            {entry.status}
+                          </span>
+                          <span className="text-zinc-400 text-[11px]">
+                            {Math.round(entry.durationMs)}ms
+                          </span>
+                          <span className="text-zinc-600 text-[10px]">
+                            {entry.clientIp}
+                          </span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -856,51 +1418,51 @@ export function ApplicationDetailPage({
           </div>
         )}
 
-        {/* Tab 3: Domain Setup */}
-        {activeTab === 'domains' && (
-          <div className="space-y-6 max-w-4xl">
-            {/* Default Traefik Subdomain Route */}
-            <div className="p-5 rounded-xl border border-zinc-800 bg-zinc-900/20 space-y-3">
-              <div className="flex items-start justify-between">
-                <div>
-                  <h3 className="text-sm font-semibold text-zinc-200">Default Subdomain Ingress</h3>
-                  <p className="text-xs text-zinc-400 mt-0.5">
-                    Automatically assigned and synchronized with the Traefik fleet proxy.
-                  </p>
-                </div>
-                <span className="text-xs font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-800/80 px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                  <ShieldCheck className="w-3.5 h-3.5" /> Active
-                </span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 pt-1">
-                <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800/80 font-mono text-xs flex items-center justify-between">
-                  <span className="text-emerald-400">{subdomain}.localhost</span>
-                  <span className="text-[10px] text-zinc-500">RFC 6761 Wildcard</span>
-                </div>
-                <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800/80 font-mono text-xs flex items-center justify-between">
-                  <span className="text-emerald-400">{subdomain}.cubit.local</span>
-                  <span className="text-[10px] text-zinc-500">Local Traefik Mesh</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Custom Domains */}
+        {/* Tab 3: Triggers */}
+        {activeTab === 'triggers' && (
+          <div className="space-y-8 max-w-4xl">
+            {/* Section 1: Ingress & Custom Domains */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-sm font-semibold text-zinc-200">Custom Domains</h3>
+                  <h3 className="text-sm font-bold text-zinc-200 flex items-center gap-2">
+                    <Globe className="w-4 h-4 text-purple-400" />
+                    HTTP & Custom Domains
+                  </h3>
                   <p className="text-xs text-zinc-400">
-                    Route external hostnames with automatic Let's Encrypt TLS certificates.
+                    Hostnames routed directly to this worker through Traefik and edge proxies.
                   </p>
                 </div>
               </div>
 
-              {appDomains.length === 0 ? (
-                <div className="p-6 rounded-xl border border-dashed border-zinc-800 text-center text-xs text-zinc-500">
-                  No custom domains configured for this application yet.
+              {/* Default Traefik Subdomain Route */}
+              <div className="p-5 rounded-xl border border-zinc-800 bg-zinc-900/20 space-y-3">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h4 className="text-xs font-semibold text-zinc-200">Default Subdomain Ingress</h4>
+                    <p className="text-[11px] text-zinc-500 mt-0.5">
+                      Automatically assigned and synchronized with the Traefik fleet proxy.
+                    </p>
+                  </div>
+                  <span className="text-xs font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-800/80 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                    <ShieldCheck className="w-3.5 h-3.5" /> Active
+                  </span>
                 </div>
-              ) : (
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800/80 font-mono text-xs flex items-center justify-between">
+                    <span className="text-emerald-400">{subdomain}.localhost</span>
+                    <span className="text-[10px] text-zinc-500">RFC 6761 Wildcard</span>
+                  </div>
+                  <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800/80 font-mono text-xs flex items-center justify-between">
+                    <span className="text-emerald-400">{subdomain}.cubit.local</span>
+                    <span className="text-[10px] text-zinc-500">Local Traefik Mesh</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Custom Domains list */}
+              {appDomains.length > 0 && (
                 <div className="space-y-2">
                   {appDomains.map(d => (
                     <div
@@ -926,7 +1488,7 @@ export function ApplicationDetailPage({
 
               {/* Add Custom Domain Form */}
               <form onSubmit={handleAddDomain} className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/20 space-y-3">
-                <span className="text-xs font-semibold text-zinc-300 block">Add New Domain</span>
+                <span className="text-xs font-semibold text-zinc-300 block">Add New Custom Domain</span>
                 <div className="flex gap-2">
                   <input
                     type="text"
@@ -946,6 +1508,155 @@ export function ApplicationDetailPage({
                   </button>
                 </div>
               </form>
+            </div>
+
+            {/* Section 2: Cron Triggers (scheduled()) */}
+            <div className="space-y-4 pt-4 border-t border-zinc-800/80">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-zinc-200 flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-sky-400" />
+                    Cron Triggers (scheduled())
+                  </h3>
+                  <p className="text-xs text-zinc-400">
+                    Execute your worker's exported <code className="font-mono text-emerald-400">scheduled(event, env, ctx)</code> handler on an automated schedule.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowAddCronModal(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold transition shadow-sm"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Add Cron Trigger
+                </button>
+              </div>
+
+              {attachedCron.length === 0 ? (
+                <div className="p-6 rounded-xl border border-dashed border-zinc-800 bg-zinc-950/40 text-center space-y-2">
+                  <p className="text-xs text-zinc-400">No cron triggers scheduled for this worker.</p>
+                  <p className="text-[11px] text-zinc-600 max-w-sm mx-auto">
+                    Add a cron schedule to periodically invoke maintenance tasks, cache warming, or scheduled jobs.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {attachedCron.map((cron) => (
+                    <div
+                      key={cron.id}
+                      className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/40 flex items-center justify-between gap-4 flex-wrap"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-lg bg-sky-950/80 border border-sky-800/80 text-sky-400">
+                          <Clock className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-zinc-200">{cron.name}</span>
+                            <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-zinc-800 text-emerald-400 border border-zinc-700">
+                              {cron.cronExpression || cron.cron}
+                            </span>
+                            <span className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase bg-emerald-950 text-emerald-400 border border-emerald-800">
+                              Active
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-zinc-500 font-mono mt-1">
+                            Last run: {cron.lastRunAt ? new Date(cron.lastRunAt).toLocaleString() : 'Never'}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleRunCronNow(cron.id)}
+                          disabled={runningCronId === cron.id}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-sky-800 bg-sky-950/60 hover:bg-sky-900/80 text-sky-300 text-xs font-semibold transition"
+                          title="Trigger immediate execution"
+                        >
+                          {runningCronId === cron.id ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+                          Run Now
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onNavigateToService?.('cron', cron.id)}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-semibold transition"
+                        >
+                          <span>Open in Cron</span>
+                          <ArrowRight className="w-3.5 h-3.5 text-zinc-400" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Section 3: Queue Consumers (queue()) */}
+            <div className="space-y-4 pt-4 border-t border-zinc-800/80">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-zinc-200 flex items-center gap-2">
+                    <Inbox className="w-4 h-4 text-emerald-400" />
+                    Queue Consumers (queue())
+                  </h3>
+                  <p className="text-xs text-zinc-400">
+                    Process batches of messages via your worker's exported <code className="font-mono text-emerald-400">queue(batch, env, ctx)</code> handler.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onNavigateToService?.('queues')}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-semibold transition"
+                >
+                  <span>Manage Queues</span>
+                  <ArrowRight className="w-3.5 h-3.5 text-emerald-400" />
+                </button>
+              </div>
+
+              {attachedQueues.length === 0 ? (
+                <div className="p-6 rounded-xl border border-dashed border-zinc-800 bg-zinc-950/40 text-center space-y-2">
+                  <p className="text-xs text-zinc-400">No queues configured to send messages to this worker.</p>
+                  <p className="text-[11px] text-zinc-600 max-w-sm mx-auto">
+                    To process messages, bind this worker as a consumer in the Queues control panel.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {attachedQueues.map((q) => (
+                    <div
+                      key={q.id}
+                      className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/40 flex items-center justify-between"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-lg bg-emerald-950/80 border border-emerald-800/80 text-emerald-400">
+                          <Inbox className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-zinc-200">{q.name}</span>
+                            <span className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase bg-emerald-950 text-emerald-400 border border-emerald-800">
+                              Consumer Active
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-zinc-500 font-mono mt-0.5">
+                            Batch size: {q.maxBatchSize || 10} • Retries: {q.maxRetries || 3}
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => onNavigateToService?.('queues', q.id)}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-semibold transition"
+                      >
+                        <span>Open Queue</span>
+                        <ArrowRight className="w-3.5 h-3.5 text-emerald-400" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -977,6 +1688,104 @@ export function ApplicationDetailPage({
                 </div>
               </div>
             </div>
+
+            {/* Runtime & Compatibility Configuration */}
+            <form onSubmit={handleSaveRuntime} className="p-5 rounded-xl border border-zinc-800 bg-zinc-900/20 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-zinc-200 flex items-center gap-2">
+                    <Sliders className="w-4 h-4 text-emerald-400" />
+                    Runtime & Compatibility Settings
+                  </h3>
+                  <p className="text-xs text-zinc-400">
+                    Point-in-time compatibility date, Node.js API support, and celld execution resource limits.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {runtimeSaveStatus === 'saved' && (
+                    <span className="text-xs text-emerald-400 font-semibold flex items-center gap-1">
+                      <Check className="w-3.5 h-3.5" /> Runtime Saved!
+                    </span>
+                  )}
+                  {runtimeSaveStatus === 'error' && (
+                    <span className="text-xs text-rose-400 font-semibold">Failed to save runtime</span>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={isSavingRuntime}
+                    className="px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-zinc-950 text-xs font-semibold transition"
+                  >
+                    {isSavingRuntime ? 'Saving...' : 'Save Runtime Settings'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-mono">
+                <div>
+                  <label className="text-zinc-400 block mb-1 font-sans font-medium">Compatibility Date</label>
+                  <input
+                    type="text"
+                    value={compatDate}
+                    onChange={e => setCompatDate(e.target.value)}
+                    placeholder="2024-04-03"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-zinc-200 outline-none focus:border-emerald-500"
+                  />
+                  <span className="text-[11px] text-zinc-500 font-sans block mt-1">
+                    Standard Cloudflare Worker point-in-time runtime snapshot (YYYY-MM-DD).
+                  </span>
+                </div>
+
+                <div>
+                  <label className="text-zinc-400 block mb-1 font-sans font-medium">Memory Limit (Isolate)</label>
+                  <select
+                    value={memoryLimitMB}
+                    onChange={e => setMemoryLimitMB(Number(e.target.value))}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-zinc-200 outline-none focus:border-emerald-500 font-sans"
+                  >
+                    <option value={64}>64 MB (Lightweight)</option>
+                    <option value={128}>128 MB (Default standard)</option>
+                    <option value={256}>256 MB (High capacity)</option>
+                    <option value={512}>512 MB (Data intensive)</option>
+                    <option value={1024}>1024 MB (Max limit)</option>
+                  </select>
+                  <span className="text-[11px] text-zinc-500 font-sans block mt-1">
+                    Maximum heap memory allocated per V8 isolate.
+                  </span>
+                </div>
+
+                <div>
+                  <label className="text-zinc-400 block mb-1 font-sans font-medium">CPU Execution Timeout (ms)</label>
+                  <input
+                    type="number"
+                    min={5}
+                    max={30000}
+                    value={maxDurationMs}
+                    onChange={e => setMaxDurationMs(Number(e.target.value))}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-zinc-200 outline-none focus:border-emerald-500"
+                  />
+                  <span className="text-[11px] text-zinc-500 font-sans block mt-1">
+                    Allowed CPU time per request before execution is terminated.
+                  </span>
+                </div>
+
+                <div className="flex flex-col justify-center pt-2">
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={nodejsCompat}
+                      onChange={e => setNodejsCompat(e.target.checked)}
+                      className="rounded bg-zinc-950 border-zinc-800 text-emerald-500 focus:ring-0 w-4 h-4"
+                    />
+                    <span className="text-xs font-semibold text-zinc-200 font-sans">
+                      Enable Node.js Compatibility (nodejs_compat)
+                    </span>
+                  </label>
+                  <span className="text-[11px] text-zinc-500 font-sans mt-1 ml-6">
+                    Injects <code className="text-emerald-400 font-mono">node:buffer</code>, <code className="text-emerald-400 font-mono">node:crypto</code>, <code className="text-emerald-400 font-mono">node:events</code>, etc.
+                  </span>
+                </div>
+              </div>
+            </form>
 
             {/* Environment Variables Editor */}
             <div className="p-5 rounded-xl border border-zinc-800 bg-zinc-900/20 space-y-4">
@@ -1069,6 +1878,28 @@ export function ApplicationDetailPage({
                   })}
                 </div>
               )}
+            </div>
+
+            {/* Danger Zone: Delete Application */}
+            <div className="p-5 rounded-xl border border-rose-900/60 bg-rose-950/10 space-y-4">
+              <div className="flex items-start justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-rose-300 flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-rose-400" />
+                    Danger Zone
+                  </h3>
+                  <p className="text-xs text-zinc-400 mt-1">
+                    Permanently delete this worker application and all its deployment records from the cluster.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteConfirm(true)}
+                  className="px-3.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold transition"
+                >
+                  Delete Worker
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -1450,12 +2281,15 @@ export function ApplicationDetailPage({
                   <option value="r2_bucket">R2 Bucket (Object Storage)</option>
                   <option value="queue">Queue (Message Queue Producer)</option>
                   <option value="workflow">Workflow (Stateful Durable Execution)</option>
+                  <option value="service">Service Binding (Worker-to-Worker RPC)</option>
                 </select>
               </div>
 
               {/* Resource Target */}
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-zinc-400">Target Fleet Resource</label>
+                <label className="text-xs font-semibold text-zinc-400">
+                  {newBindingType === 'service' ? 'Target Worker' : 'Target Fleet Resource'}
+                </label>
                 <select
                   value={newBindingResourceId}
                   onChange={e => setNewBindingResourceId(e.target.value)}
@@ -1476,6 +2310,9 @@ export function ApplicationDetailPage({
                   ))}
                   {newBindingType === 'workflow' && fleetWorkflows.map(w => (
                     <option key={w.id} value={w.name || w.id}>{w.name}</option>
+                  ))}
+                  {newBindingType === 'service' && allApps.filter(a => a.id !== app.id).map(a => (
+                    <option key={a.id} value={a.name || a.id}>{a.name} ({a.subdomain || a.id.substring(0, 8)})</option>
                   ))}
                   <option value="__custom__">-- Enter custom ID / name --</option>
                 </select>
@@ -1499,7 +2336,7 @@ export function ApplicationDetailPage({
                   <span className="text-xs font-mono text-zinc-500">env.</span>
                   <input
                     type="text"
-                    placeholder="MY_BINDING"
+                    placeholder={newBindingType === 'service' ? 'MY_WORKER' : 'MY_BINDING'}
                     value={newBindingName}
                     onChange={e => setNewBindingName(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, ''))}
                     className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-xs text-zinc-200 font-mono outline-none focus:border-emerald-500 uppercase"
@@ -1507,7 +2344,12 @@ export function ApplicationDetailPage({
                   />
                 </div>
                 <p className="text-[11px] text-zinc-500">
-                  Access in worker: <code className="font-mono text-emerald-400">env.{newBindingName || 'MY_BINDING'}</code>
+                  Access in worker: <code className="font-mono text-emerald-400">env.{newBindingName || (newBindingType === 'service' ? 'MY_WORKER' : 'MY_BINDING')}</code>
+                  {newBindingType === 'service' && (
+                    <span className="block mt-0.5 text-zinc-400">
+                      RPC fetch: <code className="font-mono text-zinc-300">await env.{newBindingName || 'MY_WORKER'}.fetch(request)</code>
+                    </span>
+                  )}
                 </p>
               </div>
 
@@ -1528,6 +2370,137 @@ export function ApplicationDetailPage({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add Cron Trigger Modal */}
+      {showAddCronModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Clock className="w-5 h-5 text-sky-400" />
+                <h3 className="text-lg font-bold text-zinc-100">Add Cron Trigger</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddCronModal(false)}
+                className="text-zinc-500 hover:text-zinc-300 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateCron} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-zinc-400">Trigger Name</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="daily-cleanup"
+                  value={newCronName}
+                  onChange={e => setNewCronName(e.target.value)}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-xs text-zinc-200 outline-none focus:border-sky-500 font-mono"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-zinc-400">Cron Expression</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="*/15 * * * *"
+                  value={newCronExpr}
+                  onChange={e => setNewCronExpr(e.target.value)}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-xs text-zinc-200 outline-none focus:border-sky-500 font-mono"
+                />
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {[
+                    { label: 'Every min', expr: '* * * * *' },
+                    { label: 'Every 5m', expr: '*/5 * * * *' },
+                    { label: 'Every 15m', expr: '*/15 * * * *' },
+                    { label: 'Hourly', expr: '0 * * * *' },
+                    { label: 'Daily (Midnight)', expr: '0 0 * * *' },
+                  ].map((preset) => (
+                    <button
+                      key={preset.expr}
+                      type="button"
+                      onClick={() => setNewCronExpr(preset.expr)}
+                      className="text-[10px] px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition"
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-zinc-400">Target Worker</label>
+                <input
+                  type="text"
+                  readOnly
+                  value={`${app.name} (${app.id})`}
+                  className="w-full bg-zinc-950/60 border border-zinc-800 rounded-lg p-2.5 text-xs text-zinc-400 font-mono select-all"
+                />
+                <p className="text-[11px] text-zinc-500">
+                  Invokes the exported <code className="font-mono text-emerald-400">scheduled(event, env, ctx)</code> handler.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setShowAddCronModal(false)}
+                  className="px-4 py-2 rounded-lg text-xs font-semibold text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isCreatingCron || !newCronName.trim() || !newCronExpr.trim()}
+                  className="px-5 py-2 rounded-lg text-xs font-bold bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white transition shadow-sm"
+                >
+                  {isCreatingCron ? 'Scheduling...' : 'Create Trigger'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Application Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-zinc-900 border border-rose-900/60 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center gap-3 text-rose-400">
+              <div className="p-2.5 rounded-full bg-rose-950/80 border border-rose-800/80">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <h3 className="text-base font-bold text-zinc-100">Delete Application?</h3>
+            </div>
+
+            <p className="text-xs text-zinc-400 leading-relaxed">
+              Are you sure you want to permanently delete <strong className="text-zinc-200">{app.name}</strong>? This action cannot be undone and will terminate all running isolates and remove deployment history.
+            </p>
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-zinc-800">
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(false)}
+                className="px-4 py-2 rounded-lg text-xs font-semibold text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteApp}
+                disabled={isDeletingApp}
+                className="px-5 py-2 rounded-lg text-xs font-bold bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white transition shadow-sm"
+              >
+                {isDeletingApp ? 'Deleting...' : 'Confirm Delete'}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -1553,6 +2526,8 @@ export function getServiceTabForBindingType(type: ResourceBindingType): ActiveTa
       return 'queues';
     case 'workflow':
       return 'workflows';
+    case 'service':
+      return 'apps';
     default:
       return 'apps';
   }
@@ -1570,6 +2545,8 @@ export function getServiceLabelForBindingType(type: ResourceBindingType): string
       return 'Queue Producer';
     case 'workflow':
       return 'Workflow';
+    case 'service':
+      return 'Worker RPC';
     default:
       return type;
   }
@@ -1587,6 +2564,8 @@ export function getServicePageName(type: ResourceBindingType): string {
       return 'Queues';
     case 'workflow':
       return 'Workflows';
+    case 'service':
+      return 'Workers';
     default:
       return 'Service';
   }
@@ -1604,6 +2583,8 @@ function renderBindingTypeIcon(type: ResourceBindingType) {
       return <Inbox className="w-4 h-4 text-emerald-400" />;
     case 'workflow':
       return <GitMerge className="w-4 h-4 text-pink-400" />;
+    case 'service':
+      return <Cpu className="w-4 h-4 text-emerald-400" />;
     default:
       return <Link2 className="w-4 h-4 text-zinc-400" />;
   }

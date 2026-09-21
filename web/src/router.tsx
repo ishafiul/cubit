@@ -52,9 +52,17 @@ export const appsRoute = createRoute({
 export const appDetailRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/apps/$appId',
-  validateSearch: (search: Record<string, unknown>): { tab?: DetailTab } => ({
-    tab: typeof search.tab === 'string' ? (search.tab as DetailTab) : undefined,
-  }),
+  validateSearch: (search: Record<string, unknown>): { tab?: DetailTab } => {
+    const rawTab = typeof search.tab === 'string' ? search.tab : undefined;
+    if (rawTab === 'domains') {
+      return { tab: 'triggers' };
+    }
+    const validTabs: DetailTab[] = ['overview', 'code', 'builds', 'triggers', 'bindings', 'settings'];
+    if (rawTab && validTabs.includes(rawTab as DetailTab)) {
+      return { tab: rawTab as DetailTab };
+    }
+    return { tab: undefined };
+  },
   component: AppDetailRouteView,
 });
 

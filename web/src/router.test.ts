@@ -64,10 +64,25 @@ describe('Given the Cubit TanStack Router configuration', () => {
         expect(result).toEqual({ tab: 'code' });
       });
 
-      it('Then non-string or missing tab becomes undefined', () => {
+      it('Then legacy domains tab redirects to triggers', () => {
+        const validate = (appDetailRoute.options as any).validateSearch;
+        expect(validate({ tab: 'domains' })).toEqual({ tab: 'triggers' });
+      });
+
+      it('Then overview, triggers, builds, bindings, settings are recognized as valid tabs', () => {
+        const validate = (appDetailRoute.options as any).validateSearch;
+        expect(validate({ tab: 'overview' })).toEqual({ tab: 'overview' });
+        expect(validate({ tab: 'triggers' })).toEqual({ tab: 'triggers' });
+        expect(validate({ tab: 'builds' })).toEqual({ tab: 'builds' });
+        expect(validate({ tab: 'bindings' })).toEqual({ tab: 'bindings' });
+        expect(validate({ tab: 'settings' })).toEqual({ tab: 'settings' });
+      });
+
+      it('Then non-string, missing, or invalid tab becomes undefined', () => {
         const validate = (appDetailRoute.options as any).validateSearch;
         expect(validate({})).toEqual({ tab: undefined });
         expect(validate({ tab: 123 })).toEqual({ tab: undefined });
+        expect(validate({ tab: 'non_existent_tab' })).toEqual({ tab: undefined });
       });
     });
 

@@ -27,6 +27,10 @@ CREATE TABLE IF NOT EXISTS applications (
     bindings TEXT,
     active_deployment_id TEXT,
     auto_deploy INTEGER NOT NULL DEFAULT 1,
+    compatibility_date TEXT NOT NULL DEFAULT '2024-09-23',
+    compatibility_flags TEXT NOT NULL DEFAULT '[]',
+    memory_limit_mb INTEGER NOT NULL DEFAULT 128,
+    max_duration_ms INTEGER NOT NULL DEFAULT 50,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL
 );
