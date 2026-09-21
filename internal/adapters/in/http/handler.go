@@ -67,6 +67,21 @@ func (h *APIHandler) CreateApplication(w http.ResponseWriter, r *http.Request) {
 		branch = *req.Branch
 	}
 
+	sourceType := domain.SourceTypeGit
+	if req.SourceType != nil && *req.SourceType != "" {
+		sourceType = domain.SourceType(*req.SourceType)
+	}
+
+	gitRepo := ""
+	if req.GitRepo != nil {
+		gitRepo = *req.GitRepo
+	}
+
+	inlineCode := ""
+	if req.InlineCode != nil {
+		inlineCode = *req.InlineCode
+	}
+
 	var envVars []domain.EnvironmentVariable
 	if req.EnvVars != nil {
 		for _, e := range *req.EnvVars {
@@ -97,7 +112,7 @@ func (h *APIHandler) CreateApplication(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	app, err := h.appUsecase.CreateApplication(r.Context(), req.Name, req.GitRepo, branch, envVars, bindings)
+	app, err := h.appUsecase.CreateApplicationWithSource(r.Context(), req.Name, sourceType, gitRepo, branch, inlineCode, envVars, bindings)
 	if err != nil {
 		h.respondError(w, err)
 		return
@@ -127,6 +142,11 @@ func (h *APIHandler) UpdateApplication(w http.ResponseWriter, r *http.Request, i
 	branch := ""
 	if req.Branch != nil {
 		branch = *req.Branch
+	}
+
+	inlineCode := ""
+	if req.InlineCode != nil {
+		inlineCode = *req.InlineCode
 	}
 
 	var envVars []domain.EnvironmentVariable
@@ -159,7 +179,7 @@ func (h *APIHandler) UpdateApplication(w http.ResponseWriter, r *http.Request, i
 		}
 	}
 
-	app, err := h.appUsecase.UpdateApplication(r.Context(), id.String(), branch, envVars, bindings)
+	app, err := h.appUsecase.UpdateApplication(r.Context(), id.String(), branch, inlineCode, envVars, bindings)
 	if err != nil {
 		h.respondError(w, err)
 		return
@@ -490,11 +510,30 @@ func toAPIApplication(a *domain.Application) Application {
 		activeDepUUID = &p
 	}
 
+	sourceType := SourceType(a.SourceType)
+	if sourceType == "" {
+		sourceType = Git
+	}
+
+	var gitRepo *string
+	if a.GitRepo != "" {
+		gitRepo = &a.GitRepo
+	}
+
+	branch := a.Branch
+
+	var inlineCode *string
+	if a.InlineCode != "" {
+		inlineCode = &a.InlineCode
+	}
+
 	return Application{
 		Id:                 uid,
 		Name:               a.Name,
-		GitRepo:            a.GitRepo,
-		Branch:             a.Branch,
+		SourceType:         sourceType,
+		GitRepo:            gitRepo,
+		Branch:             &branch,
+		InlineCode:         inlineCode,
 		Status:             ApplicationStatus(a.Status),
 		EnvVars:            &envs,
 		Bindings:           &bindings,

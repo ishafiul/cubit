@@ -111,5 +111,45 @@ func TestHTTPAPI(t *testing.T) {
 				}
 			})
 		})
+
+		t.Run("When creating an inline Hello World application via API", func(t *testing.T) {
+			createBody := []byte(`{
+				"name": "hello-world-api",
+				"sourceType": "inline"
+			}`)
+			createReq := httptest.NewRequest(http.MethodPost, "/api/v1/applications", bytes.NewReader(createBody))
+			createReq.Header.Set("Content-Type", "application/json")
+			createRec := httptest.NewRecorder()
+
+			router.ServeHTTP(createRec, createReq)
+
+			t.Run("Then application is created with 201 status and default Hello World template", func(t *testing.T) {
+				if createRec.Code != http.StatusCreated {
+					t.Fatalf("expected 201 created, got %d: %s", createRec.Code, createRec.Body.String())
+				}
+
+				var app http_adapter.Application
+				_ = json.NewDecoder(createRec.Body).Decode(&app)
+
+				if app.SourceType != http_adapter.Inline {
+					t.Errorf("expected source type inline, got %s", app.SourceType)
+				}
+				if app.InlineCode == nil || *app.InlineCode == "" {
+					t.Fatal("expected inlineCode to be populated, got nil or empty")
+				}
+				if app.GitRepo != nil && *app.GitRepo != "" {
+					t.Errorf("expected empty git repo, got %s", *app.GitRepo)
+				}
+
+				// Deploy inline application
+				deployReq := httptest.NewRequest(http.MethodPost, "/api/v1/applications/"+app.Id.String()+"/deploy", nil)
+				deployRec := httptest.NewRecorder()
+				router.ServeHTTP(deployRec, deployReq)
+
+				if deployRec.Code != http.StatusAccepted {
+					t.Fatalf("expected 202 accepted for inline deploy, got %d", deployRec.Code)
+				}
+			})
+		})
 	})
 }
