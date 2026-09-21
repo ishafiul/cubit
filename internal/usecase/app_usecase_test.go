@@ -326,6 +326,24 @@ func TestAppUsecase(t *testing.T) {
 				}
 			})
 
+			t.Run("Then older deployment transitions to superseded and only latest deployment is active", func(t *testing.T) {
+				savedDep1, err := depRepo.GetByID(ctx, dep1.ID)
+				if err != nil {
+					t.Fatalf("failed fetching dep1: %v", err)
+				}
+				if savedDep1.Status != domain.DeploymentStatusSuperseded {
+					t.Errorf("expected dep1 to be superseded, got %s", savedDep1.Status)
+				}
+				if dep2.Status != domain.DeploymentStatusActive {
+					t.Errorf("expected dep2 to be active, got %s", dep2.Status)
+				}
+
+				updatedApp, _ := appRepo.GetByID(ctx, app.ID)
+				if updatedApp.ActiveDeploymentID != dep2.ID {
+					t.Errorf("expected active deployment ID %s, got %s", dep2.ID, updatedApp.ActiveDeploymentID)
+				}
+			})
+
 			t.Run("Then Traefik routes include default project subdomain", func(t *testing.T) {
 				foundLocalhost := false
 				for _, r := range proxy.syncedRules {

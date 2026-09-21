@@ -264,6 +264,16 @@ func (u *AppUsecase) DeployApplication(ctx context.Context, appID, commitHash st
 		})
 	}
 
+	// Supersede any previously active deployment for this application so that only ONE version is active
+	if prevDeps, err := u.depRepo.ListByAppID(ctx, app.ID); err == nil {
+		for _, prev := range prevDeps {
+			if prev.ID != dep.ID && prev.Status == domain.DeploymentStatusActive {
+				prev.MarkSuperseded()
+				_ = u.depRepo.Update(ctx, prev)
+			}
+		}
+	}
+
 	_ = dep.MarkActive()
 	_ = u.depRepo.Update(ctx, dep)
 
