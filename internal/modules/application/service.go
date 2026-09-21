@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ishaf/cubit/internal/domain"
+	"github.com/ishaf/cubit/internal/modules/wrangler"
 )
 
 // StorageDownloader downloads compiled worker bundles from object storage.
@@ -44,6 +45,7 @@ type Service interface {
 	RecordExecution(appID string, method, path string, statusCode int, durationMs float64, clientIP, message string)
 	RecordExecutionEvent(appID string, event domain.RequestLogEvent)
 	SubscribeLiveLogs(appID string) (<-chan domain.RequestLogEvent, func())
+	ImportWrangler(ctx context.Context, appID string, rawConfig string, format string, envName string) (*domain.Application, *wrangler.ImportSummary, error)
 }
 
 type appMetricsTracker struct {
@@ -651,4 +653,33 @@ func generateID() string {
 	b[8] = (b[8] & 0x3f) | 0x80
 	h := hex.EncodeToString(b)
 	return fmt.Sprintf("%s-%s-%s-%s-%s", h[0:8], h[8:12], h[12:16], h[16:20], h[20:32])
+}
+
+// ImportWrangler parses a wrangler configuration (JSON, JSONC, or TOML) and synchronizes
+// environment variables, compatibility settings, and resource bindings into the application.
+func (s *ApplicationService) ImportWrangler(ctx context.Context, appID string, rawConfig string, format string, envName string) (*domain.Application, *wrangler.ImportSummary, error) {
+	app, err := s.repo.GetByID(ctx, appID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	cfg, detectedFormat, err := wrangler.Parse([]byte(rawConfig), format)
+	if err != nil {
+		return nil, nil, domain.NewValidationError(fmt.Sprintf("invalid wrangler configuration: %v", err))
+	}
+
+	summary, err := wrangler.ApplyToApplication(app, cfg, envName, detectedFormat)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if err := s.repo.Update(ctx, app); err != nil {
+		return nil, nil, err
+	}
+
+	if s.routeSyncer != nil {
+		_ = s.routeSyncer.SyncRoutes(ctx)
+	}
+
+	return app, summary, nil
 }

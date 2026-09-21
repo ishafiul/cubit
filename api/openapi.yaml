@@ -389,6 +389,39 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /applications/{id}/wrangler/import:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      summary: Import and synchronize wrangler.json or wrangler.toml configuration
+      operationId: importWranglerConfig
+      tags:
+        - applications
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WranglerImportRequest'
+      responses:
+        '200':
+          description: Configuration parsed and imported successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WranglerImportResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /applications/{id}/test:
     parameters:
       - name: id
@@ -896,6 +929,59 @@ components:
         updatedAt:
           type: string
           format: date-time
+
+    WranglerImportRequest:
+      type: object
+      required:
+        - rawConfig
+      properties:
+        rawConfig:
+          type: string
+          description: Raw content of wrangler.json, wrangler.jsonc, or wrangler.toml
+        format:
+          type: string
+          enum: [auto, json, toml]
+          default: auto
+        env:
+          type: string
+          description: Optional environment name override (e.g. staging, production)
+
+    WranglerImportResult:
+      type: object
+      required:
+        - success
+        - message
+        - importedVarsCount
+        - preservedSecretsCount
+        - importedBindingsCount
+        - application
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        name:
+          type: string
+        main:
+          type: string
+        compatibilityDate:
+          type: string
+        compatibilityFlags:
+          type: array
+          items:
+            type: string
+        importedVarsCount:
+          type: integer
+        preservedSecretsCount:
+          type: integer
+        importedBindingsCount:
+          type: integer
+        cronsCount:
+          type: integer
+        detectedFormat:
+          type: string
+        application:
+          $ref: '#/components/schemas/Application'
 
     ApplicationMetrics:
       type: object

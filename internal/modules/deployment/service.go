@@ -5,16 +5,21 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/ishaf/cubit/internal/domain"
+	"github.com/ishaf/cubit/internal/modules/wrangler"
 )
 
 // ApplicationManager defines the application operations needed by the deployment service.
 type ApplicationManager interface {
 	GetByID(ctx context.Context, id string) (*domain.Application, error)
 	SetActiveDeployment(ctx context.Context, appID, deploymentID string) error
+	ImportWrangler(ctx context.Context, appID string, rawConfig string, format string, envName string) (*domain.Application, *wrangler.ImportSummary, error)
 }
 
 // StorageUploader uploads compiled worker bundles to storage.
@@ -100,6 +105,8 @@ func (s *DeploymentService) DeployWithDetails(ctx context.Context, appID, commit
 	var bundleData []byte
 	if app.SourceType == domain.SourceTypeInline && app.InlineCode != "" {
 		bundleData = []byte(app.InlineCode)
+	} else if app.SourceType == domain.SourceTypeGit && app.GitRepo != "" {
+		bundleData = s.buildGitWorker(ctx, app, dep)
 	} else {
 		bundleData = []byte(domain.DefaultHelloWorldWorker)
 	}
@@ -266,3 +273,152 @@ func generateShortHash() string {
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
 }
+
+func (s *DeploymentService) buildGitWorker(ctx context.Context, app *domain.Application, dep *domain.Deployment) []byte {
+	repoPath := ""
+	isTempDir := false
+
+	// 1. Check if app.GitRepo points to a local folder or directory
+	if stat, err := os.Stat(app.GitRepo); err == nil && stat.IsDir() {
+		repoPath = app.GitRepo
+	} else {
+		// Attempt shallow clone
+		tempDir, err := os.MkdirTemp("", "cubit-build-*")
+		if err == nil {
+			isTempDir = true
+			defer func() {
+				if isTempDir {
+					_ = os.RemoveAll(tempDir)
+				}
+			}()
+
+			repoURL := app.GitRepo
+			if !strings.HasPrefix(repoURL, "http://") && !strings.HasPrefix(repoURL, "https://") && !strings.HasPrefix(repoURL, "git@") {
+				repoURL = "https://github.com/" + repoURL
+			}
+
+			branch := app.Branch
+			if branch == "" {
+				branch = "main"
+			}
+
+			cloneCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+			defer cancel()
+
+			cmd := exec.CommandContext(cloneCtx, "git", "clone", "--depth", "1", "-b", branch, repoURL, tempDir)
+			if out, err := cmd.CombinedOutput(); err == nil {
+				repoPath = tempDir
+				_ = s.repo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
+					Timestamp: time.Now().UTC(),
+					Step:      domain.LogStepGitClone,
+					Message:   fmt.Sprintf("Cloned repository %s (%s)", app.GitRepo, branch),
+					Level:     domain.LogLevelInfo,
+				})
+			} else {
+				_ = s.repo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
+					Timestamp: time.Now().UTC(),
+					Step:      domain.LogStepGitClone,
+					Message:   fmt.Sprintf("Git clone skipped/fallback: %s", strings.TrimSpace(string(out))),
+					Level:     domain.LogLevelWarn,
+				})
+			}
+		}
+	}
+
+	if repoPath == "" {
+		return []byte(domain.DefaultHelloWorldWorker)
+	}
+
+	// 2. Scan for wrangler.json, wrangler.jsonc, or wrangler.toml
+	candidates := []string{
+		"wrangler.json",
+		"wrangler.jsonc",
+		"wrangler.toml",
+		"worker/wrangler.json",
+		"worker/wrangler.toml",
+	}
+
+	var foundFile string
+	var wranglerData []byte
+	for _, c := range candidates {
+		fp := filepath.Join(repoPath, c)
+		if data, err := os.ReadFile(fp); err == nil && len(data) > 0 {
+			foundFile = c
+			wranglerData = data
+			break
+		}
+	}
+
+	var entrypoint string
+	if len(wranglerData) > 0 {
+		_, summary, err := s.appMgr.ImportWrangler(ctx, app.ID, string(wranglerData), "auto", app.Branch)
+		if err == nil && summary != nil {
+			_ = s.repo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
+				Timestamp: time.Now().UTC(),
+				Step:      domain.LogStepGitClone,
+				Message:   fmt.Sprintf("[wrangler] Detected %s: synced %d variables and %d bindings (compat: %s)", foundFile, summary.ImportedVarsCount, summary.ImportedBindingsCount, summary.CompatibilityDate),
+				Level:     domain.LogLevelInfo,
+			})
+			if summary.Main != "" {
+				entrypoint = summary.Main
+			}
+		} else if err != nil {
+			_ = s.repo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
+				Timestamp: time.Now().UTC(),
+				Step:      domain.LogStepGitClone,
+				Message:   fmt.Sprintf("[wrangler] Warning: failed parsing %s: %v", foundFile, err),
+				Level:     domain.LogLevelWarn,
+			})
+		}
+	}
+
+	// 3. Detect entrypoint file
+	if entrypoint == "" {
+		entryCandidates := []string{
+			"src/index.ts",
+			"src/index.js",
+			"src/worker.ts",
+			"src/worker.js",
+			"index.ts",
+			"index.js",
+		}
+		for _, ec := range entryCandidates {
+			if _, err := os.Stat(filepath.Join(repoPath, ec)); err == nil {
+				entrypoint = ec
+				break
+			}
+		}
+	}
+
+	if entrypoint != "" {
+		entryPath := filepath.Join(repoPath, entrypoint)
+		outPath := filepath.Join(repoPath, "dist-worker.js")
+
+		buildCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		defer cancel()
+
+		cmd := exec.CommandContext(buildCtx, "npx", "--yes", "esbuild", entryPath, "--bundle", "--format=esm", "--target=es2022", "--outfile="+outPath)
+		cmd.Dir = repoPath
+		if out, err := cmd.CombinedOutput(); err == nil {
+			if bundled, err := os.ReadFile(outPath); err == nil && len(bundled) > 0 {
+				_ = s.repo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
+					Timestamp: time.Now().UTC(),
+					Step:      domain.LogStepEsbuild,
+					Message:   fmt.Sprintf("[esbuild] Successfully bundled entrypoint '%s' (%d bytes)", entrypoint, len(bundled)),
+					Level:     domain.LogLevelInfo,
+				})
+				return bundled
+			}
+		} else {
+			_ = s.repo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
+				Timestamp: time.Now().UTC(),
+				Step:      domain.LogStepEsbuild,
+				Message:   fmt.Sprintf("[esbuild] Build error for '%s': %s", entrypoint, strings.TrimSpace(string(out))),
+				Level:     domain.LogLevelWarn,
+			})
+		}
+	}
+
+	return []byte(domain.DefaultHelloWorldWorker)
+}
+

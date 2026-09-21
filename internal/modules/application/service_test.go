@@ -315,5 +315,71 @@ export default {
 				}
 			})
 		})
+
+		t.Run("When importing wrangler configuration with existing secrets", func(t *testing.T) {
+			app, _ := svc.Create(
+				context.Background(),
+				"wrangler-app",
+				domain.SourceTypeInline,
+				"",
+				"main",
+				"export default {}",
+				false,
+				[]domain.EnvironmentVariable{
+					{Key: "DB_PASSWORD", Value: "existing-secret-pass", IsSecret: true},
+					{Key: "DEBUG", Value: "true", IsSecret: false},
+				},
+				nil,
+			)
+
+			wranglerJSON := `{
+				"compatibility_date": "2024-10-01",
+				"compatibility_flags": ["nodejs_compat"],
+				"vars": {
+					"DEBUG": "false",
+					"DB_PASSWORD": "dummy-wrangler-value",
+					"NEW_CONFIG_KEY": "hello-world"
+				},
+				"d1_databases": [
+					{ "binding": "DB", "database_name": "app-d1" }
+				]
+			}`
+
+			updatedApp, summary, err := svc.ImportWrangler(context.Background(), app.ID, wranglerJSON, "auto", "")
+
+			t.Run("Then configuration is imported and secrets are preserved", func(t *testing.T) {
+				if err != nil {
+					t.Fatalf("expected no error importing wrangler config, got: %v", err)
+				}
+				if summary.ImportedVarsCount != 3 {
+					t.Errorf("expected 3 imported vars, got %d", summary.ImportedVarsCount)
+				}
+				if summary.PreservedSecretsCount != 1 {
+					t.Errorf("expected 1 preserved secret, got %d", summary.PreservedSecretsCount)
+				}
+				if updatedApp.CompatibilityDate != "2024-10-01" {
+					t.Errorf("expected compat date 2024-10-01, got %s", updatedApp.CompatibilityDate)
+				}
+
+				vMap := make(map[string]domain.EnvironmentVariable)
+				for _, v := range updatedApp.EnvVars {
+					vMap[v.Key] = v
+				}
+
+				if !vMap["DB_PASSWORD"].IsSecret {
+					t.Errorf("DB_PASSWORD must remain secret, got: %+v", vMap["DB_PASSWORD"])
+				}
+				if vMap["DEBUG"].Value != "false" {
+					t.Errorf("DEBUG should be false, got: %s", vMap["DEBUG"].Value)
+				}
+				if vMap["NEW_CONFIG_KEY"].Value != "hello-world" {
+					t.Errorf("NEW_CONFIG_KEY should be hello-world, got: %s", vMap["NEW_CONFIG_KEY"].Value)
+				}
+				if len(updatedApp.Bindings) != 1 || updatedApp.Bindings[0].Name != "DB" {
+					t.Errorf("expected DB binding, got: %v", updatedApp.Bindings)
+				}
+			})
+		})
 	})
 }
+

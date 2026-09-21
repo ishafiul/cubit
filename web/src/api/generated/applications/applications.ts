@@ -35,7 +35,9 @@ import type {
   NotFoundResponse,
   TestApplicationRequest,
   TestApplicationResponse,
-  UpdateApplicationRequest
+  UpdateApplicationRequest,
+  WranglerImportRequest,
+  WranglerImportResult
 } from '../../model';
 
 import { customInstance } from '../../custom-instance';
@@ -605,6 +607,71 @@ export function useGetApplicationBundle<TData = Awaited<ReturnType<typeof getApp
 
 
 /**
+ * @summary Import and synchronize wrangler.json or wrangler.toml configuration
+ */
+export const importWranglerConfig = (
+    id: string,
+    wranglerImportRequest: WranglerImportRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return customInstance<WranglerImportResult>(
+      {url: `/applications/${id}/wrangler/import`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: wranglerImportRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getImportWranglerConfigMutationOptions = <TError = BadRequestResponse | NotFoundResponse | InternalErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importWranglerConfig>>, TError,{id: string;data: WranglerImportRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof importWranglerConfig>>, TError,{id: string;data: WranglerImportRequest}, TContext> => {
+
+const mutationKey = ['importWranglerConfig'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof importWranglerConfig>>, {id: string;data: WranglerImportRequest}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  importWranglerConfig(id,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ImportWranglerConfigMutationResult = NonNullable<Awaited<ReturnType<typeof importWranglerConfig>>>
+    export type ImportWranglerConfigMutationBody = WranglerImportRequest
+    export type ImportWranglerConfigMutationError = BadRequestResponse | NotFoundResponse | InternalErrorResponse
+
+    /**
+ * @summary Import and synchronize wrangler.json or wrangler.toml configuration
+ */
+export const useImportWranglerConfig = <TError = BadRequestResponse | NotFoundResponse | InternalErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importWranglerConfig>>, TError,{id: string;data: WranglerImportRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof importWranglerConfig>>,
+        TError,
+        {id: string;data: WranglerImportRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getImportWranglerConfigMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
  * @summary Send a test HTTP request to the active deployment of an application
  */
 export const testApplication = (

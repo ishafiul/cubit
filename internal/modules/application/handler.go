@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/ishaf/cubit/internal/domain"
@@ -60,6 +61,27 @@ type testApplicationRequest struct {
 	Path    *string            `json:"path,omitempty"`
 	Headers *map[string]string `json:"headers,omitempty"`
 	Body    *string            `json:"body,omitempty"`
+}
+
+type importWranglerRequest struct {
+	RawConfig string  `json:"rawConfig" binding:"required"`
+	Format    *string `json:"format,omitempty"`
+	Env       *string `json:"env,omitempty"`
+}
+
+type importWranglerResponse struct {
+	Success               bool                `json:"success"`
+	Message               string              `json:"message"`
+	Name                  string              `json:"name,omitempty"`
+	Main                  string              `json:"main,omitempty"`
+	CompatibilityDate     string              `json:"compatibilityDate"`
+	CompatibilityFlags    []string            `json:"compatibilityFlags"`
+	ImportedVarsCount     int                 `json:"importedVarsCount"`
+	PreservedSecretsCount int                 `json:"preservedSecretsCount"`
+	ImportedBindingsCount int                 `json:"importedBindingsCount"`
+	CronsCount            int                 `json:"cronsCount"`
+	DetectedFormat        string              `json:"detectedFormat"`
+	Application           applicationResponse `json:"application"`
 }
 
 type applicationResponse struct {
@@ -419,6 +441,52 @@ func (h *Handler) GetBundle(c *gin.Context) {
 		return
 	}
 	c.Data(http.StatusOK, "application/javascript; charset=utf-8", data)
+}
+
+// ImportWranglerConfig parses and imports a Cloudflare wrangler configuration.
+func (h *Handler) ImportWranglerConfig(c *gin.Context) {
+	id := c.Param("id")
+	var req importWranglerRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	format := "auto"
+	if req.Format != nil && *req.Format != "" {
+		format = *req.Format
+	}
+	envName := ""
+	if req.Env != nil {
+		envName = *req.Env
+	}
+
+	app, summary, err := h.service.ImportWrangler(c.Request.Context(), id, req.RawConfig, format, envName)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+
+	msg := fmt.Sprintf("Imported %d variables and %d bindings from %s configuration",
+		summary.ImportedVarsCount, summary.ImportedBindingsCount, strings.ToUpper(summary.DetectedFormat))
+	if summary.PreservedSecretsCount > 0 {
+		msg = fmt.Sprintf("%s (%d existing secrets preserved)", msg, summary.PreservedSecretsCount)
+	}
+
+	c.JSON(http.StatusOK, importWranglerResponse{
+		Success:               true,
+		Message:               msg,
+		Name:                  summary.Name,
+		Main:                  summary.Main,
+		CompatibilityDate:     summary.CompatibilityDate,
+		CompatibilityFlags:    summary.CompatibilityFlags,
+		ImportedVarsCount:     summary.ImportedVarsCount,
+		PreservedSecretsCount: summary.PreservedSecretsCount,
+		ImportedBindingsCount: summary.ImportedBindingsCount,
+		CronsCount:            summary.CronsCount,
+		DetectedFormat:        summary.DetectedFormat,
+		Application:           toResponse(app),
+	})
 }
 
 func respondError(c *gin.Context, err error) {

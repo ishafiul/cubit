@@ -2,11 +2,15 @@ package deployment_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/ishaf/cubit/internal/domain"
 	"github.com/ishaf/cubit/internal/modules/deployment"
+	"github.com/ishaf/cubit/internal/modules/wrangler"
 )
 
 type mockAppManager struct {
@@ -26,6 +30,18 @@ func (m *mockAppManager) SetActiveDeployment(ctx context.Context, appID, deploym
 		return nil
 	}
 	return domain.NewNotFoundError("application not found: " + appID)
+}
+
+func (m *mockAppManager) ImportWrangler(ctx context.Context, appID string, rawConfig string, format string, envName string) (*domain.Application, *wrangler.ImportSummary, error) {
+	if m.app != nil && m.app.ID == appID {
+		cfg, detectedFormat, err := wrangler.Parse([]byte(rawConfig), format)
+		if err != nil {
+			return nil, nil, err
+		}
+		summary, err := wrangler.ApplyToApplication(m.app, cfg, envName, detectedFormat)
+		return m.app, summary, err
+	}
+	return nil, nil, domain.NewNotFoundError("application not found: " + appID)
 }
 
 type mockDeploymentRepo struct {
@@ -179,6 +195,95 @@ func TestDeploymentService(t *testing.T) {
 			t.Run("Then rollback is rejected with validation error", func(t *testing.T) {
 				if err == nil {
 					t.Fatal("expected error rolling back to failed deployment, got nil")
+				}
+			})
+		})
+
+		t.Run("When deploying a Git application containing a wrangler.json file", func(t *testing.T) {
+			// Create a temp repository folder simulating a cloned repo
+			tempRepo, err := os.MkdirTemp("", "test-repo-*")
+			if err != nil {
+				t.Fatalf("failed to create temp repo dir: %v", err)
+			}
+			defer os.RemoveAll(tempRepo)
+
+			wranglerContent := `{
+				"name": "auto-pickup-worker",
+				"compatibility_date": "2024-11-20",
+				"compatibility_flags": ["nodejs_compat"],
+				"vars": {
+					"REPO_VAR": "detected-from-git",
+					"EXISTING_SECRET": "wrangler-ignored"
+				},
+				"d1_databases": [
+					{ "binding": "GIT_DB", "database_name": "prod-d1" }
+				]
+			}`
+			_ = os.WriteFile(filepath.Join(tempRepo, "wrangler.json"), []byte(wranglerContent), 0644)
+			_ = os.WriteFile(filepath.Join(tempRepo, "index.js"), []byte("export default { fetch() { return new Response('git worker'); } };"), 0644)
+
+			gitApp, err := domain.NewApplicationWithSource(
+				"git-app-1",
+				"git-worker",
+				domain.SourceTypeGit,
+				"github.com/example/git-worker",
+				"main",
+				"",
+				[]domain.EnvironmentVariable{
+					{Key: "EXISTING_SECRET", Value: "topsecretpass", IsSecret: true},
+				},
+				nil,
+			)
+			if err != nil {
+				t.Fatalf("failed to create git app: %v", err)
+			}
+			gitApp.GitRepo = tempRepo
+
+			gitAppMgr := &mockAppManager{app: gitApp}
+			gitDepRepo := newMockDeploymentRepo()
+			gitSvc := deployment.NewService(gitDepRepo, gitAppMgr, nil, nil, "cubit-fleet")
+
+			dep, err := gitSvc.Deploy(context.Background(), gitApp.ID, "commit123")
+
+			t.Run("Then wrangler.json is automatically parsed and applied to the application", func(t *testing.T) {
+				if err != nil {
+					t.Fatalf("unexpected deployment error: %v", err)
+				}
+				if dep.Status != domain.DeploymentStatusActive {
+					t.Fatalf("expected active deployment, got: %s", dep.Status)
+				}
+
+				// Verify logs recorded the wrangler pickup
+				logs, _ := gitSvc.GetLogs(context.Background(), dep.ID)
+				foundWranglerLog := false
+				for _, l := range logs {
+					if strings.Contains(l.Message, "[wrangler] Detected wrangler.json") {
+						foundWranglerLog = true
+						break
+					}
+				}
+				if !foundWranglerLog {
+					t.Errorf("expected wrangler detection log entry in deployment logs, got: %+v", logs)
+				}
+
+				// Verify application state was updated
+				if gitApp.CompatibilityDate != "2024-11-20" {
+					t.Errorf("expected compat date 2024-11-20, got: %s", gitApp.CompatibilityDate)
+				}
+
+				vMap := make(map[string]domain.EnvironmentVariable)
+				for _, v := range gitApp.EnvVars {
+					vMap[v.Key] = v
+				}
+
+				if vMap["REPO_VAR"].Value != "detected-from-git" {
+					t.Errorf("expected REPO_VAR detected-from-git, got: %s", vMap["REPO_VAR"].Value)
+				}
+				if !vMap["EXISTING_SECRET"].IsSecret {
+					t.Errorf("expected EXISTING_SECRET to maintain IsSecret=true")
+				}
+				if len(gitApp.Bindings) != 1 || gitApp.Bindings[0].Name != "GIT_DB" {
+					t.Errorf("expected GIT_DB binding, got: %v", gitApp.Bindings)
 				}
 			})
 		})
