@@ -7,12 +7,10 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 echo "==> Generating Go server interfaces and models from api/openapi.yaml..."
 mkdir -p "${ROOT_DIR}/internal/adapters/in/http"
 
-if ! command -v oapi-codegen >/dev/null 2>&1; then
-    echo "Installing oapi-codegen..."
-    go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@latest
-fi
-
-oapi-codegen -config "${ROOT_DIR}/api/oapi-codegen.yaml" "${ROOT_DIR}/api/openapi.yaml"
+# Use go run directly (no PATH or asdf shim dependencies needed)
+go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@latest \
+  -config "${ROOT_DIR}/api/oapi-codegen.yaml" \
+  "${ROOT_DIR}/api/openapi.yaml"
 
 echo "==> Go generation complete."
 
