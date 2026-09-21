@@ -129,4 +129,27 @@ func TestApplication(t *testing.T) {
 			}
 		})
 	})
+
+	t.Run("Given an application name", func(t *testing.T) {
+		t.Run("When creating application then subdomain is automatically assigned and sanitized", func(t *testing.T) {
+			app, err := domain.NewApplicationWithSource("app-4", "my-test-worker", domain.SourceTypeInline, "", "", "", nil, nil)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if app.Subdomain != "my-test-worker" {
+				t.Errorf("expected subdomain 'my-test-worker', got %s", app.Subdomain)
+			}
+			expectedURL := "http://my-test-worker.localhost:8000"
+			if app.DefaultTestURL(8000) != expectedURL {
+				t.Errorf("expected test URL %s, got %s", expectedURL, app.DefaultTestURL(8000))
+			}
+		})
+
+		t.Run("When sanitizing names with underscores or spaces then returns valid dns label", func(t *testing.T) {
+			result := domain.SanitizeSubdomain("My_Awesome App.")
+			if result != "my-awesome-app" {
+				t.Errorf("expected 'my-awesome-app', got %s", result)
+			}
+		})
+	})
 }

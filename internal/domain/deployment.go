@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"fmt"
 	"strings"
 	"time"
 )
@@ -47,24 +48,33 @@ type DeploymentLog struct {
 
 // Deployment represents an immutable release of an application.
 type Deployment struct {
-	ID            string
-	ApplicationID string
-	CommitHash    string
-	CommitMessage string
-	Status        DeploymentStatus
-	BundleSize    int64
-	ErrorMessage  string
-	CreatedAt     time.Time
-	FinishedAt    *time.Time
+	ID            string           `json:"id"`
+	ApplicationID string           `json:"applicationId"`
+	BuildVersion  int              `json:"buildVersion"`
+	CommitHash    string           `json:"commitHash"`
+	CommitMessage string           `json:"commitMessage"`
+	Status        DeploymentStatus `json:"status"`
+	BundleSize    int64            `json:"bundleSize"`
+	ErrorMessage  string           `json:"errorMessage,omitempty"`
+	CreatedAt     time.Time        `json:"createdAt"`
+	FinishedAt    *time.Time       `json:"finishedAt,omitempty"`
 }
 
-// NewDeployment creates and initializes a new Deployment.
+// NewDeployment creates and initializes a new Deployment with default build version 1.
 func NewDeployment(id, applicationID, commitHash, commitMessage string) (*Deployment, error) {
+	return NewDeploymentWithVersion(id, applicationID, commitHash, commitMessage, 1)
+}
+
+// NewDeploymentWithVersion creates a Deployment with an explicit sequential build version.
+func NewDeploymentWithVersion(id, applicationID, commitHash, commitMessage string, buildVersion int) (*Deployment, error) {
 	if strings.TrimSpace(id) == "" {
 		return nil, NewValidationError("deployment ID cannot be empty")
 	}
 	if strings.TrimSpace(applicationID) == "" {
 		return nil, NewValidationError("application ID cannot be empty")
+	}
+	if buildVersion < 1 {
+		buildVersion = 1
 	}
 
 	commitHash = strings.TrimSpace(commitHash)
@@ -76,11 +86,20 @@ func NewDeployment(id, applicationID, commitHash, commitMessage string) (*Deploy
 	return &Deployment{
 		ID:            id,
 		ApplicationID: applicationID,
+		BuildVersion:  buildVersion,
 		CommitHash:    commitHash,
 		CommitMessage: strings.TrimSpace(commitMessage),
 		Status:        DeploymentStatusPending,
 		CreatedAt:     now,
 	}, nil
+}
+
+// VersionTag returns a human-readable version tag like "v1", "v2".
+func (d *Deployment) VersionTag() string {
+	if d.BuildVersion <= 0 {
+		return "v1"
+	}
+	return fmt.Sprintf("v%d", d.BuildVersion)
 }
 
 // StartBuilding transitions deployment state from pending to building.

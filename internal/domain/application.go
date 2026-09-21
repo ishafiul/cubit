@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -23,7 +24,7 @@ const (
 	AppStatusFailed   ApplicationStatus = "failed"
 )
 
-// SourceType defines the origin of the application worker code.
+// SourceType defines whether the application code originates from Git or inline code.
 type SourceType string
 
 const (
@@ -31,7 +32,7 @@ const (
 	SourceTypeInline SourceType = "inline"
 )
 
-// DefaultHelloWorldWorker is the standard ES module template for inline worker applications.
+// DefaultHelloWorldWorker is the initial standard template for inline Cloudflare Workers.
 const DefaultHelloWorldWorker = `export default {
   async fetch(request, env, ctx) {
     return new Response("Hello World from Cubit Worker!", {
@@ -51,14 +52,14 @@ const (
 	BindingTypeWorkflow BindingType = "workflow"
 )
 
-// EnvironmentVariable represents an injected application runtime variable.
+// EnvironmentVariable represents a key-value pair injected into a Worker isolate.
 type EnvironmentVariable struct {
 	Key      string
 	Value    string
 	IsSecret bool
 }
 
-// ResourceBinding represents a binding to a stateful cell or storage.
+// ResourceBinding represents a cloud binding to a Worker (e.g. KV, R2, D1).
 type ResourceBinding struct {
 	Type       BindingType
 	Name       string
@@ -70,6 +71,7 @@ type Application struct {
 	ID                 string
 	Name               string
 	SourceType         SourceType
+	Subdomain          string
 	GitRepo            string
 	Branch             string
 	InlineCode         string
@@ -79,6 +81,27 @@ type Application struct {
 	ActiveDeploymentID string
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
+}
+
+// SanitizeSubdomain converts an application name into a valid RFC-1123 subdomain label.
+func SanitizeSubdomain(name string) string {
+	s := strings.ToLower(strings.TrimSpace(name))
+	s = strings.ReplaceAll(s, "_", "-")
+	s = strings.ReplaceAll(s, " ", "-")
+	s = strings.ReplaceAll(s, ".", "-")
+	s = strings.Trim(s, "-")
+	if s == "" {
+		s = "worker"
+	}
+	return s
+}
+
+// DefaultTestURL generates the standard local test URL for this application.
+func (a *Application) DefaultTestURL(basePort int) string {
+	if basePort <= 0 {
+		basePort = 8000
+	}
+	return fmt.Sprintf("http://%s.localhost:%d", a.Subdomain, basePort)
 }
 
 // NewApplication constructs and validates a new Git-backed Application entity (backwards-compatible).
@@ -133,6 +156,7 @@ func NewApplicationWithSource(
 		ID:         id,
 		Name:       name,
 		SourceType: sourceType,
+		Subdomain:  SanitizeSubdomain(name),
 		GitRepo:    gitRepo,
 		Branch:     branch,
 		InlineCode: inlineCode,

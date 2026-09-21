@@ -81,4 +81,32 @@ func TestDeployment(t *testing.T) {
 			}
 		})
 	})
+
+	t.Run("Given explicit build versions", func(t *testing.T) {
+		t.Run("When creating deployment with build version 2 then version tag is v2", func(t *testing.T) {
+			dep, err := domain.NewDeploymentWithVersion("dep-2", "app-1", "head", "deploy 2", 2)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if dep.BuildVersion != 2 {
+				t.Errorf("expected build version 2, got %d", dep.BuildVersion)
+			}
+			if dep.VersionTag() != "v2" {
+				t.Errorf("expected version tag 'v2', got %s", dep.VersionTag())
+			}
+		})
+
+		t.Run("When creating deployment with default version then version tag is v1", func(t *testing.T) {
+			dep, err := domain.NewDeployment("dep-1", "app-1", "head", "deploy 1")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if dep.BuildVersion != 1 {
+				t.Errorf("expected build version 1, got %d", dep.BuildVersion)
+			}
+			if dep.VersionTag() != "v1" {
+				t.Errorf("expected version tag 'v1', got %s", dep.VersionTag())
+			}
+		})
+	})
 }
