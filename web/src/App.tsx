@@ -42,7 +42,7 @@ import {
   useUpgradeCelldDaemon,
 } from './api/generated/runtime/runtime';
 import type { Application } from './api/model';
-import { ApplicationDetailPage } from './components/ApplicationDetailPage';
+import { ApplicationDetailPage, getDeploymentStatusBadge } from './components/ApplicationDetailPage';
 
 export default function App() {
   const [tab, setTab] = useState<'nodes' | 'apps' | 'domains' | 'logs'>('nodes');
@@ -893,8 +893,8 @@ function ApplicationCard({
 }: ApplicationCardProps) {
   const { data: deploymentsData } = useListDeployments(app.id);
   const deployments = Array.isArray(deploymentsData) ? deploymentsData : [];
-  const latestDep = deployments.length > 0 ? deployments[0] : null;
-  const buildVersion = latestDep?.buildVersion;
+  const activeDep = deployments.find(d => d.id === app.activeDeploymentId) || (deployments.length > 0 ? deployments[0] : null);
+  const buildVersion = activeDep?.buildVersion;
   const subdomain = app.subdomain || app.name;
   const testUrl = app.testUrl || `http://${subdomain}.localhost:8000`;
   const [copied, setCopied] = useState(false);
@@ -1328,13 +1328,7 @@ function BuildHistoryModal({ app, onClose }: BuildHistoryModalProps) {
                       <span className="font-bold text-xs text-emerald-400 font-mono">
                         v{dep.buildVersion || 1}
                       </span>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
-                        dep.status === 'active'
-                          ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
-                          : dep.status === 'failed'
-                          ? 'bg-rose-950 text-rose-400 border border-rose-800'
-                          : 'bg-zinc-800 text-zinc-400'
-                      }`}>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${getDeploymentStatusBadge(dep.status)}`}>
                         {dep.status}
                       </span>
                     </div>
@@ -1469,13 +1463,7 @@ function ProjectBuildLogsView({ appId, apps }: { appId: string; apps: Applicatio
                     <span className="font-bold text-xs text-emerald-400 font-mono">
                       v{dep.buildVersion || 1}
                     </span>
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
-                      dep.status === 'active'
-                        ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
-                        : dep.status === 'failed'
-                        ? 'bg-rose-950 text-rose-400 border border-rose-800'
-                        : 'bg-zinc-800 text-zinc-400'
-                    }`}>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${getDeploymentStatusBadge(dep.status)}`}>
                       {dep.status}
                     </span>
                   </div>

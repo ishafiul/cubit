@@ -27,6 +27,23 @@ import { useUpdateApplication } from '../api/generated/applications/applications
 import { useListDomains, useCreateDomain } from '../api/generated/domains/domains';
 import { CodeEditor } from './CodeEditor';
 
+export function getDeploymentStatusBadge(status: string) {
+  switch (status) {
+    case 'active':
+      return 'bg-emerald-950 text-emerald-400 border border-emerald-800';
+    case 'superseded':
+      return 'bg-zinc-800/80 text-zinc-400 border border-zinc-700/60';
+    case 'building':
+    case 'deploying':
+      return 'bg-amber-950 text-amber-400 border border-amber-800';
+    case 'failed':
+      return 'bg-rose-950 text-rose-400 border border-rose-800';
+    case 'pending':
+    default:
+      return 'bg-zinc-900 text-zinc-500 border border-zinc-800';
+  }
+}
+
 export interface ApplicationDetailPageProps {
   app: Application;
   onBack: () => void;
@@ -54,11 +71,14 @@ export function ApplicationDetailPage({
   // Deployments hook
   const { data: deploymentsData, refetch: refetchDeployments } = useListDeployments(app.id);
   const deployments = Array.isArray(deploymentsData) ? deploymentsData : [];
-  const latestDep = deployments.length > 0 ? deployments[0] : null;
-  const currentBuildVersion = latestDep?.buildVersion || 1;
+  const activeDep = deployments.find(d => d.id === app.activeDeploymentId) || (deployments.length > 0 ? deployments[0] : null);
+  const activeBuildVersion = activeDep?.buildVersion || 1;
+  const latestBuildVersion = deployments.reduce((max, d) => Math.max(max, d.buildVersion || 1), 0);
+  const nextDeployVersion = latestBuildVersion + 1;
 
   // Selected deployment for logs
   const [selectedDepId, setSelectedDepId] = useState<string | null>(null);
+  const selectedDep = deployments.find(d => d.id === selectedDepId) || null;
   const [depLogs, setDepLogs] = useState<Array<{ timestamp: string; step: string; message: string; level: string }>>([]);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
 
@@ -266,7 +286,7 @@ export function ApplicationDetailPage({
               ) : (
                 <Play className="w-3.5 h-3.5 fill-current" />
               )}
-              {isDeploying ? 'Deploying...' : `Deploy v${currentBuildVersion + 1}`}
+              {isDeploying ? 'Deploying...' : `Deploy v${nextDeployVersion}`}
             </button>
           </div>
         </div>
@@ -282,7 +302,7 @@ export function ApplicationDetailPage({
                 {app.status}
               </span>
               <span className="text-[11px] px-2.5 py-0.5 rounded-full font-mono font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-800/80">
-                v{currentBuildVersion}
+                v{activeBuildVersion}
               </span>
               {app.sourceType === 'inline' ? (
                 <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-sky-950/80 text-sky-400 border border-sky-800/60 flex items-center gap-1">
@@ -423,13 +443,7 @@ export function ApplicationDetailPage({
                         <span className="font-bold text-xs text-emerald-400 font-mono">
                           v{dep.buildVersion || 1}
                         </span>
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
-                          dep.status === 'active'
-                            ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
-                            : dep.status === 'failed'
-                            ? 'bg-rose-950 text-rose-400 border border-rose-800'
-                            : 'bg-amber-950 text-amber-400 border border-amber-800'
-                        }`}>
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${getDeploymentStatusBadge(dep.status)}`}>
                           {dep.status}
                         </span>
                       </div>
@@ -449,9 +463,16 @@ export function ApplicationDetailPage({
             {/* Build Logs Console (Right Column) */}
             <div className="col-span-8 flex flex-col space-y-2 min-h-0">
               <div className="flex items-center justify-between text-xs text-zinc-400">
-                <span className="font-semibold uppercase tracking-wider">
-                  {selectedDepId ? `Build Output (ID: ${selectedDepId.slice(0, 8)})` : 'Build Output'}
-                </span>
+                <div className="flex items-center gap-2.5">
+                  <span className="font-semibold uppercase tracking-wider">
+                    {selectedDep ? `Build Output (v${selectedDep.buildVersion || 1})` : 'Build Output'}
+                  </span>
+                  {selectedDep && (
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${getDeploymentStatusBadge(selectedDep.status)}`}>
+                      {selectedDep.status}
+                    </span>
+                  )}
+                </div>
                 {selectedDepId && (
                   <span className="font-mono text-[10px] text-zinc-500">{selectedDepId}</span>
                 )}
