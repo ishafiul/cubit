@@ -19,7 +19,7 @@ interface CronRun {
   executedAt: string;
 }
 
-export function CronView() {
+export function CronView({ initialSelectedId }: { initialSelectedId?: string } = {}) {
   const [triggers, setTriggers] = useState<CronTrigger[]>([]);
   const [selectedTrigger, setSelectedTrigger] = useState<CronTrigger | null>(null);
   const [runs, setRuns] = useState<CronRun[]>([]);
@@ -41,6 +41,13 @@ export function CronView() {
       const data = await res.json();
       const list = Array.isArray(data) ? data : [];
       setTriggers(list);
+      if (initialSelectedId) {
+        const found = list.find(t => t.id === initialSelectedId || t.name === initialSelectedId);
+        if (found) {
+          setSelectedTrigger(found);
+          return;
+        }
+      }
       if (list.length > 0 && !selectedTrigger) {
         setSelectedTrigger(list[0]);
       }
@@ -50,6 +57,15 @@ export function CronView() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (initialSelectedId && triggers.length > 0) {
+      const found = triggers.find(t => t.id === initialSelectedId || t.name === initialSelectedId);
+      if (found) {
+        setSelectedTrigger(found);
+      }
+    }
+  }, [initialSelectedId, triggers]);
 
   const fetchRuns = async (triggerId: string) => {
     try {

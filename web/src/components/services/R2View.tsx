@@ -16,7 +16,7 @@ interface R2Object {
   lastModified: string;
 }
 
-export function R2View() {
+export function R2View({ initialSelectedId }: { initialSelectedId?: string } = {}) {
   const [buckets, setBuckets] = useState<R2Bucket[]>([]);
   const [selectedBucket, setSelectedBucket] = useState<R2Bucket | null>(null);
   const [objects, setObjects] = useState<R2Object[]>([]);
@@ -37,6 +37,13 @@ export function R2View() {
       const data = await res.json();
       const list = Array.isArray(data) ? data : [];
       setBuckets(list);
+      if (initialSelectedId) {
+        const found = list.find(b => b.name === initialSelectedId);
+        if (found) {
+          setSelectedBucket(found);
+          return;
+        }
+      }
       if (list.length > 0 && !selectedBucket) {
         setSelectedBucket(list[0]);
       }
@@ -46,6 +53,15 @@ export function R2View() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (initialSelectedId && buckets.length > 0) {
+      const found = buckets.find(b => b.name === initialSelectedId);
+      if (found) {
+        setSelectedBucket(found);
+      }
+    }
+  }, [initialSelectedId, buckets]);
 
   const fetchObjects = async (bucketName: string) => {
     try {

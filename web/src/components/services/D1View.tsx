@@ -16,7 +16,7 @@ interface D1QueryResult {
   durationMs: number;
 }
 
-export function D1View() {
+export function D1View({ initialSelectedId }: { initialSelectedId?: string } = {}) {
   const [databases, setDatabases] = useState<D1Database[]>([]);
   const [selectedDb, setSelectedDb] = useState<D1Database | null>(null);
   const [loading, setLoading] = useState(false);
@@ -51,6 +51,13 @@ SELECT * FROM users;`
       const data = await res.json();
       const list = Array.isArray(data) ? data : [];
       setDatabases(list);
+      if (initialSelectedId) {
+        const found = list.find(d => d.id === initialSelectedId || d.name === initialSelectedId);
+        if (found) {
+          setSelectedDb(found);
+          return;
+        }
+      }
       if (list.length > 0 && !selectedDb) {
         setSelectedDb(list[0]);
       }
@@ -60,6 +67,15 @@ SELECT * FROM users;`
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (initialSelectedId && databases.length > 0) {
+      const found = databases.find(d => d.id === initialSelectedId || d.name === initialSelectedId);
+      if (found) {
+        setSelectedDb(found);
+      }
+    }
+  }, [initialSelectedId, databases]);
 
   useEffect(() => {
     fetchDatabases();

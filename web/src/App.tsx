@@ -79,6 +79,13 @@ export type ActiveTab =
 export default function App() {
   const [tab, setTab] = useState<ActiveTab>('apps');
   const [currentAppId, setCurrentAppId] = useState<string | null>(null);
+  const [selectedServiceId, setSelectedServiceId] = useState<string | undefined>(undefined);
+
+  const handleNavigateToService = (targetTab: ActiveTab, resourceId?: string) => {
+    setCurrentAppId(null);
+    setSelectedServiceId(resourceId);
+    setTab(targetTab);
+  };
 
   // Orval TanStack Query hooks (100% type-safe from OpenAPI)
   const { data: nodesData, refetch: refetchNodes } = useListNodes();
@@ -632,6 +639,7 @@ export default function App() {
               isDeploying={isDeploying === currentApp.id}
               onTestApp={setTestingApp}
               onRefreshApps={refetchApps}
+              onNavigateToService={handleNavigateToService}
             />
           )}
 
@@ -772,15 +780,15 @@ export default function App() {
           )}
 
           {tab === 'dynamic-workers' && <DynamicWorkersView />}
-          {tab === 'durable-objects' && <DurableObjectsView />}
+          {tab === 'durable-objects' && <DurableObjectsView initialSelectedId={selectedServiceId} />}
           {tab === 'containers' && <ContainersView />}
-          {tab === 'kv' && <KVView />}
-          {tab === 'd1' && <D1View />}
-          {tab === 'r2' && <R2View />}
+          {tab === 'kv' && <KVView initialSelectedId={selectedServiceId} />}
+          {tab === 'd1' && <D1View initialSelectedId={selectedServiceId} />}
+          {tab === 'r2' && <R2View initialSelectedId={selectedServiceId} />}
           {tab === 'static-assets' && <StaticAssetsView />}
-          {tab === 'cron' && <CronView />}
-          {tab === 'queues' && <QueuesView />}
-          {tab === 'workflows' && <WorkflowsView />}
+          {tab === 'cron' && <CronView initialSelectedId={selectedServiceId} />}
+          {tab === 'queues' && <QueuesView initialSelectedId={selectedServiceId} />}
+          {tab === 'workflows' && <WorkflowsView initialSelectedId={selectedServiceId} />}
         </div>
       </main>
 

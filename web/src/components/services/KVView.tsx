@@ -17,7 +17,7 @@ interface KVPair {
   updatedAt: string;
 }
 
-export function KVView() {
+export function KVView({ initialSelectedId }: { initialSelectedId?: string } = {}) {
   const [namespaces, setNamespaces] = useState<KVNamespace[]>([]);
   const [selectedNs, setSelectedNs] = useState<KVNamespace | null>(null);
   const [pairs, setPairs] = useState<KVPair[]>([]);
@@ -44,6 +44,13 @@ export function KVView() {
       const data = await res.json();
       const list = Array.isArray(data) ? data : [];
       setNamespaces(list);
+      if (initialSelectedId) {
+        const found = list.find(n => n.id === initialSelectedId || n.name === initialSelectedId);
+        if (found) {
+          setSelectedNs(found);
+          return;
+        }
+      }
       if (list.length > 0 && !selectedNs) {
         setSelectedNs(list[0]);
       }
@@ -53,6 +60,15 @@ export function KVView() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (initialSelectedId && namespaces.length > 0) {
+      const found = namespaces.find(n => n.id === initialSelectedId || n.name === initialSelectedId);
+      if (found) {
+        setSelectedNs(found);
+      }
+    }
+  }, [initialSelectedId, namespaces]);
 
   const fetchPairs = async (nsId: string) => {
     try {

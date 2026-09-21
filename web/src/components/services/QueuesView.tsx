@@ -18,7 +18,7 @@ interface QueueMessage {
   createdAt: string;
 }
 
-export function QueuesView() {
+export function QueuesView({ initialSelectedId }: { initialSelectedId?: string } = {}) {
   const [queues, setQueues] = useState<Queue[]>([]);
   const [selectedQueue, setSelectedQueue] = useState<Queue | null>(null);
   const [messages, setMessages] = useState<QueueMessage[]>([]);
@@ -43,6 +43,13 @@ export function QueuesView() {
       const data = await res.json();
       const list = Array.isArray(data) ? data : [];
       setQueues(list);
+      if (initialSelectedId) {
+        const found = list.find(q => q.id === initialSelectedId || q.name === initialSelectedId);
+        if (found) {
+          setSelectedQueue(found);
+          return;
+        }
+      }
       if (list.length > 0 && !selectedQueue) {
         setSelectedQueue(list[0]);
       }
@@ -52,6 +59,15 @@ export function QueuesView() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (initialSelectedId && queues.length > 0) {
+      const found = queues.find(q => q.id === initialSelectedId || q.name === initialSelectedId);
+      if (found) {
+        setSelectedQueue(found);
+      }
+    }
+  }, [initialSelectedId, queues]);
 
   const fetchMessages = async (queueId: string) => {
     try {

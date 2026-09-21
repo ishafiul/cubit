@@ -19,7 +19,7 @@ interface WorkflowRun {
   finishedAt?: string;
 }
 
-export function WorkflowsView() {
+export function WorkflowsView({ initialSelectedId }: { initialSelectedId?: string } = {}) {
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [selectedWf, setSelectedWf] = useState<Workflow | null>(null);
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
@@ -41,6 +41,13 @@ export function WorkflowsView() {
       const data = await res.json();
       const list = Array.isArray(data) ? data : [];
       setWorkflows(list);
+      if (initialSelectedId) {
+        const found = list.find(w => w.id === initialSelectedId || w.name === initialSelectedId);
+        if (found) {
+          setSelectedWf(found);
+          return;
+        }
+      }
       if (list.length > 0 && !selectedWf) {
         setSelectedWf(list[0]);
       }
@@ -50,6 +57,15 @@ export function WorkflowsView() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (initialSelectedId && workflows.length > 0) {
+      const found = workflows.find(w => w.id === initialSelectedId || w.name === initialSelectedId);
+      if (found) {
+        setSelectedWf(found);
+      }
+    }
+  }, [initialSelectedId, workflows]);
 
   const fetchRuns = async (wfId: string) => {
     try {

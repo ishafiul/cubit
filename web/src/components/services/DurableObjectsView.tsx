@@ -24,7 +24,7 @@ interface DurableObjectInstance {
   createdAt: string;
 }
 
-export function DurableObjectsView() {
+export function DurableObjectsView({ initialSelectedId }: { initialSelectedId?: string } = {}) {
   const [classes, setClasses] = useState<DurableObjectClass[]>([]);
   const [selectedClass, setSelectedClass] = useState<DurableObjectClass | null>(null);
   const [instances, setInstances] = useState<DurableObjectInstance[]>([]);
@@ -49,6 +49,13 @@ export function DurableObjectsView() {
       const data = await res.json();
       const list = Array.isArray(data) ? data : [];
       setClasses(list);
+      if (initialSelectedId) {
+        const found = list.find(c => c.id === initialSelectedId || c.name === initialSelectedId);
+        if (found) {
+          setSelectedClass(found);
+          return;
+        }
+      }
       if (list.length > 0 && !selectedClass) {
         setSelectedClass(list[0]);
       }
@@ -58,6 +65,15 @@ export function DurableObjectsView() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (initialSelectedId && classes.length > 0) {
+      const found = classes.find(c => c.id === initialSelectedId || c.name === initialSelectedId);
+      if (found) {
+        setSelectedClass(found);
+      }
+    }
+  }, [initialSelectedId, classes]);
 
   const fetchInstances = async (classId: string) => {
     try {
