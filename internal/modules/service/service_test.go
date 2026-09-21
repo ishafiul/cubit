@@ -111,4 +111,62 @@ func TestServicesService(t *testing.T) {
 			})
 		})
 	})
+
+	t.Run("Given R2 bucket operations", func(t *testing.T) {
+		t.Run("When creating a custom R2 bucket", func(t *testing.T) {
+			b, err := svc.CreateR2Bucket(ctx, "user-media-assets")
+			if err != nil {
+				t.Fatalf("failed creating R2 bucket: %v", err)
+			}
+			if b.Name != "user-media-assets" {
+				t.Errorf("expected bucket name user-media-assets, got %s", b.Name)
+			}
+
+			t.Run("Then it is listed alongside the protected fleet bucket", func(t *testing.T) {
+				buckets, err := svc.ListR2Buckets(ctx)
+				if err != nil {
+					t.Fatalf("failed listing R2 buckets: %v", err)
+				}
+				if len(buckets) < 2 {
+					t.Fatalf("expected at least 2 buckets, got %d", len(buckets))
+				}
+
+				var foundFleet, foundUser bool
+				for _, bk := range buckets {
+					if bk.Name == "cubit-fleet" && bk.IsSystem {
+						foundFleet = true
+					}
+					if bk.Name == "user-media-assets" && !bk.IsSystem {
+						foundUser = true
+					}
+				}
+				if !foundFleet {
+					t.Errorf("expected protected system bucket cubit-fleet")
+				}
+				if !foundUser {
+					t.Errorf("expected user bucket user-media-assets")
+				}
+			})
+
+			t.Run("Then uploading to system fleet bucket is forbidden", func(t *testing.T) {
+				uploadErr := svc.UploadR2Object(ctx, "cubit-fleet", "test.txt", []byte("hello"))
+				if uploadErr == nil {
+					t.Fatalf("expected upload error on system bucket, got nil")
+				}
+			})
+
+			t.Run("Then deleting system fleet bucket is forbidden", func(t *testing.T) {
+				delErr := svc.DeleteR2Bucket(ctx, "cubit-fleet")
+				if delErr == nil {
+					t.Fatalf("expected delete error on system bucket, got nil")
+				}
+			})
+
+			t.Run("Then deleting custom user bucket succeeds", func(t *testing.T) {
+				if err := svc.DeleteR2Bucket(ctx, "user-media-assets"); err != nil {
+					t.Fatalf("failed deleting user bucket: %v", err)
+				}
+			})
+		})
+	})
 }

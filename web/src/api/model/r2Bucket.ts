@@ -5,18 +5,11 @@
  * Strict REST API for Cubit, an open-source bare-metal PaaS for running Cloudflare Workers and Durable Objects using celld, Traefik, and S3 storage.
  * OpenAPI spec version: 1.0.0
  */
-import type { NodeStatus } from './nodeStatus';
-import type { NodeSpecs } from './nodeSpecs';
 
-export interface Node {
-  id: string;
+export interface R2Bucket {
   name: string;
-  ipAddress: string;
-  internalPort: number;
-  workerPort: number;
-  status: NodeStatus;
-  celldVersion: string;
-  specs?: NodeSpecs;
-  isProtected?: boolean;
+  objectsCount: number;
+  sizeBytes: number;
+  isSystem?: boolean;
   createdAt: string;
 }

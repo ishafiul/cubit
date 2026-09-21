@@ -70,6 +70,11 @@ type Repository interface {
 	SaveStaticSite(ctx context.Context, site *domain.StaticSite) error
 	ListStaticSites(ctx context.Context) ([]*domain.StaticSite, error)
 	DeleteStaticSite(ctx context.Context, id string) error
+
+	// R2
+	SaveR2Bucket(ctx context.Context, bucket *domain.R2Bucket) error
+	ListR2Buckets(ctx context.Context) ([]*domain.R2Bucket, error)
+	DeleteR2Bucket(ctx context.Context, name string) error
 }
 
 type SQLiteRepository struct {
@@ -762,3 +767,47 @@ func (r *SQLiteRepository) DeleteStaticSite(ctx context.Context, id string) erro
 	_, err := r.db.ExecContext(ctx, query, id)
 	return err
 }
+
+// -----------------------------------------------------------------------------
+// R2 Operations
+// -----------------------------------------------------------------------------
+
+func (r *SQLiteRepository) SaveR2Bucket(ctx context.Context, b *domain.R2Bucket) error {
+	query := `INSERT INTO r2_buckets (name, created_at) VALUES (?, ?)`
+	_, err := r.db.ExecContext(ctx, query, b.Name, b.CreatedAt.Format(time.RFC3339))
+	return err
+}
+
+func (r *SQLiteRepository) ListR2Buckets(ctx context.Context) ([]*domain.R2Bucket, error) {
+	query := `SELECT name, created_at FROM r2_buckets ORDER BY created_at DESC`
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var buckets []*domain.R2Bucket
+	for rows.Next() {
+		var (
+			b            domain.R2Bucket
+			createdAtStr string
+		)
+		if err := rows.Scan(&b.Name, &createdAtStr); err != nil {
+			return nil, err
+		}
+		b.CreatedAt, _ = time.Parse(time.RFC3339, createdAtStr)
+		b.IsSystem = false
+		buckets = append(buckets, &b)
+	}
+	if buckets == nil {
+		buckets = []*domain.R2Bucket{}
+	}
+	return buckets, rows.Err()
+}
+
+func (r *SQLiteRepository) DeleteR2Bucket(ctx context.Context, name string) error {
+	query := `DELETE FROM r2_buckets WHERE name = ?`
+	_, err := r.db.ExecContext(ctx, query, name)
+	return err
+}
+

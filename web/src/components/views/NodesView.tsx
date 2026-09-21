@@ -9,6 +9,8 @@ import {
   Pause,
   Trash2,
   RefreshCw,
+  Shield,
+  Lock,
 } from 'lucide-react';
 import { useDashboard } from '../../context/DashboardContext';
 
@@ -141,6 +143,7 @@ export function NodesView() {
               const isDraining = node.status === 'draining';
               const isOffline = node.status === 'offline';
               const isActive = node.status === 'active';
+              const isMainNode = Boolean(node.isProtected || node.name === 'worker-node-01');
 
               return (
                 <div
@@ -162,6 +165,12 @@ export function NodesView() {
                         >
                           {node.status}
                         </span>
+                        {isMainNode && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider bg-sky-950/80 text-sky-400 border border-sky-800/80 flex items-center gap-1">
+                            <Shield className="w-2.5 h-2.5" />
+                            <span>Main Node</span>
+                          </span>
+                        )}
                       </div>
                       <p className="text-xs text-zinc-400 font-mono mt-0.5">{node.ipAddress}</p>
                     </div>
@@ -183,69 +192,81 @@ export function NodesView() {
 
                   {/* Node Management Actions */}
                   <div className="flex items-center justify-between pt-2 border-t border-zinc-850">
-                    <div className="flex items-center gap-2">
-                      {isActive && (
+                    {isMainNode ? (
+                      <div className="flex items-center justify-between w-full">
+                        <div className="flex items-center gap-1.5 text-xs text-zinc-400 font-medium py-1">
+                          <Lock className="w-3.5 h-3.5 text-sky-400" />
+                          <span>Protected Main Node (Cannot be drained or removed)</span>
+                        </div>
+                        <span className="text-[10px] font-mono text-zinc-500 uppercase">Core Cluster Host</span>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-2">
+                          {isActive && (
+                            <button
+                              type="button"
+                              disabled={isLoading}
+                              onClick={() => onDrain(node.id, node.name)}
+                              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border border-amber-800/60 bg-amber-950/30 text-amber-400 hover:bg-amber-900/40 transition disabled:opacity-50"
+                              title="Drain traffic from this node"
+                            >
+                              {isLoading ? (
+                                <RefreshCw className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <Pause className="w-3 h-3" />
+                              )}
+                              <span>Drain</span>
+                            </button>
+                          )}
+
+                          {isDraining && (
+                            <button
+                              type="button"
+                              disabled={isLoading}
+                              onClick={() => onActivate(node.id)}
+                              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border border-emerald-800/60 bg-emerald-950/30 text-emerald-400 hover:bg-emerald-900/40 transition disabled:opacity-50"
+                              title="Reactivate node to accept traffic"
+                            >
+                              {isLoading ? (
+                                <RefreshCw className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <Play className="w-3 h-3" />
+                              )}
+                              <span>Activate</span>
+                            </button>
+                          )}
+
+                          {isOffline && (
+                            <button
+                              type="button"
+                              disabled={isLoading}
+                              onClick={() => onActivate(node.id)}
+                              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border border-emerald-800/60 bg-emerald-950/30 text-emerald-400 hover:bg-emerald-900/40 transition disabled:opacity-50"
+                              title="Restore node to active state"
+                            >
+                              {isLoading ? (
+                                <RefreshCw className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <Play className="w-3 h-3" />
+                              )}
+                              <span>Activate</span>
+                            </button>
+                          )}
+                        </div>
+
                         <button
                           type="button"
                           disabled={isLoading}
-                          onClick={() => onDrain(node.id, node.name)}
-                          className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border border-amber-800/60 bg-amber-950/30 text-amber-400 hover:bg-amber-900/40 transition disabled:opacity-50"
-                          title="Drain traffic from this node"
+                          onClick={() => onDelete(node.id, node.name)}
+                          className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-zinc-500 hover:text-red-400 hover:bg-red-950/30 transition disabled:opacity-50"
+                          title="Deregister node"
                         >
-                          {isLoading ? (
-                            <RefreshCw className="w-3 h-3 animate-spin" />
-                          ) : (
-                            <Pause className="w-3 h-3" />
-                          )}
-                          <span>Drain</span>
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Remove</span>
                         </button>
-                      )}
-
-                      {isDraining && (
-                        <button
-                          type="button"
-                          disabled={isLoading}
-                          onClick={() => onActivate(node.id)}
-                          className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border border-emerald-800/60 bg-emerald-950/30 text-emerald-400 hover:bg-emerald-900/40 transition disabled:opacity-50"
-                          title="Reactivate node to accept traffic"
-                        >
-                          {isLoading ? (
-                            <RefreshCw className="w-3 h-3 animate-spin" />
-                          ) : (
-                            <Play className="w-3 h-3" />
-                          )}
-                          <span>Activate</span>
-                        </button>
-                      )}
-
-                      {isOffline && (
-                        <button
-                          type="button"
-                          disabled={isLoading}
-                          onClick={() => onActivate(node.id)}
-                          className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border border-emerald-800/60 bg-emerald-950/30 text-emerald-400 hover:bg-emerald-900/40 transition disabled:opacity-50"
-                          title="Restore node to active state"
-                        >
-                          {isLoading ? (
-                            <RefreshCw className="w-3 h-3 animate-spin" />
-                          ) : (
-                            <Play className="w-3 h-3" />
-                          )}
-                          <span>Activate</span>
-                        </button>
-                      )}
-                    </div>
-
-                    <button
-                      type="button"
-                      disabled={isLoading}
-                      onClick={() => onDelete(node.id, node.name)}
-                      className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-zinc-500 hover:text-red-400 hover:bg-red-950/30 transition disabled:opacity-50"
-                      title="Deregister node"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>Remove</span>
-                    </button>
+                      </>
+                    )}
                   </div>
                 </div>
               );

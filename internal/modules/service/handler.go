@@ -45,6 +45,9 @@ func (h *Handler) respondError(c *gin.Context, err error) {
 		case "INVALID_STATE":
 			code = http.StatusBadRequest
 			errCode = "INVALID_STATE"
+		case "FORBIDDEN":
+			code = http.StatusForbidden
+			errCode = "FORBIDDEN"
 		}
 	} else if errors.Is(err, domain.ErrNotFound) {
 		code = http.StatusNotFound
@@ -58,6 +61,9 @@ func (h *Handler) respondError(c *gin.Context, err error) {
 	} else if errors.Is(err, domain.ErrInvalidState) {
 		code = http.StatusBadRequest
 		errCode = "INVALID_STATE"
+	} else if errors.Is(err, domain.ErrForbidden) {
+		code = http.StatusForbidden
+		errCode = "FORBIDDEN"
 	}
 
 	h.respondJSON(c, code, map[string]string{
@@ -239,6 +245,33 @@ func (h *Handler) ExecuteD1Query(c *gin.Context) {
 }
 
 // --- R2 Endpoints ---
+
+type CreateR2BucketReq struct {
+	Name string `json:"name" binding:"required"`
+}
+
+func (h *Handler) CreateR2Bucket(c *gin.Context) {
+	var req CreateR2BucketReq
+	if err := json.NewDecoder(c.Request.Body).Decode(&req); err != nil {
+		h.respondError(c, domain.NewValidationError("invalid request body"))
+		return
+	}
+	bucket, err := h.service.CreateR2Bucket(c.Request.Context(), req.Name)
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+	h.respondJSON(c, http.StatusCreated, bucket)
+}
+
+func (h *Handler) DeleteR2Bucket(c *gin.Context) {
+	bucketName := c.Param("name")
+	if err := h.service.DeleteR2Bucket(c.Request.Context(), bucketName); err != nil {
+		h.respondError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
 
 func (h *Handler) ListR2Buckets(c *gin.Context) {
 	buckets, err := h.service.ListR2Buckets(c.Request.Context())

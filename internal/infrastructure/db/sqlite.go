@@ -106,5 +106,38 @@ func OpenSQLite(dsn string) (*sql.DB, error) {
 		  )
 	`)
 
+	// Dynamic migration for nodes.is_protected
+	var hasIsProtected bool
+	nodeRows, err := db.QueryContext(context.Background(), "PRAGMA table_info(nodes)")
+	if err == nil {
+		for nodeRows.Next() {
+			var cid int
+			var colName, ctype string
+			var notnull, pk int
+			var dfltValue sql.NullString
+			if err := nodeRows.Scan(&cid, &colName, &ctype, &notnull, &dfltValue, &pk); err == nil {
+				if colName == "is_protected" {
+					hasIsProtected = true
+				}
+			}
+		}
+		nodeRows.Close()
+
+		if !hasIsProtected {
+			_, _ = db.ExecContext(context.Background(), "ALTER TABLE nodes ADD COLUMN is_protected INTEGER NOT NULL DEFAULT 0")
+		}
+	}
+
+	// Always ensure the main cluster seed node is marked protected
+	_, _ = db.ExecContext(context.Background(), "UPDATE nodes SET is_protected = 1 WHERE name = 'worker-node-01'")
+
+	// Ensure r2_buckets table exists
+	_, _ = db.ExecContext(context.Background(), `
+		CREATE TABLE IF NOT EXISTS r2_buckets (
+			name TEXT PRIMARY KEY,
+			created_at TIMESTAMP NOT NULL
+		);
+	`)
+
 	return db, nil
 }

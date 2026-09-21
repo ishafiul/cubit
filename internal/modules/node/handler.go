@@ -41,6 +41,7 @@ type nodeResponse struct {
 	Status       string            `json:"status"`
 	CelldVersion string            `json:"celldVersion"`
 	Specs        nodeSpecsResponse `json:"specs"`
+	IsProtected  bool              `json:"isProtected"`
 	CreatedAt    string            `json:"createdAt"`
 	UpdatedAt    string            `json:"updatedAt"`
 }
@@ -59,8 +60,9 @@ func toNodeResponse(n *domain.Node) nodeResponse {
 			MemoryBytes:   n.Specs.MemoryBytes,
 			DiskFreeBytes: n.Specs.DiskFreeBytes,
 		},
-		CreatedAt: n.CreatedAt.Format("2006-01-02T15:04:05.999999999Z"),
-		UpdatedAt: n.UpdatedAt.Format("2006-01-02T15:04:05.999999999Z"),
+		IsProtected: n.IsProtected || n.Name == "worker-node-01",
+		CreatedAt:   n.CreatedAt.Format("2006-01-02T15:04:05.999999999Z"),
+		UpdatedAt:   n.UpdatedAt.Format("2006-01-02T15:04:05.999999999Z"),
 	}
 }
 
@@ -164,6 +166,9 @@ func respondError(c *gin.Context, err error) {
 			return
 		case "CONFLICT":
 			c.JSON(http.StatusConflict, gin.H{"error": domErr.Error()})
+			return
+		case "FORBIDDEN":
+			c.JSON(http.StatusForbidden, gin.H{"error": domErr.Error()})
 			return
 		}
 	}

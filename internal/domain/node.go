@@ -35,6 +35,7 @@ type Node struct {
 	Status       NodeStatus
 	CelldVersion string
 	Specs        NodeSpecs
+	IsProtected  bool
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
@@ -75,6 +76,7 @@ func NewNode(id, name, ipAddress string, internalPort, workerPort int, celldVers
 		WorkerPort:   workerPort,
 		Status:       NodeStatusActive,
 		CelldVersion: celldVersion,
+		IsProtected:  false,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}, nil

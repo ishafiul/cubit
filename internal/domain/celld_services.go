@@ -103,6 +103,7 @@ type R2Bucket struct {
 	CreatedAt    time.Time `json:"createdAt"`
 	ObjectsCount int       `json:"objectsCount"`
 	SizeBytes    int64     `json:"sizeBytes"`
+	IsSystem     bool      `json:"isSystem"`
 }
 
 // R2Object represents a stored file object.

@@ -14,6 +14,9 @@ var (
 
 	// ErrInvalidState indicates an illegal state transition was attempted.
 	ErrInvalidState = errors.New("invalid entity state transition")
+
+	// ErrForbidden indicates an operation on a protected or restricted resource was denied.
+	ErrForbidden = errors.New("operation forbidden on protected resource")
 )
 
 // DomainError wraps an error code and a human-readable message.
@@ -67,5 +70,14 @@ func NewInvalidStateError(message string) error {
 		Code:    "INVALID_STATE",
 		Message: message,
 		Err:     ErrInvalidState,
+	}
+}
+
+// NewForbiddenError creates a new forbidden domain error for protected resources.
+func NewForbiddenError(message string) error {
+	return &DomainError{
+		Code:    "FORBIDDEN",
+		Message: message,
+		Err:     ErrForbidden,
 	}
 }

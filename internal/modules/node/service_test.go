@@ -109,5 +109,26 @@ func TestNodeService(t *testing.T) {
 				}
 			})
 		})
+
+		t.Run("When attempting to drain or delete the protected main node", func(t *testing.T) {
+			mainNode, _ := svc.RegisterNode(context.Background(), "worker-node-01", "127.0.0.1", 9091, 8081, "v0.5.1")
+			mainNode.IsProtected = true
+			_ = repo.Update(context.Background(), mainNode)
+
+			_, drainErr := svc.DrainNode(context.Background(), mainNode.ID)
+			deleteErr := svc.DeleteNode(context.Background(), mainNode.ID)
+
+			t.Run("Then drain is forbidden", func(t *testing.T) {
+				if drainErr == nil {
+					t.Fatalf("expected drain error on protected main node, got nil")
+				}
+			})
+
+			t.Run("Then delete is forbidden", func(t *testing.T) {
+				if deleteErr == nil {
+					t.Fatalf("expected delete error on protected main node, got nil")
+				}
+			})
+		})
 	})
 }

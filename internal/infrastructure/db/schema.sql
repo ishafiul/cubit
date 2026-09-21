@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS nodes (
     worker_port INTEGER NOT NULL,
     status TEXT NOT NULL,
     celld_version TEXT NOT NULL,
+    is_protected INTEGER NOT NULL DEFAULT 0,
     cpu_cores INTEGER DEFAULT 0,
     memory_bytes INTEGER DEFAULT 0,
     disk_free_bytes INTEGER DEFAULT 0,
@@ -205,3 +206,9 @@ CREATE TABLE IF NOT EXISTS github_app_settings (
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS r2_buckets (
+    name TEXT PRIMARY KEY,
+    created_at TIMESTAMP NOT NULL
+);
+

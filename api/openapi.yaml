@@ -486,6 +486,70 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /r2/buckets:
+    get:
+      summary: List all R2 storage buckets
+      operationId: listR2Buckets
+      tags:
+        - r2
+      responses:
+        '200':
+          description: List of R2 storage buckets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/R2Bucket'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      summary: Create a new custom R2 bucket
+      operationId: createR2Bucket
+      tags:
+        - r2
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateR2BucketRequest'
+      responses:
+        '201':
+          description: Bucket created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/R2Bucket'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /r2/buckets/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      summary: Delete an R2 bucket (protected fleet buckets cannot be deleted)
+      operationId: deleteR2Bucket
+      tags:
+        - r2
+      responses:
+        '204':
+          description: Bucket deleted successfully
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
 components:
   responses:
     BadRequest:
@@ -506,6 +570,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Forbidden operation on protected or restricted resource
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
     InternalError:
       description: Internal server error
       content:
@@ -514,6 +584,40 @@ components:
             $ref: '#/components/schemas/ErrorResponse'
 
   schemas:
+    R2Bucket:
+      type: object
+      required:
+        - name
+        - createdAt
+        - objectsCount
+        - sizeBytes
+      properties:
+        name:
+          type: string
+          example: "user-assets"
+        objectsCount:
+          type: integer
+          example: 4
+        sizeBytes:
+          type: integer
+          format: int64
+          example: 1048576
+        isSystem:
+          type: boolean
+          default: false
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateR2BucketRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          example: "user-assets"
+
     NodeStatus:
       type: string
       enum:
@@ -570,6 +674,9 @@ components:
           example: "0.2.0"
         specs:
           $ref: '#/components/schemas/NodeSpecs'
+        isProtected:
+          type: boolean
+          default: false
         createdAt:
           type: string
           format: date-time

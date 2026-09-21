@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/ishaf/cubit/internal/domain"
@@ -25,6 +27,8 @@ type StoragePort interface {
 	DownloadBundle(ctx context.Context, bucketName, objectKey string) ([]byte, error)
 	CheckHealth(ctx context.Context) error
 	DriverName() string
+	ListObjects(ctx context.Context, bucketName string) ([]*domain.R2Object, error)
+	DeleteBucket(ctx context.Context, bucketName string) error
 }
 
 // ApplicationRepository checks application existence.
@@ -164,51 +168,143 @@ func (u *ServicesService) ExecuteD1Query(ctx context.Context, id, query string) 
 // R2 Operations (Object Storage)
 // -----------------------------------------------------------------------------
 
-func (u *ServicesService) ListR2Buckets(ctx context.Context) ([]*domain.R2Bucket, error) {
-	// Returns standard buckets in the fleet
-	buckets := []*domain.R2Bucket{
-		{
-			Name:         u.bucketName,
-			CreatedAt:    time.Now().UTC().Add(-24 * time.Hour),
-			ObjectsCount: 12,
-			SizeBytes:    1048576,
-		},
-		{
-			Name:         "user-assets",
-			CreatedAt:    time.Now().UTC().Add(-48 * time.Hour),
-			ObjectsCount: 5,
-			SizeBytes:    524288,
-		},
+// S3 bucket naming validation rule:
+// 3 to 63 characters long, lowercase alphanumeric and hyphens, starting and ending with alphanumeric.
+var bucketNameRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$`)
+
+func (u *ServicesService) CreateR2Bucket(ctx context.Context, name string) (*domain.R2Bucket, error) {
+	name = strings.TrimSpace(strings.ToLower(name))
+	if !bucketNameRegex.MatchString(name) {
+		return nil, domain.NewValidationError("invalid bucket name: must be 3-63 characters, lowercase letters, numbers, and hyphens only, and cannot begin or end with a hyphen")
 	}
-	return buckets, nil
+
+	sysBucketName := u.bucketName
+	if sysBucketName == "" {
+		sysBucketName = "cubit-fleet"
+	}
+
+	if name == sysBucketName || name == "cubit-fleet" {
+		return nil, domain.NewConflictError("bucket name is reserved by fleet system: " + name)
+	}
+
+	existing, _ := u.repo.ListR2Buckets(ctx)
+	for _, b := range existing {
+		if b.Name == name {
+			return nil, domain.NewConflictError("bucket already exists: " + name)
+		}
+	}
+
+	if u.storage != nil {
+		if err := u.storage.EnsureBucket(ctx, name); err != nil {
+			return nil, fmt.Errorf("failed to create bucket storage: %w", err)
+		}
+	}
+
+	bucket := &domain.R2Bucket{
+		Name:         name,
+		CreatedAt:    time.Now().UTC(),
+		ObjectsCount: 0,
+		SizeBytes:    0,
+		IsSystem:     false,
+	}
+
+	if err := u.repo.SaveR2Bucket(ctx, bucket); err != nil {
+		return nil, err
+	}
+
+	return bucket, nil
+}
+
+func (u *ServicesService) DeleteR2Bucket(ctx context.Context, name string) error {
+	name = strings.TrimSpace(name)
+	sysBucketName := u.bucketName
+	if sysBucketName == "" {
+		sysBucketName = "cubit-fleet"
+	}
+
+	if name == sysBucketName || name == "cubit-fleet" {
+		return domain.NewForbiddenError("fleet system bucket is protected and cannot be deleted")
+	}
+
+	if u.storage != nil {
+		_ = u.storage.DeleteBucket(ctx, name)
+	}
+
+	return u.repo.DeleteR2Bucket(ctx, name)
 }
 
 func (u *ServicesService) UploadR2Object(ctx context.Context, bucketName, key string, data []byte) error {
+	bucketName = strings.TrimSpace(bucketName)
+	sysBucketName := u.bucketName
+	if sysBucketName == "" {
+		sysBucketName = "cubit-fleet"
+	}
+
+	if bucketName == sysBucketName || bucketName == "cubit-fleet" {
+		return domain.NewForbiddenError("fleet system bucket is reserved for Cubit daemon; manual uploads are restricted")
+	}
+
 	if u.storage != nil {
 		return u.storage.UploadBundle(ctx, bucketName, key, data)
 	}
 	return nil
 }
 
-func (u *ServicesService) ListR2Objects(ctx context.Context, bucketName string) ([]*domain.R2Object, error) {
-	// Sample file list in the bucket
-	objects := []*domain.R2Object{
+func (u *ServicesService) ListR2Buckets(ctx context.Context) ([]*domain.R2Bucket, error) {
+	sysBucketName := u.bucketName
+	if sysBucketName == "" {
+		sysBucketName = "cubit-fleet"
+	}
+
+	var sysObjectsCount int
+	var sysSizeBytes int64
+	if u.storage != nil {
+		if objs, err := u.storage.ListObjects(ctx, sysBucketName); err == nil {
+			sysObjectsCount = len(objs)
+			for _, o := range objs {
+				sysSizeBytes += o.SizeBytes
+			}
+		}
+	}
+
+	buckets := []*domain.R2Bucket{
 		{
-			Key:          "bundles/worker-v1.js",
-			SizeBytes:    2450,
-			ContentType:  "application/javascript",
-			ETag:         "\"a7b3c4d5e6\"",
-			LastModified: time.Now().UTC().Add(-2 * time.Hour),
-		},
-		{
-			Key:          "assets/logo.png",
-			SizeBytes:    18420,
-			ContentType:  "image/png",
-			ETag:         "\"e8f9a0b1c2\"",
-			LastModified: time.Now().UTC().Add(-12 * time.Hour),
+			Name:         sysBucketName,
+			CreatedAt:    time.Now().UTC().Add(-48 * time.Hour),
+			ObjectsCount: sysObjectsCount,
+			SizeBytes:    sysSizeBytes,
+			IsSystem:     true,
 		},
 	}
-	return objects, nil
+
+	userBuckets, err := u.repo.ListR2Buckets(ctx)
+	if err == nil {
+		for _, ub := range userBuckets {
+			if ub.Name == sysBucketName {
+				continue
+			}
+			if u.storage != nil {
+				if objs, err := u.storage.ListObjects(ctx, ub.Name); err == nil {
+					ub.ObjectsCount = len(objs)
+					ub.SizeBytes = 0
+					for _, o := range objs {
+						ub.SizeBytes += o.SizeBytes
+					}
+				}
+			}
+			ub.IsSystem = false
+			buckets = append(buckets, ub)
+		}
+	}
+
+	return buckets, nil
+}
+
+func (u *ServicesService) ListR2Objects(ctx context.Context, bucketName string) ([]*domain.R2Object, error) {
+	if u.storage != nil {
+		return u.storage.ListObjects(ctx, bucketName)
+	}
+	return []*domain.R2Object{}, nil
 }
 
 // -----------------------------------------------------------------------------

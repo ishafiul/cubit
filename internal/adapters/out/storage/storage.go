@@ -3,9 +3,12 @@ package storage
 import (
 	"context"
 	"fmt"
+	"mime"
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/ishaf/cubit/internal/domain"
 )
 
 // StorageDriver specifies the storage driver type.
@@ -84,4 +87,48 @@ func (a *LocalStorageAdapter) CheckHealth(ctx context.Context) error {
 // DriverName returns the active storage driver identifier.
 func (a *LocalStorageAdapter) DriverName() string {
 	return a.driverName
+}
+
+// ListObjects returns all objects stored in the specified bucket.
+func (a *LocalStorageAdapter) ListObjects(ctx context.Context, bucketName string) ([]*domain.R2Object, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	bucketPath := filepath.Join(a.baseDir, bucketName)
+	if _, err := os.Stat(bucketPath); os.IsNotExist(err) {
+		return []*domain.R2Object{}, nil
+	}
+
+	var objects []*domain.R2Object
+	err := filepath.Walk(bucketPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		relKey, _ := filepath.Rel(bucketPath, path)
+		contentType := mime.TypeByExtension(filepath.Ext(path))
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		objects = append(objects, &domain.R2Object{
+			Key:          filepath.ToSlash(relKey),
+			SizeBytes:    info.Size(),
+			ContentType:  contentType,
+			ETag:         fmt.Sprintf("\"%x-%x\"", info.ModTime().UnixNano(), info.Size()),
+			LastModified: info.ModTime().UTC(),
+		})
+		return nil
+	})
+	if objects == nil {
+		objects = []*domain.R2Object{}
+	}
+	return objects, err
+}
+
+// DeleteBucket removes a bucket directory and its contents.
+func (a *LocalStorageAdapter) DeleteBucket(ctx context.Context, bucketName string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	bucketPath := filepath.Join(a.baseDir, bucketName)
+	return os.RemoveAll(bucketPath)
 }

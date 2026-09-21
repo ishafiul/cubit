@@ -30,12 +30,17 @@ func NewRepository(db *sql.DB) *SQLiteRepository {
 
 // Save persists a new node.
 func (r *SQLiteRepository) Save(ctx context.Context, n *domain.Node) error {
+	isProtectedInt := 0
+	if n.IsProtected {
+		isProtectedInt = 1
+	}
 	query := `
-		INSERT INTO nodes (id, name, ip_address, internal_port, worker_port, status, celld_version, cpu_cores, memory_bytes, disk_free_bytes, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO nodes (id, name, ip_address, internal_port, worker_port, status, celld_version, is_protected, cpu_cores, memory_bytes, disk_free_bytes, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	_, err := r.db.ExecContext(ctx, query,
 		n.ID, n.Name, n.IPAddress, n.InternalPort, n.WorkerPort, string(n.Status), n.CelldVersion,
+		isProtectedInt,
 		n.Specs.CPUCores, n.Specs.MemoryBytes, n.Specs.DiskFreeBytes,
 		n.CreatedAt.Format(time.RFC3339), n.UpdatedAt.Format(time.RFC3339),
 	)
@@ -45,18 +50,20 @@ func (r *SQLiteRepository) Save(ctx context.Context, n *domain.Node) error {
 // GetByID fetches a node by ID.
 func (r *SQLiteRepository) GetByID(ctx context.Context, id string) (*domain.Node, error) {
 	query := `
-		SELECT id, name, ip_address, internal_port, worker_port, status, celld_version, cpu_cores, memory_bytes, disk_free_bytes, created_at, updated_at
+		SELECT id, name, ip_address, internal_port, worker_port, status, celld_version, is_protected, cpu_cores, memory_bytes, disk_free_bytes, created_at, updated_at
 		FROM nodes WHERE id = ?
 	`
 	row := r.db.QueryRowContext(ctx, query, id)
 
 	var (
 		n                                     domain.Node
+		isProtectedInt                        int
 		statusStr, createdAtStr, updatedAtStr string
 	)
 
 	err := row.Scan(
 		&n.ID, &n.Name, &n.IPAddress, &n.InternalPort, &n.WorkerPort, &statusStr, &n.CelldVersion,
+		&isProtectedInt,
 		&n.Specs.CPUCores, &n.Specs.MemoryBytes, &n.Specs.DiskFreeBytes,
 		&createdAtStr, &updatedAtStr,
 	)
@@ -67,6 +74,7 @@ func (r *SQLiteRepository) GetByID(ctx context.Context, id string) (*domain.Node
 		return nil, err
 	}
 
+	n.IsProtected = isProtectedInt == 1
 	n.Status = domain.NodeStatus(statusStr)
 	n.CreatedAt, _ = time.Parse(time.RFC3339, createdAtStr)
 	n.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAtStr)
@@ -76,7 +84,7 @@ func (r *SQLiteRepository) GetByID(ctx context.Context, id string) (*domain.Node
 // List returns all registered nodes.
 func (r *SQLiteRepository) List(ctx context.Context) ([]*domain.Node, error) {
 	query := `
-		SELECT id, name, ip_address, internal_port, worker_port, status, celld_version, cpu_cores, memory_bytes, disk_free_bytes, created_at, updated_at
+		SELECT id, name, ip_address, internal_port, worker_port, status, celld_version, is_protected, cpu_cores, memory_bytes, disk_free_bytes, created_at, updated_at
 		FROM nodes ORDER BY created_at DESC
 	`
 	rows, err := r.db.QueryContext(ctx, query)
@@ -89,15 +97,18 @@ func (r *SQLiteRepository) List(ctx context.Context) ([]*domain.Node, error) {
 	for rows.Next() {
 		var (
 			n                                     domain.Node
+			isProtectedInt                        int
 			statusStr, createdAtStr, updatedAtStr string
 		)
 		if err := rows.Scan(
 			&n.ID, &n.Name, &n.IPAddress, &n.InternalPort, &n.WorkerPort, &statusStr, &n.CelldVersion,
+			&isProtectedInt,
 			&n.Specs.CPUCores, &n.Specs.MemoryBytes, &n.Specs.DiskFreeBytes,
 			&createdAtStr, &updatedAtStr,
 		); err != nil {
 			return nil, err
 		}
+		n.IsProtected = isProtectedInt == 1
 		n.Status = domain.NodeStatus(statusStr)
 		n.CreatedAt, _ = time.Parse(time.RFC3339, createdAtStr)
 		n.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAtStr)
@@ -108,15 +119,19 @@ func (r *SQLiteRepository) List(ctx context.Context) ([]*domain.Node, error) {
 
 // Update updates an existing node.
 func (r *SQLiteRepository) Update(ctx context.Context, n *domain.Node) error {
+	isProtectedInt := 0
+	if n.IsProtected {
+		isProtectedInt = 1
+	}
 	query := `
 		UPDATE nodes
 		SET name = ?, ip_address = ?, internal_port = ?, worker_port = ?, status = ?, celld_version = ?,
-		    cpu_cores = ?, memory_bytes = ?, disk_free_bytes = ?, updated_at = ?
+		    is_protected = ?, cpu_cores = ?, memory_bytes = ?, disk_free_bytes = ?, updated_at = ?
 		WHERE id = ?
 	`
 	res, err := r.db.ExecContext(ctx, query,
 		n.Name, n.IPAddress, n.InternalPort, n.WorkerPort, string(n.Status), n.CelldVersion,
-		n.Specs.CPUCores, n.Specs.MemoryBytes, n.Specs.DiskFreeBytes,
+		isProtectedInt, n.Specs.CPUCores, n.Specs.MemoryBytes, n.Specs.DiskFreeBytes,
 		n.UpdatedAt.Format(time.RFC3339), n.ID,
 	)
 	if err != nil {

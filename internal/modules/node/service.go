@@ -98,6 +98,10 @@ func (s *NodeService) DrainNode(ctx context.Context, id string) (*domain.Node, e
 		return nil, err
 	}
 
+	if node.IsProtected || node.Name == "worker-node-01" {
+		return nil, domain.NewForbiddenError("main node is protected and cannot be drained")
+	}
+
 	if err := node.Drain(); err != nil {
 		return nil, err
 	}
@@ -140,6 +144,10 @@ func (s *NodeService) DeleteNode(ctx context.Context, id string) error {
 	node, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return err
+	}
+
+	if node.IsProtected || node.Name == "worker-node-01" {
+		return domain.NewForbiddenError("main node is protected and cannot be deleted")
 	}
 
 	if s.supervisor != nil {
