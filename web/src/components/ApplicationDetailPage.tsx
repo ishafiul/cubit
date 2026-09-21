@@ -54,6 +54,8 @@ export function getDeploymentStatusBadge(status: string) {
   }
 }
 
+export type DetailTab = 'builds' | 'code' | 'domains' | 'bindings' | 'settings';
+
 export interface ApplicationDetailPageProps {
   app: Application;
   onBack: () => void;
@@ -62,6 +64,8 @@ export interface ApplicationDetailPageProps {
   onTestApp: (app: Application) => void;
   onRefreshApps: () => void;
   onNavigateToService?: (targetTab: ActiveTab, resourceId?: string) => void;
+  initialTab?: DetailTab;
+  onTabChange?: (tab: DetailTab) => void;
 }
 
 export function ApplicationDetailPage({
@@ -72,8 +76,21 @@ export function ApplicationDetailPage({
   onTestApp,
   onRefreshApps,
   onNavigateToService,
+  initialTab,
+  onTabChange,
 }: ApplicationDetailPageProps) {
-  const [activeTab, setActiveTab] = useState<'builds' | 'code' | 'domains' | 'bindings' | 'settings'>('builds');
+  const [activeTab, setActiveTab] = useState<DetailTab>(initialTab || 'builds');
+
+  useEffect(() => {
+    if (initialTab && initialTab !== activeTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
+
+  const switchTab = (t: DetailTab) => {
+    setActiveTab(t);
+    onTabChange?.(t);
+  };
 
   // Subdomain & URLs
   const subdomain = app.subdomain || app.name;
@@ -487,7 +504,7 @@ export function ApplicationDetailPage({
               {/* Service Bindings Status Badge */}
               <button
                 type="button"
-                onClick={() => setActiveTab('bindings')}
+                onClick={() => switchTab('bindings')}
                 className={`text-[10px] px-2.5 py-0.5 rounded-full font-semibold flex items-center gap-1.5 transition cursor-pointer ${
                   totalBindingsCount > 0
                     ? 'bg-indigo-950/80 text-indigo-300 border border-indigo-800/80 hover:bg-indigo-900/60'
@@ -531,7 +548,7 @@ export function ApplicationDetailPage({
         <div className="flex border-b border-zinc-800 pt-2 gap-6">
           <button
             type="button"
-            onClick={() => setActiveTab('builds')}
+            onClick={() => switchTab('builds')}
             className={`pb-3 text-xs font-semibold flex items-center gap-2 border-b-2 transition ${
               activeTab === 'builds'
                 ? 'border-emerald-500 text-emerald-400'
@@ -547,7 +564,7 @@ export function ApplicationDetailPage({
 
           <button
             type="button"
-            onClick={() => setActiveTab('code')}
+            onClick={() => switchTab('code')}
             className={`pb-3 text-xs font-semibold flex items-center gap-2 border-b-2 transition ${
               activeTab === 'code'
                 ? 'border-emerald-500 text-emerald-400'
@@ -560,7 +577,7 @@ export function ApplicationDetailPage({
 
           <button
             type="button"
-            onClick={() => setActiveTab('domains')}
+            onClick={() => switchTab('domains')}
             className={`pb-3 text-xs font-semibold flex items-center gap-2 border-b-2 transition ${
               activeTab === 'domains'
                 ? 'border-emerald-500 text-emerald-400'
@@ -576,7 +593,7 @@ export function ApplicationDetailPage({
 
           <button
             type="button"
-            onClick={() => setActiveTab('bindings')}
+            onClick={() => switchTab('bindings')}
             className={`pb-3 text-xs font-semibold flex items-center gap-2 border-b-2 transition ${
               activeTab === 'bindings'
                 ? 'border-emerald-500 text-emerald-400'
@@ -594,7 +611,7 @@ export function ApplicationDetailPage({
 
           <button
             type="button"
-            onClick={() => setActiveTab('settings')}
+            onClick={() => switchTab('settings')}
             className={`pb-3 text-xs font-semibold flex items-center gap-2 border-b-2 transition ${
               activeTab === 'settings'
                 ? 'border-emerald-500 text-emerald-400'
