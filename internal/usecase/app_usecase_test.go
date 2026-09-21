@@ -30,6 +30,15 @@ func (m *mockAppRepo) GetByID(ctx context.Context, id string) (*domain.Applicati
 	return app, nil
 }
 
+func (m *mockAppRepo) GetBySubdomain(ctx context.Context, subdomain string) (*domain.Application, error) {
+	for _, a := range m.apps {
+		if a.Subdomain == subdomain || a.Name == subdomain {
+			return a, nil
+		}
+	}
+	return nil, domain.NewNotFoundError("app not found for subdomain")
+}
+
 func (m *mockAppRepo) List(ctx context.Context) ([]*domain.Application, error) {
 	var list []*domain.Application
 	for _, a := range m.apps {
@@ -84,6 +93,16 @@ func (m *mockDepRepo) ListByAppID(ctx context.Context, appID string) ([]*domain.
 	return list, nil
 }
 
+func (m *mockDepRepo) GetLatestBuildVersion(ctx context.Context, appID string) (int, error) {
+	maxVer := 0
+	for _, d := range m.deps {
+		if d.ApplicationID == appID && d.BuildVersion > maxVer {
+			maxVer = d.BuildVersion
+		}
+	}
+	return maxVer, nil
+}
+
 func (m *mockDepRepo) Update(ctx context.Context, dep *domain.Deployment) error {
 	m.deps[dep.ID] = dep
 	return nil
@@ -114,6 +133,14 @@ func (m *mockStoragePort) EnsureBucket(ctx context.Context, bucketName string) e
 func (m *mockStoragePort) UploadBundle(ctx context.Context, bucketName, objectKey string, data []byte) error {
 	m.uploadedBundles[objectKey] = data
 	return nil
+}
+
+func (m *mockStoragePort) DownloadBundle(ctx context.Context, bucketName, objectKey string) ([]byte, error) {
+	data, exists := m.uploadedBundles[objectKey]
+	if !exists {
+		return nil, domain.NewNotFoundError("bundle not found")
+	}
+	return data, nil
 }
 
 func (m *mockStoragePort) CheckHealth(ctx context.Context) error {
@@ -278,18 +305,50 @@ func TestAppUsecase(t *testing.T) {
 			})
 		})
 
-		t.Run("When updating an application inline code", func(t *testing.T) {
-			app, _ := uc.CreateApplicationWithSource(ctx, "mod-worker", domain.SourceTypeInline, "", "", "", nil, nil)
-			newCode := `export default { fetch: () => new Response("v2") };`
+		t.Run("When deploying an application multiple times", func(t *testing.T) {
+			app, _ := uc.CreateApplicationWithSource(ctx, "versioned-app", domain.SourceTypeInline, "", "", "", nil, nil)
 
-			updated, err := uc.UpdateApplication(ctx, app.ID, "main", newCode, nil, nil)
+			dep1, err1 := uc.DeployApplication(ctx, app.ID, "hash-1")
+			dep2, err2 := uc.DeployApplication(ctx, app.ID, "hash-2")
 
-			t.Run("Then inline code is updated successfully", func(t *testing.T) {
-				if err != nil {
-					t.Fatalf("expected update to succeed, got %v", err)
+			t.Run("Then build versions increment sequentially (v1 -> v2)", func(t *testing.T) {
+				if err1 != nil || err2 != nil {
+					t.Fatalf("unexpected deploy errors: %v, %v", err1, err2)
 				}
-				if updated.InlineCode != newCode {
-					t.Errorf("expected new code, got %s", updated.InlineCode)
+				if dep1.BuildVersion != 1 {
+					t.Errorf("expected first deployment build version 1, got %d", dep1.BuildVersion)
+				}
+				if dep2.BuildVersion != 2 {
+					t.Errorf("expected second deployment build version 2, got %d", dep2.BuildVersion)
+				}
+				if dep2.VersionTag() != "v2" {
+					t.Errorf("expected version tag 'v2', got %s", dep2.VersionTag())
+				}
+			})
+
+			t.Run("Then Traefik routes include default project subdomain", func(t *testing.T) {
+				foundLocalhost := false
+				for _, r := range proxy.syncedRules {
+					if r.Hostname == "versioned-app.localhost" {
+						foundLocalhost = true
+						break
+					}
+				}
+				if !foundLocalhost {
+					t.Errorf("expected route for versioned-app.localhost in synced rules: %+v", proxy.syncedRules)
+				}
+			})
+
+			t.Run("Then InvokeApplication executes the deployed worker bundle", func(t *testing.T) {
+				status, _, body, err := uc.InvokeApplication(ctx, app.ID, "GET", "/", nil, nil)
+				if err != nil {
+					t.Fatalf("expected invocation to succeed, got %v", err)
+				}
+				if status != 200 {
+					t.Errorf("expected status 200, got %d", status)
+				}
+				if len(body) == 0 {
+					t.Error("expected non-empty response body")
 				}
 			})
 		})

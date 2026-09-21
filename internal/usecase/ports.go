@@ -19,6 +19,7 @@ type NodeRepository interface {
 type ApplicationRepository interface {
 	Save(ctx context.Context, app *domain.Application) error
 	GetByID(ctx context.Context, id string) (*domain.Application, error)
+	GetBySubdomain(ctx context.Context, subdomain string) (*domain.Application, error)
 	List(ctx context.Context) ([]*domain.Application, error)
 	Delete(ctx context.Context, id string) error
 	Update(ctx context.Context, app *domain.Application) error
@@ -28,6 +29,7 @@ type ApplicationRepository interface {
 type DeploymentRepository interface {
 	Save(ctx context.Context, dep *domain.Deployment) error
 	GetByID(ctx context.Context, id string) (*domain.Deployment, error)
+	GetLatestBuildVersion(ctx context.Context, appID string) (int, error)
 	ListByAppID(ctx context.Context, appID string) ([]*domain.Deployment, error)
 	Update(ctx context.Context, dep *domain.Deployment) error
 	AppendLog(ctx context.Context, deploymentID string, entry domain.DeploymentLog) error
@@ -48,6 +50,7 @@ type DomainRepository interface {
 type StoragePort interface {
 	EnsureBucket(ctx context.Context, bucketName string) error
 	UploadBundle(ctx context.Context, bucketName, objectKey string, data []byte) error
+	DownloadBundle(ctx context.Context, bucketName, objectKey string) ([]byte, error)
 	CheckHealth(ctx context.Context) error
 	DriverName() string
 }

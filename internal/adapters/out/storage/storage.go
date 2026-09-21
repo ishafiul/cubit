@@ -63,6 +63,15 @@ func (a *LocalStorageAdapter) UploadBundle(ctx context.Context, bucketName, obje
 	return os.WriteFile(targetPath, data, 0644)
 }
 
+// DownloadBundle reads a stored worker bundle.
+func (a *LocalStorageAdapter) DownloadBundle(ctx context.Context, bucketName, objectKey string) ([]byte, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	targetPath := filepath.Join(a.baseDir, bucketName, objectKey)
+	return os.ReadFile(targetPath)
+}
+
 // CheckHealth verifies that the storage backend is reachable and writable.
 func (a *LocalStorageAdapter) CheckHealth(ctx context.Context) error {
 	a.mu.RLock()
