@@ -30,12 +30,17 @@ func (r *DeploymentRepo) Save(ctx context.Context, dep *domain.Deployment) error
 		finishedAtStr.Valid = true
 	}
 
+	buildVersion := dep.BuildVersion
+	if buildVersion < 1 {
+		buildVersion = 1
+	}
+
 	query := `
-		INSERT INTO deployments (id, application_id, commit_hash, commit_message, status, bundle_size, error_message, created_at, finished_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO deployments (id, application_id, build_version, commit_hash, commit_message, status, bundle_size, error_message, created_at, finished_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	_, err := r.db.ExecContext(ctx, query,
-		dep.ID, dep.ApplicationID, dep.CommitHash, dep.CommitMessage,
+		dep.ID, dep.ApplicationID, buildVersion, dep.CommitHash, dep.CommitMessage,
 		string(dep.Status), dep.BundleSize, dep.ErrorMessage,
 		dep.CreatedAt.Format(time.RFC3339), finishedAtStr,
 	)
@@ -45,7 +50,7 @@ func (r *DeploymentRepo) Save(ctx context.Context, dep *domain.Deployment) error
 // GetByID retrieves a deployment by ID.
 func (r *DeploymentRepo) GetByID(ctx context.Context, id string) (*domain.Deployment, error) {
 	query := `
-		SELECT id, application_id, commit_hash, commit_message, status, bundle_size, error_message, created_at, finished_at
+		SELECT id, application_id, build_version, commit_hash, commit_message, status, bundle_size, error_message, created_at, finished_at
 		FROM deployments WHERE id = ?
 	`
 	row := r.db.QueryRowContext(ctx, query, id)
@@ -57,7 +62,7 @@ func (r *DeploymentRepo) GetByID(ctx context.Context, id string) (*domain.Deploy
 	)
 
 	err := row.Scan(
-		&dep.ID, &dep.ApplicationID, &dep.CommitHash, &commitMsg,
+		&dep.ID, &dep.ApplicationID, &dep.BuildVersion, &dep.CommitHash, &commitMsg,
 		&statusStr, &dep.BundleSize, &errorMsg,
 		&createdAtStr, &finishedAtStr,
 	)
@@ -68,6 +73,9 @@ func (r *DeploymentRepo) GetByID(ctx context.Context, id string) (*domain.Deploy
 		return nil, err
 	}
 
+	if dep.BuildVersion < 1 {
+		dep.BuildVersion = 1
+	}
 	dep.Status = domain.DeploymentStatus(statusStr)
 	if commitMsg.Valid {
 		dep.CommitMessage = commitMsg.String
@@ -87,8 +95,8 @@ func (r *DeploymentRepo) GetByID(ctx context.Context, id string) (*domain.Deploy
 // ListByAppID returns all deployments for an application.
 func (r *DeploymentRepo) ListByAppID(ctx context.Context, appID string) ([]*domain.Deployment, error) {
 	query := `
-		SELECT id, application_id, commit_hash, commit_message, status, bundle_size, error_message, created_at, finished_at
-		FROM deployments WHERE application_id = ? ORDER BY created_at DESC
+		SELECT id, application_id, build_version, commit_hash, commit_message, status, bundle_size, error_message, created_at, finished_at
+		FROM deployments WHERE application_id = ? ORDER BY build_version DESC, created_at DESC
 	`
 	rows, err := r.db.QueryContext(ctx, query, appID)
 	if err != nil {
@@ -104,11 +112,14 @@ func (r *DeploymentRepo) ListByAppID(ctx context.Context, appID string) ([]*doma
 			commitMsg, errorMsg, finishedAtStr            sql.NullString
 		)
 		if err := rows.Scan(
-			&dep.ID, &dep.ApplicationID, &dep.CommitHash, &commitMsg,
+			&dep.ID, &dep.ApplicationID, &dep.BuildVersion, &dep.CommitHash, &commitMsg,
 			&statusStr, &dep.BundleSize, &errorMsg,
 			&createdAtStr, &finishedAtStr,
 		); err != nil {
 			return nil, err
+		}
+		if dep.BuildVersion < 1 {
+			dep.BuildVersion = 1
 		}
 		dep.Status = domain.DeploymentStatus(statusStr)
 		if commitMsg.Valid {
@@ -126,6 +137,17 @@ func (r *DeploymentRepo) ListByAppID(ctx context.Context, appID string) ([]*doma
 	}
 
 	return deps, rows.Err()
+}
+
+// GetLatestBuildVersion returns the highest build version recorded for an application, or 0 if none exist.
+func (r *DeploymentRepo) GetLatestBuildVersion(ctx context.Context, appID string) (int, error) {
+	query := `SELECT COALESCE(MAX(build_version), 0) FROM deployments WHERE application_id = ?`
+	var maxVer int
+	err := r.db.QueryRowContext(ctx, query, appID).Scan(&maxVer)
+	if err != nil {
+		return 0, err
+	}
+	return maxVer, nil
 }
 
 // Update updates deployment status, finish time, or bundle size.

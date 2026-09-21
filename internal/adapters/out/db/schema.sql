@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS applications (
     id TEXT PRIMARY KEY,
     name TEXT UNIQUE NOT NULL,
     source_type TEXT NOT NULL DEFAULT 'git',
+    subdomain TEXT NOT NULL DEFAULT '',
     git_repo TEXT,
     branch TEXT NOT NULL,
     inline_code TEXT,
@@ -31,6 +32,7 @@ CREATE TABLE IF NOT EXISTS applications (
 CREATE TABLE IF NOT EXISTS deployments (
     id TEXT PRIMARY KEY,
     application_id TEXT NOT NULL,
+    build_version INTEGER NOT NULL DEFAULT 1,
     commit_hash TEXT NOT NULL,
     commit_message TEXT,
     status TEXT NOT NULL,

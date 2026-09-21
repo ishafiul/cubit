@@ -115,6 +115,49 @@ func TestSQLiteRepositories(t *testing.T) {
 				if fetched.GitRepo != "" {
 					t.Errorf("expected empty git repo, got %s", fetched.GitRepo)
 				}
+				if fetched.Subdomain != "inline-app" {
+					t.Errorf("expected subdomain 'inline-app', got %s", fetched.Subdomain)
+				}
+			})
+
+			t.Run("Then it is retrieved via GetBySubdomain", func(t *testing.T) {
+				bySub, err := appRepo.GetBySubdomain(ctx, "inline-app")
+				if err != nil {
+					t.Fatalf("failed retrieving app by subdomain: %v", err)
+				}
+				if bySub.ID != "a-inline" {
+					t.Errorf("expected app id a-inline, got %s", bySub.ID)
+				}
+			})
+		})
+
+		t.Run("When saving multiple deployments with sequential build versions", func(t *testing.T) {
+			dep1, _ := domain.NewDeploymentWithVersion("d-ver-1", "a-100", "hash-1", "Build 1", 1)
+			dep2, _ := domain.NewDeploymentWithVersion("d-ver-2", "a-100", "hash-2", "Build 2", 2)
+			_ = depRepo.Save(ctx, dep1)
+			_ = depRepo.Save(ctx, dep2)
+
+			t.Run("Then GetLatestBuildVersion returns 2", func(t *testing.T) {
+				latest, err := depRepo.GetLatestBuildVersion(ctx, "a-100")
+				if err != nil {
+					t.Fatalf("failed getting latest build version: %v", err)
+				}
+				if latest != 2 {
+					t.Errorf("expected latest version 2, got %d", latest)
+				}
+			})
+
+			t.Run("Then ListByAppID preserves build versions ordered descending", func(t *testing.T) {
+				deps, err := depRepo.ListByAppID(ctx, "a-100")
+				if err != nil {
+					t.Fatalf("failed listing deployments: %v", err)
+				}
+				if len(deps) < 2 {
+					t.Fatalf("expected at least 2 deployments, got %d", len(deps))
+				}
+				if deps[0].BuildVersion != 2 {
+					t.Errorf("expected first deployment to be build version 2, got %d", deps[0].BuildVersion)
+				}
 			})
 		})
 	})
