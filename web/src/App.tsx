@@ -14,6 +14,11 @@ import {
   GitBranch,
   Code,
   X,
+  ExternalLink,
+  Copy,
+  Check,
+  History,
+  Send,
 } from 'lucide-react';
 
 import {
@@ -22,9 +27,11 @@ import {
 import {
   useListApplications,
   useCreateApplication,
+  useTestApplication,
 } from './api/generated/applications/applications';
 import {
   useDeployApplication,
+  useListDeployments,
 } from './api/generated/deployments/deployments';
 import {
   useListDomains,
@@ -34,6 +41,7 @@ import {
   useGetRuntimeStatus,
   useUpgradeCelldDaemon,
 } from './api/generated/runtime/runtime';
+import type { Application } from './api/model';
 
 export default function App() {
   const [tab, setTab] = useState<'nodes' | 'apps' | 'domains' | 'logs'>('nodes');
@@ -75,6 +83,9 @@ export default function App() {
 };`
   );
   const [viewingCodeApp, setViewingCodeApp] = useState<any>(null);
+  const [testingApp, setTestingApp] = useState<Application | null>(null);
+  const [historyApp, setHistoryApp] = useState<Application | null>(null);
+  const [selectedLogsAppId, setSelectedLogsAppId] = useState<string>('');
   const [targetVersion, setTargetVersion] = useState('0.3.0');
   const [selectedAppId, setSelectedAppId] = useState('');
   const [domainHost, setDomainHost] = useState('');
@@ -424,59 +435,17 @@ export default function App() {
 
           {tab === 'apps' && (
             <div className="space-y-4">
-              <div className="grid grid-cols-1 gap-3">
+              <div className="grid grid-cols-1 gap-4">
                 {apps.map(app => (
-                  <div key={app.id} className="p-5 rounded-xl border border-zinc-800/80 bg-zinc-900/20 flex items-center justify-between hover:border-zinc-700 transition">
-                    <div className="space-y-1.5">
-                      <div className="flex items-center gap-2.5">
-                        <h4 className="font-semibold text-base">{app.name}</h4>
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
-                          app.status === 'running' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-zinc-800 text-zinc-400'
-                        }`}>
-                          {app.status}
-                        </span>
-                        {app.sourceType === 'inline' ? (
-                          <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-sky-950/80 text-sky-400 border border-sky-800/60 flex items-center gap-1">
-                            <Zap className="w-2.5 h-2.5" /> Inline Code
-                          </span>
-                        ) : (
-                          <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-purple-950/80 text-purple-400 border border-purple-800/60 flex items-center gap-1">
-                            <GitBranch className="w-2.5 h-2.5" /> Git
-                          </span>
-                        )}
-                      </div>
-                      {app.sourceType === 'inline' ? (
-                        <p className="text-xs text-zinc-500 font-mono">Standalone Cloudflare Worker template</p>
-                      ) : (
-                        <p className="text-xs text-zinc-400 font-mono">{app.gitRepo} ({app.branch || 'main'})</p>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      {app.sourceType === 'inline' && (
-                        <button
-                          type="button"
-                          onClick={() => setViewingCodeApp(app)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 text-xs font-medium transition"
-                        >
-                          <Code className="w-3.5 h-3.5 text-zinc-400" />
-                          View Code
-                        </button>
-                      )}
-                      <button
-                        onClick={() => handleDeployApp(app.id)}
-                        disabled={isDeploying === app.id}
-                        className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-zinc-950 text-xs font-semibold transition"
-                      >
-                        {isDeploying === app.id ? (
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                        ) : (
-                          <Play className="w-3.5 h-3.5 fill-current" />
-                        )}
-                        {isDeploying === app.id ? 'Deploying...' : 'Deploy Now'}
-                      </button>
-                    </div>
-                  </div>
+                  <ApplicationCard
+                    key={app.id}
+                    app={app}
+                    onDeploy={handleDeployApp}
+                    isDeploying={isDeploying === app.id}
+                    onViewCode={setViewingCodeApp}
+                    onTestApp={setTestingApp}
+                    onViewHistory={setHistoryApp}
+                  />
                 ))}
               </div>
             </div>
@@ -506,11 +475,13 @@ export default function App() {
           )}
 
           {tab === 'logs' && (
-            <div className="h-full flex flex-col space-y-3">
-              <div className="flex items-center justify-between">
+            <div className="h-full flex flex-col space-y-4 min-h-0">
+              <div className="flex items-center justify-between flex-wrap gap-3">
                 <div className="flex items-center gap-3">
-                  <span className="text-sm font-semibold text-zinc-400 uppercase tracking-wider">Live Build & Deployment Stream</span>
-                  {deployStatus && (
+                  <span className="text-sm font-semibold text-zinc-400 uppercase tracking-wider">
+                    {selectedLogsAppId ? 'Project Build Logs' : 'Live Build & Deployment Stream'}
+                  </span>
+                  {!selectedLogsAppId && deployStatus && (
                     <span className={`text-[11px] font-mono px-2.5 py-0.5 rounded-full border uppercase font-bold flex items-center gap-1.5 ${
                       deployStatus === 'active'
                         ? 'bg-emerald-950/60 border-emerald-700/80 text-emerald-400'
@@ -524,52 +495,76 @@ export default function App() {
                     </span>
                   )}
                 </div>
-                {activeDeploymentId && <span className="text-xs font-mono text-zinc-500">ID: {activeDeploymentId}</span>}
+
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-zinc-400 font-medium">Filter Project:</label>
+                    <select
+                      value={selectedLogsAppId}
+                      onChange={e => setSelectedLogsAppId(e.target.value)}
+                      className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500 font-mono"
+                    >
+                      <option value="">-- Active Live Stream --</option>
+                      {apps.map(a => (
+                        <option key={a.id} value={a.id}>{a.name} ({a.subdomain || a.name})</option>
+                      ))}
+                    </select>
+                  </div>
+                  {!selectedLogsAppId && activeDeploymentId && (
+                    <span className="text-xs font-mono text-zinc-500">ID: {activeDeploymentId.slice(0, 8)}</span>
+                  )}
+                </div>
               </div>
 
-              {deployStatus === 'active' && (
-                <div className="p-3 bg-emerald-950/40 border border-emerald-800/80 rounded-xl flex items-center justify-between text-xs text-emerald-300">
-                  <div className="flex items-center gap-2">
-                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                    <span className="font-semibold">Deployment active and traffic routing live!</span>
-                  </div>
-                  <span className="text-[11px] text-emerald-500/80">Traefik route synchronized</span>
-                </div>
-              )}
-
-              {deployStatus === 'failed' && (
-                <div className="p-3 bg-rose-950/40 border border-rose-800/80 rounded-xl flex items-center justify-between text-xs text-rose-300">
-                  <div className="flex items-center gap-2">
-                    <X className="w-4 h-4 text-rose-400" />
-                    <span className="font-semibold">Deployment failed during build or route sync.</span>
-                  </div>
-                  <span className="text-[11px] text-rose-500/80">Check logs below for details</span>
-                </div>
-              )}
-
-              <div className="flex-1 bg-black/80 rounded-xl p-5 font-mono text-xs text-zinc-300 overflow-y-auto border border-zinc-900 space-y-1.5 shadow-inner">
-                {logs.length === 0 ? (
-                  <div className="text-zinc-600 italic">Waiting for deployment stream...</div>
-                ) : (
-                  logs.map((l, idx) => {
-                    const timeStr = (() => {
-                      try {
-                        const d = new Date(l.timestamp);
-                        return isNaN(d.getTime()) ? new Date().toLocaleTimeString() : d.toLocaleTimeString();
-                      } catch (_) {
-                        return new Date().toLocaleTimeString();
-                      }
-                    })();
-                    return (
-                      <div key={idx} className="flex items-start gap-3">
-                        <span className="text-zinc-600">{timeStr}</span>
-                        <span className="text-emerald-500 font-bold uppercase text-[10px]">[{l.step}]</span>
-                        <span className={l.level === 'error' ? 'text-red-400 font-semibold' : 'text-zinc-200'}>{l.message}</span>
+              {selectedLogsAppId ? (
+                <ProjectBuildLogsView appId={selectedLogsAppId} apps={apps} />
+              ) : (
+                <div className="flex-1 flex flex-col space-y-3 min-h-0">
+                  {deployStatus === 'active' && (
+                    <div className="p-3 bg-emerald-950/40 border border-emerald-800/80 rounded-xl flex items-center justify-between text-xs text-emerald-300">
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                        <span className="font-semibold">Deployment active and traffic routing live!</span>
                       </div>
-                    );
-                  })
-                )}
-              </div>
+                      <span className="text-[11px] text-emerald-500/80">Traefik route synchronized</span>
+                    </div>
+                  )}
+
+                  {deployStatus === 'failed' && (
+                    <div className="p-3 bg-rose-950/40 border border-rose-800/80 rounded-xl flex items-center justify-between text-xs text-rose-300">
+                      <div className="flex items-center gap-2">
+                        <X className="w-4 h-4 text-rose-400" />
+                        <span className="font-semibold">Deployment failed during build or route sync.</span>
+                      </div>
+                      <span className="text-[11px] text-rose-500/80">Check logs below for details</span>
+                    </div>
+                  )}
+
+                  <div className="flex-1 bg-black/80 rounded-xl p-5 font-mono text-xs text-zinc-300 overflow-y-auto border border-zinc-900 space-y-1.5 shadow-inner min-h-[300px]">
+                    {logs.length === 0 ? (
+                      <div className="text-zinc-600 italic">Waiting for deployment stream...</div>
+                    ) : (
+                      logs.map((l, idx) => {
+                        const timeStr = (() => {
+                          try {
+                            const d = new Date(l.timestamp);
+                            return isNaN(d.getTime()) ? new Date().toLocaleTimeString() : d.toLocaleTimeString();
+                          } catch (_) {
+                            return new Date().toLocaleTimeString();
+                          }
+                        })();
+                        return (
+                          <div key={idx} className="flex items-start gap-3">
+                            <span className="text-zinc-600">{timeStr}</span>
+                            <span className="text-emerald-500 font-bold uppercase text-[10px]">[{l.step}]</span>
+                            <span className={l.level === 'error' ? 'text-red-400 font-semibold' : 'text-zinc-200'}>{l.message}</span>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -830,6 +825,673 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Test Application Modal */}
+      {testingApp && (
+        <TestAppModal
+          app={testingApp}
+          onClose={() => setTestingApp(null)}
+        />
+      )}
+
+      {/* Build History & Logs Modal */}
+      {historyApp && (
+        <BuildHistoryModal
+          app={historyApp}
+          onClose={() => setHistoryApp(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// -----------------------------------------------------------------------------
+// Subcomponents
+// -----------------------------------------------------------------------------
+
+interface ApplicationCardProps {
+  app: Application;
+  onDeploy: (id: string) => void;
+  isDeploying: boolean;
+  onViewCode: (app: Application) => void;
+  onTestApp: (app: Application) => void;
+  onViewHistory: (app: Application) => void;
+}
+
+function ApplicationCard({
+  app,
+  onDeploy,
+  isDeploying,
+  onViewCode,
+  onTestApp,
+  onViewHistory,
+}: ApplicationCardProps) {
+  const { data: deploymentsData } = useListDeployments(app.id);
+  const deployments = Array.isArray(deploymentsData) ? deploymentsData : [];
+  const latestDep = deployments.length > 0 ? deployments[0] : null;
+  const buildVersion = latestDep?.buildVersion;
+  const subdomain = app.subdomain || app.name;
+  const testUrl = app.testUrl || `http://${subdomain}.localhost:8000`;
+  const [copied, setCopied] = useState(false);
+
+  const copyUrl = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(testUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="p-5 rounded-xl border border-zinc-800/80 bg-zinc-900/20 hover:border-zinc-700 transition space-y-3">
+      <div className="flex items-start justify-between">
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <h4 className="font-semibold text-base">{app.name}</h4>
+            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
+              app.status === 'running' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-zinc-800 text-zinc-400'
+            }`}>
+              {app.status}
+            </span>
+
+            {/* Build Version Badge */}
+            {buildVersion ? (
+              <span className="text-[10px] px-2.5 py-0.5 rounded-full font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-800/80">
+                v{buildVersion}
+              </span>
+            ) : (
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-zinc-800/80 text-zinc-500 border border-zinc-700/50">
+                v0 (Draft)
+              </span>
+            )}
+
+            {app.sourceType === 'inline' ? (
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-sky-950/80 text-sky-400 border border-sky-800/60 flex items-center gap-1">
+                <Zap className="w-2.5 h-2.5" /> Inline Code
+              </span>
+            ) : (
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-purple-950/80 text-purple-400 border border-purple-800/60 flex items-center gap-1">
+                <GitBranch className="w-2.5 h-2.5" /> Git
+              </span>
+            )}
+          </div>
+
+          {app.sourceType === 'inline' ? (
+            <p className="text-xs text-zinc-500 font-mono">Standalone Cloudflare Worker template</p>
+          ) : (
+            <p className="text-xs text-zinc-400 font-mono">{app.gitRepo} ({app.branch || 'main'})</p>
+          )}
+
+          {/* Subdomain / Test URL Badge */}
+          <div className="flex items-center gap-2 pt-1">
+            <span className="text-xs font-mono text-emerald-400 bg-emerald-950/30 border border-emerald-900/60 px-2.5 py-1 rounded-md flex items-center gap-1.5">
+              <Globe className="w-3.5 h-3.5 text-emerald-400" />
+              {testUrl}
+            </span>
+            <button
+              type="button"
+              onClick={copyUrl}
+              title="Copy URL"
+              className="p-1.5 rounded-md hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition"
+            >
+              {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+            </button>
+            <a
+              href={testUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open in new browser tab"
+              className="p-1.5 rounded-md hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          </div>
+        </div>
+
+        {/* Action buttons */}
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          {app.sourceType === 'inline' && (
+            <button
+              type="button"
+              onClick={() => onViewCode(app)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 text-xs font-medium transition"
+            >
+              <Code className="w-3.5 h-3.5 text-zinc-400" />
+              Code
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => onViewHistory(app)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 text-xs font-medium transition"
+          >
+            <History className="w-3.5 h-3.5 text-zinc-400" />
+            Build Logs ({deployments.length})
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onTestApp(app)}
+            disabled={!app.activeDeploymentId && deployments.length === 0}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-900/60 bg-emerald-950/30 hover:bg-emerald-950/60 disabled:opacity-40 text-emerald-400 text-xs font-semibold transition"
+          >
+            <Send className="w-3.5 h-3.5" />
+            Test App
+          </button>
+
+          <button
+            onClick={() => onDeploy(app.id)}
+            disabled={isDeploying}
+            className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-zinc-950 text-xs font-semibold transition"
+          >
+            {isDeploying ? (
+              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Play className="w-3.5 h-3.5 fill-current" />
+            )}
+            {isDeploying ? 'Deploying...' : 'Deploy'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface TestAppModalProps {
+  app: Application;
+  onClose: () => void;
+}
+
+function TestAppModal({ app, onClose }: TestAppModalProps) {
+  const [method, setMethod] = useState<'GET' | 'POST' | 'PUT' | 'DELETE'>('GET');
+  const [path, setPath] = useState('/');
+  const [body, setBody] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [testResult, setTestResult] = useState<{
+    statusCode: number;
+    headers?: Record<string, string>;
+    body: string;
+    durationMs?: number;
+  } | null>(null);
+  const [copiedCurl, setCopiedCurl] = useState(false);
+
+  const testAppMutation = useTestApplication();
+  const subdomain = app.subdomain || app.name;
+  const testUrl = app.testUrl || `http://${subdomain}.localhost:8000`;
+  const curlCommand = `curl -i -X ${method} -H "Host: ${subdomain}.localhost:8000" http://localhost:8000${path}${
+    method !== 'GET' && body ? ` -d '${body}'` : ''
+  }`;
+
+  const handleRunTest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    const start = performance.now();
+    try {
+      const res = await testAppMutation.mutateAsync({
+        id: app.id,
+        data: {
+          method,
+          path: path.startsWith('/') ? path : `/${path}`,
+          body: method !== 'GET' && body ? body : undefined,
+        },
+      });
+      const duration = Math.round(performance.now() - start);
+      setTestResult({
+        statusCode: res.statusCode,
+        headers: res.headers as Record<string, string> | undefined,
+        body: res.body,
+        durationMs: duration,
+      });
+    } catch (err: any) {
+      setTestResult({
+        statusCode: 500,
+        body: err?.message || 'Failed to invoke test runner',
+        durationMs: Math.round(performance.now() - start),
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const copyCurl = () => {
+    navigator.clipboard.writeText(curlCommand);
+    setCopiedCurl(true);
+    setTimeout(() => setCopiedCurl(false), 2000);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-2xl w-full p-6 space-y-5 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-zinc-800/80 pb-4">
+          <div>
+            <div className="flex items-center gap-2.5">
+              <h3 className="text-lg font-bold">Test Application</h3>
+              <span className="text-xs px-2.5 py-0.5 rounded-full font-mono bg-emerald-950/80 text-emerald-400 border border-emerald-800/80">
+                {app.name}
+              </span>
+            </div>
+            <p className="text-xs text-zinc-400 mt-0.5">
+              Live HTTP testing via subdomain route{' '}
+              <code className="text-emerald-400 font-mono">{testUrl}</code>
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-zinc-500 hover:text-zinc-300 transition"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="space-y-4 overflow-y-auto pr-1">
+          <form onSubmit={handleRunTest} className="space-y-3">
+            <div className="flex gap-2">
+              <select
+                value={method}
+                onChange={e => setMethod(e.target.value as any)}
+                className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-xs font-semibold text-emerald-400 focus:outline-none focus:border-emerald-500"
+              >
+                <option value="GET">GET</option>
+                <option value="POST">POST</option>
+                <option value="PUT">PUT</option>
+                <option value="DELETE">DELETE</option>
+              </select>
+              <input
+                type="text"
+                value={path}
+                onChange={e => setPath(e.target.value)}
+                placeholder="/"
+                className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-xs font-mono text-zinc-100 focus:outline-none focus:border-emerald-500"
+              />
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-zinc-950 text-xs font-semibold transition flex items-center gap-1.5"
+              >
+                {isLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5 fill-current" />}
+                Send Request
+              </button>
+            </div>
+
+            {(method === 'POST' || method === 'PUT') && (
+              <div>
+                <label className="text-[11px] font-medium text-zinc-400 mb-1 block">Request Body (JSON / Raw)</label>
+                <textarea
+                  rows={3}
+                  value={body}
+                  onChange={e => setBody(e.target.value)}
+                  placeholder='{"key": "value"}'
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-xs font-mono text-zinc-200 focus:outline-none focus:border-emerald-500 resize-none leading-relaxed"
+                />
+              </div>
+            )}
+          </form>
+
+          {/* Test Response */}
+          {testResult && (
+            <div className="space-y-2 border-t border-zinc-800/80 pt-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Response</span>
+                <div className="flex items-center gap-2">
+                  {testResult.durationMs !== undefined && (
+                    <span className="text-[11px] font-mono text-zinc-500">{testResult.durationMs}ms</span>
+                  )}
+                  <span className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded ${
+                    testResult.statusCode >= 200 && testResult.statusCode < 300
+                      ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                      : 'bg-rose-950 text-rose-400 border border-rose-800'
+                  }`}>
+                    {testResult.statusCode}
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-black/90 border border-zinc-800/80 rounded-xl p-3.5 space-y-2">
+                <pre className="text-xs font-mono text-zinc-200 whitespace-pre-wrap break-all overflow-y-auto max-h-48 leading-relaxed">
+                  {testResult.body || '<Empty Body>'}
+                </pre>
+              </div>
+            </div>
+          )}
+
+          {/* cURL command snippet */}
+          <div className="space-y-1.5 border-t border-zinc-800/80 pt-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] text-zinc-400 font-medium">Terminal cURL command</span>
+              <button
+                type="button"
+                onClick={copyCurl}
+                className="text-[11px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1 transition"
+              >
+                {copiedCurl ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                {copiedCurl ? 'Copied' : 'Copy cURL'}
+              </button>
+            </div>
+            <pre className="bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-[11px] font-mono text-zinc-400 overflow-x-auto select-all">
+              {curlCommand}
+            </pre>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between border-t border-zinc-800/80 pt-3">
+          <a
+            href={`${testUrl}${path}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-zinc-400 hover:text-zinc-200 flex items-center gap-1.5 transition"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+            Open in Browser ({testUrl})
+          </a>
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-lg border border-zinc-800 text-sm font-medium hover:bg-zinc-800 transition"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface BuildHistoryModalProps {
+  app: Application;
+  onClose: () => void;
+}
+
+function BuildHistoryModal({ app, onClose }: BuildHistoryModalProps) {
+  const { data: deploymentsData } = useListDeployments(app.id);
+  const deployments = Array.isArray(deploymentsData) ? deploymentsData : [];
+  const [selectedDepId, setSelectedDepId] = useState<string | null>(null);
+  const [depLogs, setDepLogs] = useState<Array<{ timestamp: string; step: string; message: string; level: string }>>([]);
+  const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+
+  useEffect(() => {
+    if (!selectedDepId && deployments.length > 0) {
+      setSelectedDepId(deployments[0].id);
+    }
+  }, [deployments, selectedDepId]);
+
+  useEffect(() => {
+    if (!selectedDepId) return;
+    setIsLoadingLogs(true);
+    fetch(`/api/v1/deployments/${selectedDepId}/logs`)
+      .then(r => r.json())
+      .then((data: any[]) => {
+        if (Array.isArray(data)) {
+          setDepLogs(data.map(entry => ({
+            timestamp: entry.timestamp || entry.Timestamp || new Date().toISOString(),
+            step: entry.step || entry.Step || 'info',
+            message: entry.message || entry.Message || '',
+            level: entry.level || entry.Level || 'info',
+          })));
+        } else {
+          setDepLogs([]);
+        }
+      })
+      .catch(() => setDepLogs([]))
+      .finally(() => setIsLoadingLogs(false));
+  }, [selectedDepId]);
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-3xl w-full p-6 space-y-5 shadow-2xl flex flex-col max-h-[90vh]">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-zinc-800/80 pb-4">
+          <div>
+            <div className="flex items-center gap-2.5">
+              <h3 className="text-lg font-bold">Build History & Logs</h3>
+              <span className="text-xs px-2.5 py-0.5 rounded-full font-mono bg-emerald-950/80 text-emerald-400 border border-emerald-800/80">
+                {app.name}
+              </span>
+            </div>
+            <p className="text-xs text-zinc-400 mt-0.5">
+              Build version tags and deployment build logs for this project
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-zinc-500 hover:text-zinc-300 transition"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-12 gap-4 flex-1 overflow-hidden min-h-[350px]">
+          {/* Deployments List (Left Column) */}
+          <div className="col-span-5 border-r border-zinc-800/80 pr-3 space-y-2 overflow-y-auto max-h-[500px]">
+            <div className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
+              Build Versions ({deployments.length})
+            </div>
+            {deployments.length === 0 ? (
+              <div className="text-xs text-zinc-500 italic p-3">No builds found for this application yet.</div>
+            ) : (
+              deployments.map(dep => {
+                const isSelected = selectedDepId === dep.id;
+                const d = new Date(dep.createdAt);
+                const dateStr = isNaN(d.getTime()) ? '' : d.toLocaleString();
+                return (
+                  <div
+                    key={dep.id}
+                    onClick={() => setSelectedDepId(dep.id)}
+                    className={`p-3 rounded-xl border cursor-pointer transition space-y-1 ${
+                      isSelected
+                        ? 'bg-zinc-800 border-emerald-500/80 text-zinc-100 shadow-sm'
+                        : 'bg-zinc-950/60 border-zinc-800/80 hover:border-zinc-700 text-zinc-300'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-xs text-emerald-400 font-mono">
+                        v{dep.buildVersion || 1}
+                      </span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
+                        dep.status === 'active'
+                          ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                          : dep.status === 'failed'
+                          ? 'bg-rose-950 text-rose-400 border border-rose-800'
+                          : 'bg-zinc-800 text-zinc-400'
+                      }`}>
+                        {dep.status}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-zinc-400 truncate font-mono">
+                      {dep.commitHash ? dep.commitHash.slice(0, 7) : 'HEAD'} - {dep.commitMessage || 'Manual deployment'}
+                    </div>
+                    <div className="text-[10px] text-zinc-500">{dateStr}</div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Logs View (Right Column) */}
+          <div className="col-span-7 flex flex-col space-y-2 overflow-hidden">
+            <div className="flex items-center justify-between text-xs text-zinc-400">
+              <span className="font-semibold uppercase tracking-wider">Build Output</span>
+              {selectedDepId && (
+                <span className="font-mono text-[10px] text-zinc-500">ID: {selectedDepId.slice(0, 8)}</span>
+              )}
+            </div>
+
+            <div className="flex-1 bg-black/90 rounded-xl p-4 font-mono text-xs text-zinc-300 overflow-y-auto border border-zinc-900 space-y-1.5 shadow-inner">
+              {isLoadingLogs ? (
+                <div className="flex items-center gap-2 text-zinc-500 py-4">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+                  <span>Loading build logs...</span>
+                </div>
+              ) : depLogs.length === 0 ? (
+                <div className="text-zinc-600 italic">No log entries available for this build.</div>
+              ) : (
+                depLogs.map((l, idx) => {
+                  const timeStr = (() => {
+                    try {
+                      const d = new Date(l.timestamp);
+                      return isNaN(d.getTime()) ? new Date().toLocaleTimeString() : d.toLocaleTimeString();
+                    } catch (_) {
+                      return new Date().toLocaleTimeString();
+                    }
+                  })();
+                  return (
+                    <div key={idx} className="flex items-start gap-2 text-[11px] leading-relaxed">
+                      <span className="text-zinc-600 shrink-0">{timeStr}</span>
+                      <span className="text-emerald-500 font-bold uppercase text-[9px] shrink-0">[{l.step}]</span>
+                      <span className={l.level === 'error' ? 'text-red-400 font-semibold' : 'text-zinc-300'}>
+                        {l.message}
+                      </span>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex justify-end border-t border-zinc-800/80 pt-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-lg border border-zinc-800 text-sm font-medium hover:bg-zinc-800 transition"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProjectBuildLogsView({ appId, apps }: { appId: string; apps: Application[] }) {
+  const app = apps.find(a => a.id === appId);
+  const { data: deploymentsData } = useListDeployments(appId);
+  const deployments = Array.isArray(deploymentsData) ? deploymentsData : [];
+  const [selectedDepId, setSelectedDepId] = useState<string | null>(null);
+  const [logs, setLogs] = useState<Array<{ timestamp: string; step: string; message: string; level: string }>>([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    if (deployments.length > 0 && !selectedDepId) {
+      setSelectedDepId(deployments[0].id);
+    }
+  }, [deployments, selectedDepId]);
+
+  useEffect(() => {
+    if (!selectedDepId) return;
+    setIsLoading(true);
+    fetch(`/api/v1/deployments/${selectedDepId}/logs`)
+      .then(r => r.json())
+      .then((data: any[]) => {
+        if (Array.isArray(data)) {
+          setLogs(data.map(entry => ({
+            timestamp: entry.timestamp || entry.Timestamp || new Date().toISOString(),
+            step: entry.step || entry.Step || 'info',
+            message: entry.message || entry.Message || '',
+            level: entry.level || entry.Level || 'info',
+          })));
+        } else {
+          setLogs([]);
+        }
+      })
+      .catch(() => setLogs([]))
+      .finally(() => setIsLoading(false));
+  }, [selectedDepId]);
+
+  return (
+    <div className="flex-1 flex flex-col space-y-3 min-h-0">
+      <div className="grid grid-cols-12 gap-4 flex-1 min-h-0">
+        {/* Builds list */}
+        <div className="col-span-4 bg-zinc-900/30 border border-zinc-800/80 rounded-xl p-3 space-y-2 overflow-y-auto">
+          <div className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
+            Builds for {app?.name || 'Project'} ({deployments.length})
+          </div>
+          {deployments.length === 0 ? (
+            <div className="text-xs text-zinc-500 italic">No deployments found for this project yet.</div>
+          ) : (
+            deployments.map(dep => {
+              const isSelected = selectedDepId === dep.id;
+              const d = new Date(dep.createdAt);
+              const dateStr = isNaN(d.getTime()) ? '' : d.toLocaleString();
+              return (
+                <div
+                  key={dep.id}
+                  onClick={() => setSelectedDepId(dep.id)}
+                  className={`p-3 rounded-lg border cursor-pointer transition space-y-1 ${
+                    isSelected
+                      ? 'bg-zinc-800 border-emerald-500 text-zinc-100'
+                      : 'bg-zinc-950/60 border-zinc-800 hover:border-zinc-700 text-zinc-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-xs text-emerald-400 font-mono">
+                      v{dep.buildVersion || 1}
+                    </span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
+                      dep.status === 'active'
+                        ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                        : dep.status === 'failed'
+                        ? 'bg-rose-950 text-rose-400 border border-rose-800'
+                        : 'bg-zinc-800 text-zinc-400'
+                    }`}>
+                      {dep.status}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-zinc-400 truncate font-mono">
+                    {dep.commitHash ? dep.commitHash.slice(0, 7) : 'HEAD'} - {dep.commitMessage || 'Manual deployment'}
+                  </div>
+                  <div className="text-[10px] text-zinc-500">{dateStr}</div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Build Logs console */}
+        <div className="col-span-8 flex flex-col space-y-2 min-h-0">
+          <div className="flex items-center justify-between text-xs text-zinc-400">
+            <span className="font-semibold uppercase tracking-wider">
+              {selectedDepId ? `Log Console (Deployment ID: ${selectedDepId.slice(0, 8)})` : 'Log Console'}
+            </span>
+          </div>
+
+          <div className="flex-1 bg-black/90 rounded-xl p-5 font-mono text-xs text-zinc-300 overflow-y-auto border border-zinc-900 space-y-1.5 shadow-inner">
+            {isLoading ? (
+              <div className="flex items-center gap-2 text-zinc-500">
+                <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+                <span>Loading build logs...</span>
+              </div>
+            ) : logs.length === 0 ? (
+              <div className="text-zinc-600 italic">No log entries found for this build.</div>
+            ) : (
+              logs.map((l, idx) => {
+                const timeStr = (() => {
+                  try {
+                    const d = new Date(l.timestamp);
+                    return isNaN(d.getTime()) ? new Date().toLocaleTimeString() : d.toLocaleTimeString();
+                  } catch (_) {
+                    return new Date().toLocaleTimeString();
+                  }
+                })();
+                return (
+                  <div key={idx} className="flex items-start gap-3">
+                    <span className="text-zinc-600">{timeStr}</span>
+                    <span className="text-emerald-500 font-bold uppercase text-[10px]">[{l.step}]</span>
+                    <span className={l.level === 'error' ? 'text-red-400 font-semibold' : 'text-zinc-200'}>
+                      {l.message}
+                    </span>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
