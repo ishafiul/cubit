@@ -27,7 +27,9 @@ type ApplicationResource struct {
 type ApplicationResourceModel struct {
 	ID                 types.String `tfsdk:"id"`
 	Name               types.String `tfsdk:"name"`
+	SourceType         types.String `tfsdk:"source_type"`
 	GitRepo            types.String `tfsdk:"git_repo"`
+	InlineCode         types.String `tfsdk:"inline_code"`
 	Status             types.String `tfsdk:"status"`
 	ActiveDeploymentID types.String `tfsdk:"active_deployment_id"`
 }
@@ -51,9 +53,18 @@ func (r *ApplicationResource) Schema(ctx context.Context, req resource.SchemaReq
 				Description: "Human-readable name of the application.",
 				Required:    true,
 			},
+			"source_type": schema.StringAttribute{
+				Description: "Source type of application (git or inline). Defaults to git.",
+				Optional:    true,
+				Computed:    true,
+			},
 			"git_repo": schema.StringAttribute{
 				Description: "Git repository containing the Cloudflare Worker source code.",
-				Required:    true,
+				Optional:    true,
+			},
+			"inline_code": schema.StringAttribute{
+				Description: "Inline Cloudflare Worker JavaScript/TypeScript source code.",
+				Optional:    true,
 			},
 			"status": schema.StringAttribute{
 				Description: "Current status of the application (e.g. active, building).",
@@ -86,9 +97,16 @@ func (r *ApplicationResource) Create(ctx context.Context, req resource.CreateReq
 		return
 	}
 
+	sourceType := plan.SourceType.ValueString()
+	if sourceType == "" {
+		sourceType = "git"
+	}
+
 	app := &ClientApplication{
-		Name:    plan.Name.ValueString(),
-		GitRepo: plan.GitRepo.ValueString(),
+		Name:       plan.Name.ValueString(),
+		SourceType: sourceType,
+		GitRepo:    plan.GitRepo.ValueString(),
+		InlineCode: plan.InlineCode.ValueString(),
 	}
 
 	created, err := r.client.CreateApplication(ctx, app)
@@ -98,6 +116,7 @@ func (r *ApplicationResource) Create(ctx context.Context, req resource.CreateReq
 	}
 
 	plan.ID = types.StringValue(created.ID)
+	plan.SourceType = types.StringValue(created.SourceType)
 	plan.Status = types.StringValue(created.Status)
 	plan.ActiveDeploymentID = types.StringValue(created.ActiveDeployment)
 
@@ -118,7 +137,9 @@ func (r *ApplicationResource) Read(ctx context.Context, req resource.ReadRequest
 	}
 
 	state.Name = types.StringValue(app.Name)
+	state.SourceType = types.StringValue(app.SourceType)
 	state.GitRepo = types.StringValue(app.GitRepo)
+	state.InlineCode = types.StringValue(app.InlineCode)
 	state.Status = types.StringValue(app.Status)
 	state.ActiveDeploymentID = types.StringValue(app.ActiveDeployment)
 
@@ -132,9 +153,16 @@ func (r *ApplicationResource) Update(ctx context.Context, req resource.UpdateReq
 		return
 	}
 
+	sourceType := plan.SourceType.ValueString()
+	if sourceType == "" {
+		sourceType = "git"
+	}
+
 	app := &ClientApplication{
-		Name:    plan.Name.ValueString(),
-		GitRepo: plan.GitRepo.ValueString(),
+		Name:       plan.Name.ValueString(),
+		SourceType: sourceType,
+		GitRepo:    plan.GitRepo.ValueString(),
+		InlineCode: plan.InlineCode.ValueString(),
 	}
 
 	updated, err := r.client.UpdateApplication(ctx, plan.ID.ValueString(), app)
@@ -143,6 +171,7 @@ func (r *ApplicationResource) Update(ctx context.Context, req resource.UpdateReq
 		return
 	}
 
+	plan.SourceType = types.StringValue(updated.SourceType)
 	plan.Status = types.StringValue(updated.Status)
 	plan.ActiveDeploymentID = types.StringValue(updated.ActiveDeployment)
 

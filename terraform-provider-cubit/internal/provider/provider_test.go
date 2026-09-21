@@ -102,12 +102,18 @@ func TestClientOperations(t *testing.T) {
 				var req map[string]interface{}
 				_ = json.NewDecoder(r.Body).Decode(&req)
 				w.WriteHeader(http.StatusCreated)
-				_ = json.NewEncoder(w).Encode(map[string]interface{}{
-					"id":      "app-test-1",
-					"name":    req["name"],
-					"gitRepo": req["gitRepo"],
-					"status":  "created",
-				})
+				resp := map[string]interface{}{
+					"id":         "app-test-1",
+					"name":       req["name"],
+					"sourceType": req["sourceType"],
+					"gitRepo":    req["gitRepo"],
+					"inlineCode": req["inlineCode"],
+					"status":     "created",
+				}
+				if resp["sourceType"] == nil || resp["sourceType"] == "" {
+					resp["sourceType"] = "git"
+				}
+				_ = json.NewEncoder(w).Encode(resp)
 			}
 		})
 
@@ -178,6 +184,26 @@ func TestClientOperations(t *testing.T) {
 				}
 				if app.Status != "created" {
 					t.Errorf("expected status created, got %q", app.Status)
+				}
+			})
+		})
+
+		t.Run("When creating an inline worker application", func(t *testing.T) {
+			app, err := client.CreateApplication(context.Background(), &cubitprovider.ClientApplication{
+				Name:       "hello-worker",
+				SourceType: "inline",
+				InlineCode: `export default { fetch: () => new Response("hello") };`,
+			})
+			if err != nil {
+				t.Fatalf("failed to create inline app: %v", err)
+			}
+
+			t.Run("Then application is created with sourceType inline", func(t *testing.T) {
+				if app.ID != "app-test-1" {
+					t.Errorf("expected id app-test-1, got %q", app.ID)
+				}
+				if app.SourceType != "inline" {
+					t.Errorf("expected sourceType inline, got %q", app.SourceType)
 				}
 			})
 		})

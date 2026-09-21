@@ -43,13 +43,15 @@ type ClientNode struct {
 
 // ClientApplication represents a worker application.
 type ClientApplication struct {
-	ID               string              `json:"id,omitempty"`
-	Name             string              `json:"name"`
-	GitRepo          string              `json:"gitRepo"`
-	ActiveDeployment string              `json:"activeDeploymentId,omitempty"`
-	Status           string              `json:"status,omitempty"`
-	Env              map[string]string   `json:"env,omitempty"`
-	Bindings         []ClientBinding     `json:"bindings,omitempty"`
+	ID               string            `json:"id,omitempty"`
+	Name             string            `json:"name"`
+	SourceType       string            `json:"sourceType,omitempty"`
+	GitRepo          string            `json:"gitRepo,omitempty"`
+	InlineCode       string            `json:"inlineCode,omitempty"`
+	ActiveDeployment string            `json:"activeDeploymentId,omitempty"`
+	Status           string            `json:"status,omitempty"`
+	Env              map[string]string `json:"env,omitempty"`
+	Bindings         []ClientBinding   `json:"bindings,omitempty"`
 }
 
 // ClientBinding represents a KV, D1, or Queue resource binding.
@@ -145,8 +147,16 @@ func (c *CubitClient) DeleteNode(ctx context.Context, id string) error {
 func (c *CubitClient) CreateApplication(ctx context.Context, app *ClientApplication) (*ClientApplication, error) {
 	var result ClientApplication
 	req := map[string]interface{}{
-		"name":    app.Name,
-		"gitRepo": app.GitRepo,
+		"name": app.Name,
+	}
+	if app.SourceType != "" {
+		req["sourceType"] = app.SourceType
+	}
+	if app.GitRepo != "" {
+		req["gitRepo"] = app.GitRepo
+	}
+	if app.InlineCode != "" {
+		req["inlineCode"] = app.InlineCode
 	}
 	if err := c.doRequest(ctx, http.MethodPost, "/applications", req, &result); err != nil {
 		return nil, err
@@ -164,9 +174,12 @@ func (c *CubitClient) GetApplication(ctx context.Context, id string) (*ClientApp
 
 func (c *CubitClient) UpdateApplication(ctx context.Context, id string, app *ClientApplication) (*ClientApplication, error) {
 	var result ClientApplication
-	req := map[string]interface{}{
-		"name":    app.Name,
-		"gitRepo": app.GitRepo,
+	req := map[string]interface{}{}
+	if app.GitRepo != "" {
+		req["gitRepo"] = app.GitRepo
+	}
+	if app.InlineCode != "" {
+		req["inlineCode"] = app.InlineCode
 	}
 	if err := c.doRequest(ctx, http.MethodPut, "/applications/"+id, req, &result); err != nil {
 		return nil, err
