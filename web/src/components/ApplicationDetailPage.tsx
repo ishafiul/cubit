@@ -1,0 +1,827 @@
+import React, { useState, useEffect } from 'react';
+import {
+  ArrowLeft,
+  Play,
+  RefreshCw,
+  Send,
+  Terminal,
+  Code,
+  Globe,
+  Settings,
+  ShieldCheck,
+  Trash2,
+  Plus,
+  ExternalLink,
+  Copy,
+  Check,
+  Zap,
+  GitBranch,
+  Save,
+  Eye,
+  EyeOff,
+  Clock,
+} from 'lucide-react';
+import type { Application } from '../api/model';
+import { useListDeployments } from '../api/generated/deployments/deployments';
+import { useUpdateApplication } from '../api/generated/applications/applications';
+import { useListDomains, useCreateDomain } from '../api/generated/domains/domains';
+import { CodeEditor } from './CodeEditor';
+
+export interface ApplicationDetailPageProps {
+  app: Application;
+  onBack: () => void;
+  onDeploy: (appId: string) => Promise<void> | void;
+  isDeploying: boolean;
+  onTestApp: (app: Application) => void;
+  onRefreshApps: () => void;
+}
+
+export function ApplicationDetailPage({
+  app,
+  onBack,
+  onDeploy,
+  isDeploying,
+  onTestApp,
+  onRefreshApps,
+}: ApplicationDetailPageProps) {
+  const [activeTab, setActiveTab] = useState<'builds' | 'code' | 'domains' | 'settings'>('builds');
+
+  // Subdomain & URLs
+  const subdomain = app.subdomain || app.name;
+  const testUrl = app.testUrl || `http://${subdomain}.localhost:8000`;
+  const [copiedUrl, setCopiedUrl] = useState(false);
+
+  // Deployments hook
+  const { data: deploymentsData, refetch: refetchDeployments } = useListDeployments(app.id);
+  const deployments = Array.isArray(deploymentsData) ? deploymentsData : [];
+  const latestDep = deployments.length > 0 ? deployments[0] : null;
+  const currentBuildVersion = latestDep?.buildVersion || 1;
+
+  // Selected deployment for logs
+  const [selectedDepId, setSelectedDepId] = useState<string | null>(null);
+  const [depLogs, setDepLogs] = useState<Array<{ timestamp: string; step: string; message: string; level: string }>>([]);
+  const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+
+  // Code editor state
+  const [editedCode, setEditedCode] = useState(app.inlineCode || '');
+  const [isSavingCode, setIsSavingCode] = useState(false);
+  const [codeSaveStatus, setCodeSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
+
+  // Git branch state
+  const [gitBranch, setGitBranch] = useState(app.branch || 'main');
+  const [isSavingBranch, setIsSavingBranch] = useState(false);
+
+  // Custom Domains state
+  const { data: allDomainsData, refetch: refetchDomains } = useListDomains();
+  const allDomains = Array.isArray(allDomainsData) ? allDomainsData : [];
+  const appDomains = allDomains.filter(d => d.applicationId === app.id);
+  const [newHostname, setNewHostname] = useState('');
+  const [isCreatingDomain, setIsCreatingDomain] = useState(false);
+  const createDomainMutation = useCreateDomain();
+
+  // Environment variables state
+  const [envVars, setEnvVars] = useState<Array<{ key: string; value: string; isSecret: boolean }>>(
+    app.envVars ? app.envVars.map(e => ({ key: e.key || (e as any).Key || '', value: e.value || (e as any).Value || '', isSecret: !!(e.isSecret || (e as any).IsSecret) })) : []
+  );
+  const [showSecretValues, setShowSecretValues] = useState<Record<number, boolean>>({});
+  const [isSavingEnv, setIsSavingEnv] = useState(false);
+  const [envSaveStatus, setEnvSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
+
+  const updateAppMutation = useUpdateApplication();
+
+  // Initialize selected deployment for logs
+  useEffect(() => {
+    if (!selectedDepId && deployments.length > 0) {
+      setSelectedDepId(deployments[0].id);
+    }
+  }, [deployments, selectedDepId]);
+
+  // Sync edited code when app changes
+  useEffect(() => {
+    setEditedCode(app.inlineCode || '');
+  }, [app.inlineCode]);
+
+  // Fetch logs for selected deployment
+  useEffect(() => {
+    if (!selectedDepId) return;
+    setIsLoadingLogs(true);
+    fetch(`/api/v1/deployments/${selectedDepId}/logs`)
+      .then(r => r.json())
+      .then((data: any[]) => {
+        if (Array.isArray(data)) {
+          setDepLogs(data.map(entry => ({
+            timestamp: entry.timestamp || entry.Timestamp || new Date().toISOString(),
+            step: entry.step || entry.Step || 'info',
+            message: entry.message || entry.Message || '',
+            level: entry.level || entry.Level || 'info',
+          })));
+        } else {
+          setDepLogs([]);
+        }
+      })
+      .catch(() => setDepLogs([]))
+      .finally(() => setIsLoadingLogs(false));
+  }, [selectedDepId]);
+
+  const copyUrl = () => {
+    navigator.clipboard.writeText(testUrl);
+    setCopiedUrl(true);
+    setTimeout(() => setCopiedUrl(false), 2000);
+  };
+
+  // Save Code
+  const handleSaveCode = async (triggerDeploy = false) => {
+    setIsSavingCode(true);
+    setCodeSaveStatus('idle');
+    try {
+      await updateAppMutation.mutateAsync({
+        id: app.id,
+        data: { inlineCode: editedCode },
+      });
+      setCodeSaveStatus('saved');
+      onRefreshApps();
+      setTimeout(() => setCodeSaveStatus('idle'), 3000);
+
+      if (triggerDeploy) {
+        await onDeploy(app.id);
+        refetchDeployments();
+      }
+    } catch (err) {
+      console.error('Failed saving code:', err);
+      setCodeSaveStatus('error');
+    } finally {
+      setIsSavingCode(false);
+    }
+  };
+
+  // Save Git branch
+  const handleSaveBranch = async () => {
+    setIsSavingBranch(true);
+    try {
+      await updateAppMutation.mutateAsync({
+        id: app.id,
+        data: { branch: gitBranch },
+      });
+      onRefreshApps();
+    } finally {
+      setIsSavingBranch(false);
+    }
+  };
+
+  // Add Domain
+  const handleAddDomain = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newHostname) return;
+    setIsCreatingDomain(true);
+    try {
+      await createDomainMutation.mutateAsync({
+        data: {
+          applicationId: app.id,
+          hostname: newHostname.trim(),
+          pathPrefix: '/',
+        },
+      });
+      setNewHostname('');
+      refetchDomains();
+    } finally {
+      setIsCreatingDomain(false);
+    }
+  };
+
+  // Save Environment Variables
+  const handleSaveEnvVars = async () => {
+    setIsSavingEnv(true);
+    setEnvSaveStatus('idle');
+    try {
+      const validEnvs = envVars.filter(e => e.key.trim() !== '');
+      await updateAppMutation.mutateAsync({
+        id: app.id,
+        data: {
+          envVars: validEnvs.map(e => ({
+            key: e.key.trim(),
+            value: e.value,
+            isSecret: e.isSecret,
+          })),
+        },
+      });
+      setEnvSaveStatus('saved');
+      onRefreshApps();
+      setTimeout(() => setEnvSaveStatus('idle'), 3000);
+    } catch (err) {
+      console.error('Failed saving env vars:', err);
+      setEnvSaveStatus('error');
+    } finally {
+      setIsSavingEnv(false);
+    }
+  };
+
+  const addEnvVarRow = () => {
+    setEnvVars([...envVars, { key: '', value: '', isSecret: false }]);
+  };
+
+  const removeEnvVarRow = (index: number) => {
+    setEnvVars(envVars.filter((_, i) => i !== index));
+  };
+
+  const updateEnvVarRow = (index: number, field: 'key' | 'value' | 'isSecret', val: any) => {
+    setEnvVars(envVars.map((row, i) => (i === index ? { ...row, [field]: val } : row)));
+  };
+
+  return (
+    <div className="flex-1 flex flex-col overflow-hidden">
+      {/* Application Top Bar */}
+      <div className="border-b border-zinc-800/80 bg-zinc-950/80 backdrop-blur px-8 py-4 space-y-4">
+        {/* Navigation Breadcrumb */}
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            onClick={onBack}
+            className="flex items-center gap-2 text-xs font-medium text-zinc-400 hover:text-zinc-200 transition"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>Applications</span>
+            <span className="text-zinc-600">/</span>
+            <span className="text-zinc-200 font-semibold">{app.name}</span>
+          </button>
+
+          {/* Persistent Action Buttons */}
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => onTestApp(app)}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-emerald-900/60 bg-emerald-950/40 hover:bg-emerald-950/70 text-emerald-400 text-xs font-semibold transition"
+            >
+              <Send className="w-3.5 h-3.5" />
+              Test App
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onDeploy(app.id)}
+              disabled={isDeploying}
+              className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-zinc-950 text-xs font-bold transition shadow-sm"
+            >
+              {isDeploying ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Play className="w-3.5 h-3.5 fill-current" />
+              )}
+              {isDeploying ? 'Deploying...' : `Deploy v${currentBuildVersion + 1}`}
+            </button>
+          </div>
+        </div>
+
+        {/* Project Header Info */}
+        <div className="flex items-center justify-between flex-wrap gap-4">
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-3 flex-wrap">
+              <h1 className="text-2xl font-bold tracking-tight text-zinc-100">{app.name}</h1>
+              <span className={`text-[11px] px-2.5 py-0.5 rounded-full font-bold uppercase ${
+                app.status === 'running' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-zinc-800 text-zinc-400'
+              }`}>
+                {app.status}
+              </span>
+              <span className="text-[11px] px-2.5 py-0.5 rounded-full font-mono font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-800/80">
+                v{currentBuildVersion}
+              </span>
+              {app.sourceType === 'inline' ? (
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-sky-950/80 text-sky-400 border border-sky-800/60 flex items-center gap-1">
+                  <Zap className="w-2.5 h-2.5" /> Inline Worker
+                </span>
+              ) : (
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-purple-950/80 text-purple-400 border border-purple-800/60 flex items-center gap-1">
+                  <GitBranch className="w-2.5 h-2.5" /> Git ({app.branch || 'main'})
+                </span>
+              )}
+            </div>
+
+            {/* Testable Subdomain URL */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-mono text-emerald-400 bg-emerald-950/30 border border-emerald-900/60 px-2.5 py-1 rounded-md flex items-center gap-1.5">
+                <Globe className="w-3.5 h-3.5 text-emerald-400" />
+                {testUrl}
+              </span>
+              <button
+                type="button"
+                onClick={copyUrl}
+                title="Copy URL"
+                className="p-1.5 rounded-md hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition"
+              >
+                {copiedUrl ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+              </button>
+              <a
+                href={testUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Open in new browser tab"
+                className="p-1.5 rounded-md hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            </div>
+          </div>
+        </div>
+
+        {/* Tab Buttons */}
+        <div className="flex border-b border-zinc-800 pt-2 gap-6">
+          <button
+            type="button"
+            onClick={() => setActiveTab('builds')}
+            className={`pb-3 text-xs font-semibold flex items-center gap-2 border-b-2 transition ${
+              activeTab === 'builds'
+                ? 'border-emerald-500 text-emerald-400'
+                : 'border-transparent text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <Terminal className="w-3.5 h-3.5" />
+            Builds
+            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-zinc-800 text-zinc-400">
+              {deployments.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('code')}
+            className={`pb-3 text-xs font-semibold flex items-center gap-2 border-b-2 transition ${
+              activeTab === 'code'
+                ? 'border-emerald-500 text-emerald-400'
+                : 'border-transparent text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <Code className="w-3.5 h-3.5" />
+            Code Editor
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('domains')}
+            className={`pb-3 text-xs font-semibold flex items-center gap-2 border-b-2 transition ${
+              activeTab === 'domains'
+                ? 'border-emerald-500 text-emerald-400'
+                : 'border-transparent text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <Globe className="w-3.5 h-3.5" />
+            Domain Setup
+            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-zinc-800 text-zinc-400">
+              {appDomains.length + 1}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('settings')}
+            className={`pb-3 text-xs font-semibold flex items-center gap-2 border-b-2 transition ${
+              activeTab === 'settings'
+                ? 'border-emerald-500 text-emerald-400'
+                : 'border-transparent text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <Settings className="w-3.5 h-3.5" />
+            Settings
+          </button>
+        </div>
+      </div>
+
+      {/* Tab Contents */}
+      <div className="flex-1 overflow-y-auto p-8">
+        {/* Tab 1: Builds */}
+        {activeTab === 'builds' && (
+          <div className="grid grid-cols-12 gap-6 h-full min-h-[450px]">
+            {/* Deployments List (Left Column) */}
+            <div className="col-span-4 bg-zinc-900/30 border border-zinc-800/80 rounded-xl p-4 space-y-2.5 overflow-y-auto max-h-[600px]">
+              <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
+                <span>Deployment Versions ({deployments.length})</span>
+                <button
+                  type="button"
+                  onClick={() => refetchDeployments()}
+                  className="text-zinc-400 hover:text-zinc-200 transition"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {deployments.length === 0 ? (
+                <div className="text-xs text-zinc-500 italic p-3">No deployments found for this application.</div>
+              ) : (
+                deployments.map(dep => {
+                  const isSelected = selectedDepId === dep.id;
+                  const d = new Date(dep.createdAt);
+                  const dateStr = isNaN(d.getTime()) ? '' : d.toLocaleString();
+                  return (
+                    <div
+                      key={dep.id}
+                      onClick={() => setSelectedDepId(dep.id)}
+                      className={`p-3.5 rounded-xl border cursor-pointer transition space-y-1.5 ${
+                        isSelected
+                          ? 'bg-zinc-800 border-emerald-500 text-zinc-100 shadow-sm'
+                          : 'bg-zinc-950/60 border-zinc-800/80 hover:border-zinc-700 text-zinc-300'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-xs text-emerald-400 font-mono">
+                          v{dep.buildVersion || 1}
+                        </span>
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
+                          dep.status === 'active'
+                            ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                            : dep.status === 'failed'
+                            ? 'bg-rose-950 text-rose-400 border border-rose-800'
+                            : 'bg-amber-950 text-amber-400 border border-amber-800'
+                        }`}>
+                          {dep.status}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-zinc-400 truncate font-mono">
+                        {dep.commitHash ? dep.commitHash.slice(0, 7) : 'HEAD'} - {dep.commitMessage || 'Manual deployment'}
+                      </div>
+                      <div className="flex items-center gap-1.5 text-[10px] text-zinc-500 font-mono">
+                        <Clock className="w-3 h-3 text-zinc-600" />
+                        <span>{dateStr}</span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Build Logs Console (Right Column) */}
+            <div className="col-span-8 flex flex-col space-y-2 min-h-0">
+              <div className="flex items-center justify-between text-xs text-zinc-400">
+                <span className="font-semibold uppercase tracking-wider">
+                  {selectedDepId ? `Build Output (ID: ${selectedDepId.slice(0, 8)})` : 'Build Output'}
+                </span>
+                {selectedDepId && (
+                  <span className="font-mono text-[10px] text-zinc-500">{selectedDepId}</span>
+                )}
+              </div>
+
+              <div className="flex-1 bg-black/90 rounded-xl p-5 font-mono text-xs text-zinc-300 overflow-y-auto border border-zinc-900 space-y-2 shadow-inner min-h-[400px]">
+                {isLoadingLogs ? (
+                  <div className="flex items-center gap-2 text-zinc-500 py-4">
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+                    <span>Loading build logs...</span>
+                  </div>
+                ) : depLogs.length === 0 ? (
+                  <div className="text-zinc-600 italic">No log entries available for this build version.</div>
+                ) : (
+                  depLogs.map((l, idx) => {
+                    const timeStr = (() => {
+                      try {
+                        const d = new Date(l.timestamp);
+                        return isNaN(d.getTime()) ? new Date().toLocaleTimeString() : d.toLocaleTimeString();
+                      } catch (_) {
+                        return new Date().toLocaleTimeString();
+                      }
+                    })();
+                    return (
+                      <div key={idx} className="flex items-start gap-3 leading-relaxed">
+                        <span className="text-zinc-600 shrink-0 select-none">{timeStr}</span>
+                        <span className="text-emerald-500 font-bold uppercase text-[10px] shrink-0 select-none">
+                          [{l.step}]
+                        </span>
+                        <span className={l.level === 'error' ? 'text-rose-400 font-semibold' : 'text-zinc-200'}>
+                          {l.message}
+                        </span>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 2: Code Editor */}
+        {activeTab === 'code' && (
+          <div className="space-y-4 max-w-5xl">
+            {app.sourceType === 'inline' ? (
+              <>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-zinc-200">Worker Source Code</h3>
+                    <p className="text-xs text-zinc-400">
+                      Standard Cloudflare Worker ES module handling fetch events.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {codeSaveStatus === 'saved' && (
+                      <span className="text-xs text-emerald-400 font-semibold flex items-center gap-1">
+                        <Check className="w-3.5 h-3.5" /> Saved!
+                      </span>
+                    )}
+                    {codeSaveStatus === 'error' && (
+                      <span className="text-xs text-rose-400 font-semibold">Failed to save code</span>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => handleSaveCode(false)}
+                      disabled={isSavingCode || editedCode === app.inlineCode}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50 text-zinc-200 text-xs font-semibold transition"
+                    >
+                      <Save className="w-3.5 h-3.5 text-zinc-400" />
+                      Save
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleSaveCode(true)}
+                      disabled={isSavingCode || isDeploying}
+                      className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-zinc-950 text-xs font-bold transition shadow"
+                    >
+                      {isSavingCode || isDeploying ? (
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Play className="w-3.5 h-3.5 fill-current" />
+                      )}
+                      Save & Deploy
+                    </button>
+                  </div>
+                </div>
+
+                <CodeEditor
+                  value={editedCode}
+                  onChange={setEditedCode}
+                  minHeight="420px"
+                />
+              </>
+            ) : (
+              <div className="p-6 rounded-xl border border-zinc-800 bg-zinc-900/30 space-y-4">
+                <div>
+                  <h3 className="text-base font-semibold text-zinc-200">Git Repository Integration</h3>
+                  <p className="text-xs text-zinc-400 mt-1">
+                    This application is linked to a remote Git repository. Builds are automatically compiled and bundled from Git commits.
+                  </p>
+                </div>
+
+                <div className="space-y-3 font-mono text-xs">
+                  <div>
+                    <label className="text-zinc-500 block mb-1">Repository URL</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        readOnly
+                        value={app.gitRepo || ''}
+                        className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-zinc-200 select-all"
+                      />
+                      {app.gitRepo && (
+                        <a
+                          href={app.gitRepo}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3 py-2 rounded-lg border border-zinc-800 hover:bg-zinc-800 text-zinc-300 transition flex items-center gap-1"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" /> GitHub
+                        </a>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-zinc-500 block mb-1">Production Branch</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={gitBranch}
+                        onChange={e => setGitBranch(e.target.value)}
+                        className="w-64 bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-zinc-200 outline-none focus:border-emerald-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleSaveBranch}
+                        disabled={isSavingBranch || gitBranch === app.branch}
+                        className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-zinc-200 text-xs font-semibold transition"
+                      >
+                        {isSavingBranch ? 'Updating...' : 'Update Branch'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tab 3: Domain Setup */}
+        {activeTab === 'domains' && (
+          <div className="space-y-6 max-w-4xl">
+            {/* Default Traefik Subdomain Route */}
+            <div className="p-5 rounded-xl border border-zinc-800 bg-zinc-900/20 space-y-3">
+              <div className="flex items-start justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-zinc-200">Default Subdomain Ingress</h3>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    Automatically assigned and synchronized with the Traefik fleet proxy.
+                  </p>
+                </div>
+                <span className="text-xs font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-800/80 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                  <ShieldCheck className="w-3.5 h-3.5" /> Active
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 pt-1">
+                <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800/80 font-mono text-xs flex items-center justify-between">
+                  <span className="text-emerald-400">{subdomain}.localhost</span>
+                  <span className="text-[10px] text-zinc-500">RFC 6761 Wildcard</span>
+                </div>
+                <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800/80 font-mono text-xs flex items-center justify-between">
+                  <span className="text-emerald-400">{subdomain}.cubit.local</span>
+                  <span className="text-[10px] text-zinc-500">Local Traefik Mesh</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Custom Domains */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-zinc-200">Custom Domains</h3>
+                  <p className="text-xs text-zinc-400">
+                    Route external hostnames with automatic Let's Encrypt TLS certificates.
+                  </p>
+                </div>
+              </div>
+
+              {appDomains.length === 0 ? (
+                <div className="p-6 rounded-xl border border-dashed border-zinc-800 text-center text-xs text-zinc-500">
+                  No custom domains configured for this application yet.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {appDomains.map(d => (
+                    <div
+                      key={d.id}
+                      className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/30 flex items-center justify-between"
+                    >
+                      <div className="flex items-center gap-3">
+                        <Globe className="w-4 h-4 text-emerald-400" />
+                        <div>
+                          <div className="font-mono text-xs font-semibold text-zinc-200">{d.hostname}</div>
+                          <div className="text-[10px] text-zinc-500">Path prefix: {d.pathPrefix}</div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 text-xs text-emerald-400 bg-emerald-950/40 border border-emerald-900 px-3 py-1 rounded-full">
+                        <ShieldCheck className="w-3.5 h-3.5" />
+                        <span>Let's Encrypt Active</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Add Custom Domain Form */}
+              <form onSubmit={handleAddDomain} className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/20 space-y-3">
+                <span className="text-xs font-semibold text-zinc-300 block">Add New Domain</span>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    required
+                    placeholder="api.yourdomain.com"
+                    value={newHostname}
+                    onChange={e => setNewHostname(e.target.value)}
+                    className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-xs font-mono text-zinc-100 outline-none focus:border-emerald-500"
+                  />
+                  <button
+                    type="submit"
+                    disabled={isCreatingDomain}
+                    className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-zinc-950 text-xs font-semibold transition flex items-center gap-1.5"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    {isCreatingDomain ? 'Adding...' : 'Add Domain'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 4: Settings */}
+        {activeTab === 'settings' && (
+          <div className="space-y-6 max-w-4xl">
+            {/* General Info */}
+            <div className="p-5 rounded-xl border border-zinc-800 bg-zinc-900/20 space-y-4">
+              <h3 className="text-sm font-semibold text-zinc-200">Application Identity</h3>
+              <div className="grid grid-cols-2 gap-4 text-xs font-mono">
+                <div>
+                  <label className="text-zinc-500 block mb-1">ID</label>
+                  <input
+                    type="text"
+                    readOnly
+                    value={app.id}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-zinc-400 select-all"
+                  />
+                </div>
+                <div>
+                  <label className="text-zinc-500 block mb-1">Name</label>
+                  <input
+                    type="text"
+                    readOnly
+                    value={app.name}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-zinc-200"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Environment Variables Editor */}
+            <div className="p-5 rounded-xl border border-zinc-800 bg-zinc-900/20 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-zinc-200">Environment Variables</h3>
+                  <p className="text-xs text-zinc-400">
+                    Passed to the Cloudflare Worker <code className="text-emerald-400 font-mono">env</code> parameter.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {envSaveStatus === 'saved' && (
+                    <span className="text-xs text-emerald-400 font-semibold flex items-center gap-1">
+                      <Check className="w-3.5 h-3.5" /> Variables Saved!
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={addEnvVarRow}
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 text-xs font-medium transition"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Add Variable
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveEnvVars}
+                    disabled={isSavingEnv}
+                    className="px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-zinc-950 text-xs font-semibold transition"
+                  >
+                    {isSavingEnv ? 'Saving...' : 'Save Variables'}
+                  </button>
+                </div>
+              </div>
+
+              {envVars.length === 0 ? (
+                <div className="p-6 rounded-xl border border-dashed border-zinc-800 text-center text-xs text-zinc-500">
+                  No environment variables configured.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {envVars.map((e, idx) => {
+                    const isSecretRevealed = showSecretValues[idx];
+                    return (
+                      <div key={idx} className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          placeholder="KEY"
+                          value={e.key}
+                          onChange={ev => updateEnvVarRow(idx, 'key', ev.target.value)}
+                          className="w-1/3 bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-xs font-mono text-zinc-200 outline-none focus:border-emerald-500 uppercase"
+                        />
+                        <div className="relative flex-1">
+                          <input
+                            type={e.isSecret && !isSecretRevealed ? 'password' : 'text'}
+                            placeholder="VALUE"
+                            value={e.value}
+                            onChange={ev => updateEnvVarRow(idx, 'value', ev.target.value)}
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 pr-8 text-xs font-mono text-zinc-200 outline-none focus:border-emerald-500"
+                          />
+                          {e.isSecret && (
+                            <button
+                              type="button"
+                              onClick={() => setShowSecretValues({ ...showSecretValues, [idx]: !isSecretRevealed })}
+                              className="absolute right-2 top-2.5 text-zinc-500 hover:text-zinc-300"
+                            >
+                              {isSecretRevealed ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                            </button>
+                          )}
+                        </div>
+
+                        <label className="flex items-center gap-1.5 text-xs text-zinc-400 select-none cursor-pointer px-2">
+                          <input
+                            type="checkbox"
+                            checked={e.isSecret}
+                            onChange={ev => updateEnvVarRow(idx, 'isSecret', ev.target.checked)}
+                            className="rounded bg-zinc-950 border-zinc-800 text-emerald-500 focus:ring-0"
+                          />
+                          <span>Secret</span>
+                        </label>
+
+                        <button
+                          type="button"
+                          onClick={() => removeEnvVarRow(idx)}
+                          className="p-2 rounded-lg text-zinc-500 hover:text-rose-400 hover:bg-rose-950/40 transition"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

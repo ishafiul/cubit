@@ -42,9 +42,11 @@ import {
   useUpgradeCelldDaemon,
 } from './api/generated/runtime/runtime';
 import type { Application } from './api/model';
+import { ApplicationDetailPage } from './components/ApplicationDetailPage';
 
 export default function App() {
   const [tab, setTab] = useState<'nodes' | 'apps' | 'domains' | 'logs'>('nodes');
+  const [currentAppId, setCurrentAppId] = useState<string | null>(null);
 
   // Orval TanStack Query hooks (100% type-safe from OpenAPI)
   const { data: nodesData, refetch: refetchNodes } = useListNodes();
@@ -52,15 +54,16 @@ export default function App() {
   const { data: domainsData, refetch: refetchDomains } = useListDomains();
   const { data: runtimeData, refetch: refetchRuntime } = useGetRuntimeStatus();
 
-  const createApplicationMutation = useCreateApplication();
-  const deployApplicationMutation = useDeployApplication();
-  const upgradeCelldMutation = useUpgradeCelldDaemon();
-  const createDomainMutation = useCreateDomain();
-
   const nodes = Array.isArray(nodesData) ? nodesData : [];
   const apps = Array.isArray(appsData) ? appsData : [];
   const domains = Array.isArray(domainsData) ? domainsData : [];
   const runtimeStatus = runtimeData;
+  const currentApp = apps.find(a => a.id === currentAppId) || null;
+
+  const createApplicationMutation = useCreateApplication();
+  const deployApplicationMutation = useDeployApplication();
+  const upgradeCelldMutation = useUpgradeCelldDaemon();
+  const createDomainMutation = useCreateDomain();
 
   // Modals state
   const [showNewAppModal, setShowNewAppModal] = useState(false);
@@ -198,8 +201,11 @@ export default function App() {
     setShowNewAppModal(false);
     refetchApps();
 
-    if (autoDeploy && res && res.id) {
-      handleDeployApp(res.id);
+    if (res && res.id) {
+      setCurrentAppId(res.id);
+      if (autoDeploy) {
+        handleDeployApp(res.id);
+      }
     }
   };
 
@@ -212,7 +218,7 @@ export default function App() {
       });
       if (res && res.id) {
         setActiveDeploymentId(res.id);
-        setTab('logs');
+        refetchApps();
       }
     } finally {
       setIsDeploying(null);
@@ -268,7 +274,10 @@ export default function App() {
             </button>
 
             <button
-              onClick={() => setTab('apps')}
+              onClick={() => {
+                setTab('apps');
+                setCurrentAppId(null);
+              }}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition ${
                 tab === 'apps' ? 'bg-zinc-800 text-emerald-400 shadow-sm' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
               }`}
@@ -326,45 +335,47 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col overflow-hidden">
-        {/* Top Navbar */}
-        <header className="h-16 border-b border-zinc-800/80 px-8 flex items-center justify-between bg-zinc-950/60 backdrop-blur">
-          <div className="flex items-center gap-4">
-            <h2 className="text-xl font-semibold capitalize tracking-tight">{tab}</h2>
-          </div>
+        {/* Top Navbar - Hidden when viewing an application detail page */}
+        {!(tab === 'apps' && currentApp) && (
+          <header className="h-16 border-b border-zinc-800/80 px-8 flex items-center justify-between bg-zinc-950/60 backdrop-blur">
+            <div className="flex items-center gap-4">
+              <h2 className="text-xl font-semibold capitalize tracking-tight">{tab}</h2>
+            </div>
 
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setShowUpgradeModal(true)}
-              className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 text-sm font-medium transition"
-            >
-              <RefreshCw className="w-3.5 h-3.5 text-emerald-400" />
-              Upgrade celld
-            </button>
-
-            {tab === 'apps' && (
+            <div className="flex items-center gap-3">
               <button
-                onClick={() => setShowNewAppModal(true)}
-                className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-zinc-950 text-sm font-semibold transition"
+                onClick={() => setShowUpgradeModal(true)}
+                className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 text-sm font-medium transition"
               >
-                <Plus className="w-4 h-4" />
-                New Application
+                <RefreshCw className="w-3.5 h-3.5 text-emerald-400" />
+                Upgrade celld
               </button>
-            )}
 
-            {tab === 'domains' && (
-              <button
-                onClick={() => setShowNewDomainModal(true)}
-                className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-zinc-950 text-sm font-semibold transition"
-              >
-                <Plus className="w-4 h-4" />
-                Add Domain
-              </button>
-            )}
-          </div>
-        </header>
+              {tab === 'apps' && (
+                <button
+                  onClick={() => setShowNewAppModal(true)}
+                  className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-zinc-950 text-sm font-semibold transition"
+                >
+                  <Plus className="w-4 h-4" />
+                  New Application
+                </button>
+              )}
+
+              {tab === 'domains' && (
+                <button
+                  onClick={() => setShowNewDomainModal(true)}
+                  className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-zinc-950 text-sm font-semibold transition"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Domain
+                </button>
+              )}
+            </div>
+          </header>
+        )}
 
         {/* View Content */}
-        <div className="flex-1 overflow-y-auto p-8">
+        <div className={`flex-1 overflow-y-auto ${tab === 'apps' && currentApp ? 'p-0 flex flex-col' : 'p-8'}`}>
           {tab === 'nodes' && (
             <div className="space-y-6">
               <div className="grid grid-cols-3 gap-5">
@@ -433,13 +444,25 @@ export default function App() {
             </div>
           )}
 
-          {tab === 'apps' && (
+          {tab === 'apps' && currentApp && (
+            <ApplicationDetailPage
+              app={currentApp}
+              onBack={() => setCurrentAppId(null)}
+              onDeploy={handleDeployApp}
+              isDeploying={isDeploying === currentApp.id}
+              onTestApp={setTestingApp}
+              onRefreshApps={refetchApps}
+            />
+          )}
+
+          {tab === 'apps' && !currentApp && (
             <div className="space-y-4">
               <div className="grid grid-cols-1 gap-4">
                 {apps.map(app => (
                   <ApplicationCard
                     key={app.id}
                     app={app}
+                    onOpenApp={() => setCurrentAppId(app.id)}
                     onDeploy={handleDeployApp}
                     isDeploying={isDeploying === app.id}
                     onViewCode={setViewingCodeApp}
@@ -851,6 +874,7 @@ export default function App() {
 
 interface ApplicationCardProps {
   app: Application;
+  onOpenApp: (app: Application) => void;
   onDeploy: (id: string) => void;
   isDeploying: boolean;
   onViewCode: (app: Application) => void;
@@ -860,6 +884,7 @@ interface ApplicationCardProps {
 
 function ApplicationCard({
   app,
+  onOpenApp,
   onDeploy,
   isDeploying,
   onViewCode,
@@ -886,7 +911,12 @@ function ApplicationCard({
       <div className="flex items-start justify-between">
         <div className="space-y-1.5">
           <div className="flex items-center gap-2.5 flex-wrap">
-            <h4 className="font-semibold text-base">{app.name}</h4>
+            <h4
+              onClick={() => onOpenApp(app)}
+              className="font-semibold text-base hover:text-emerald-400 cursor-pointer transition"
+            >
+              {app.name}
+            </h4>
             <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
               app.status === 'running' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-zinc-800 text-zinc-400'
             }`}>
@@ -949,6 +979,13 @@ function ApplicationCard({
 
         {/* Action buttons */}
         <div className="flex items-center gap-2 flex-wrap justify-end">
+          <button
+            type="button"
+            onClick={() => onOpenApp(app)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-700 bg-zinc-800/80 hover:bg-zinc-700 text-zinc-200 text-xs font-medium transition"
+          >
+            Manage &rarr;
+          </button>
           {app.sourceType === 'inline' && (
             <button
               type="button"
