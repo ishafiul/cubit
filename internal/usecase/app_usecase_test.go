@@ -246,5 +246,52 @@ func TestAppUsecase(t *testing.T) {
 				}
 			})
 		})
+
+		t.Run("When deploying an inline application", func(t *testing.T) {
+			customCode := `export default { fetch: () => new Response("inline active") };`
+			inlineApp, err := uc.CreateApplicationWithSource(ctx, "inline-worker", domain.SourceTypeInline, "", "", customCode, nil, nil)
+			if err != nil {
+				t.Fatalf("failed creating inline app: %v", err)
+			}
+
+			dep, err := uc.DeployApplication(ctx, inlineApp.ID, "")
+
+			t.Run("Then deployment transitions to active with exact inline bundle size", func(t *testing.T) {
+				if err != nil {
+					t.Fatalf("expected no deployment error, got %v", err)
+				}
+				if dep.Status != domain.DeploymentStatusActive {
+					t.Errorf("expected active deployment, got %s", dep.Status)
+				}
+				if dep.BundleSize != int64(len(customCode)) {
+					t.Errorf("expected bundle size %d, got %d", len(customCode), dep.BundleSize)
+				}
+			})
+
+			t.Run("Then deployment logs omit git clone and record inline bundle preparation", func(t *testing.T) {
+				logs, _ := depRepo.GetLogs(ctx, dep.ID)
+				for _, l := range logs {
+					if l.Step == domain.LogStepGitClone {
+						t.Errorf("unexpected git clone step for inline app: %s", l.Message)
+					}
+				}
+			})
+		})
+
+		t.Run("When updating an application inline code", func(t *testing.T) {
+			app, _ := uc.CreateApplicationWithSource(ctx, "mod-worker", domain.SourceTypeInline, "", "", "", nil, nil)
+			newCode := `export default { fetch: () => new Response("v2") };`
+
+			updated, err := uc.UpdateApplication(ctx, app.ID, "main", newCode, nil, nil)
+
+			t.Run("Then inline code is updated successfully", func(t *testing.T) {
+				if err != nil {
+					t.Fatalf("expected update to succeed, got %v", err)
+				}
+				if updated.InlineCode != newCode {
+					t.Errorf("expected new code, got %s", updated.InlineCode)
+				}
+			})
+		})
 	})
 }

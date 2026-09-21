@@ -40,15 +40,27 @@ func NewAppUsecase(
 	}
 }
 
-// CreateApplication creates a new worker application.
+// CreateApplication creates a new worker application (backwards-compatible for git source).
 func (u *AppUsecase) CreateApplication(
 	ctx context.Context,
 	name, gitRepo, branch string,
 	envVars []domain.EnvironmentVariable,
 	bindings []domain.ResourceBinding,
 ) (*domain.Application, error) {
+	return u.CreateApplicationWithSource(ctx, name, domain.SourceTypeGit, gitRepo, branch, "", envVars, bindings)
+}
+
+// CreateApplicationWithSource creates a new worker application with explicit source type.
+func (u *AppUsecase) CreateApplicationWithSource(
+	ctx context.Context,
+	name string,
+	sourceType domain.SourceType,
+	gitRepo, branch, inlineCode string,
+	envVars []domain.EnvironmentVariable,
+	bindings []domain.ResourceBinding,
+) (*domain.Application, error) {
 	appID := generateID()
-	app, err := domain.NewApplication(appID, name, gitRepo, branch, envVars, bindings)
+	app, err := domain.NewApplicationWithSource(appID, name, sourceType, gitRepo, branch, inlineCode, envVars, bindings)
 	if err != nil {
 		return nil, err
 	}
@@ -70,10 +82,10 @@ func (u *AppUsecase) ListApplications(ctx context.Context) ([]*domain.Applicatio
 	return u.appRepo.List(ctx)
 }
 
-// UpdateApplication updates branch, environment variables, and bindings.
+// UpdateApplication updates branch, inline code, environment variables, and bindings.
 func (u *AppUsecase) UpdateApplication(
 	ctx context.Context,
-	id, branch string,
+	id, branch, inlineCode string,
 	envVars []domain.EnvironmentVariable,
 	bindings []domain.ResourceBinding,
 ) (*domain.Application, error) {
@@ -82,7 +94,7 @@ func (u *AppUsecase) UpdateApplication(
 		return nil, err
 	}
 
-	if err := app.UpdateConfig(branch, envVars, bindings); err != nil {
+	if err := app.UpdateConfig(branch, inlineCode, envVars, bindings); err != nil {
 		return nil, err
 	}
 
@@ -121,22 +133,33 @@ func (u *AppUsecase) DeployApplication(ctx context.Context, appID, commitHash st
 	// Progress through build and deployment steps
 	_ = dep.StartBuilding()
 	_ = u.depRepo.Update(ctx, dep)
-	_ = u.depRepo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
-		Timestamp: time.Now().UTC(),
-		Step:      domain.LogStepGitClone,
-		Message:   fmt.Sprintf("Cloned repository %s @ %s", app.GitRepo, dep.CommitHash),
-		Level:     domain.LogLevelInfo,
-	})
 
-	bundleData := []byte("// Bundled worker code\nexport default { fetch: (req) => new Response('Hello from Cubit!') };")
+	var bundleData []byte
+	if app.SourceType == domain.SourceTypeInline {
+		bundleData = []byte(app.InlineCode)
+		_ = u.depRepo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
+			Timestamp: time.Now().UTC(),
+			Step:      domain.LogStepEsbuild,
+			Message:   fmt.Sprintf("Prepared inline worker bundle: %d bytes", len(bundleData)),
+			Level:     domain.LogLevelInfo,
+		})
+	} else {
+		_ = u.depRepo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
+			Timestamp: time.Now().UTC(),
+			Step:      domain.LogStepGitClone,
+			Message:   fmt.Sprintf("Cloned repository %s @ %s", app.GitRepo, dep.CommitHash),
+			Level:     domain.LogLevelInfo,
+		})
+
+		bundleData = []byte("// Bundled worker code\nexport default { fetch: (req) => new Response('Hello from Cubit!') };")
+		_ = u.depRepo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
+			Timestamp: time.Now().UTC(),
+			Step:      domain.LogStepEsbuild,
+			Message:   fmt.Sprintf("Compiled bundle using esbuild: %d bytes", len(bundleData)),
+			Level:     domain.LogLevelInfo,
+		})
+	}
 	bundleSize := int64(len(bundleData))
-
-	_ = u.depRepo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
-		Timestamp: time.Now().UTC(),
-		Step:      domain.LogStepEsbuild,
-		Message:   fmt.Sprintf("Compiled bundle using esbuild: %d bytes", bundleSize),
-		Level:     domain.LogLevelInfo,
-	})
 
 	_ = dep.StartDeploying(bundleSize)
 	_ = u.depRepo.Update(ctx, dep)
