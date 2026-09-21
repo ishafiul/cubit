@@ -1,0 +1,39 @@
+# Binaries
+bin/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test / Coverage
+*.out
+*.test
+coverage/
+
+# Go
+vendor/
+
+# Node / Web
+node_modules/
+web/dist/
+.npm
+*.tsbuildinfo
+
+# SQLite databases & temp state
+*.db
+*.db-wal
+*.db-shm
+.celld/
+.data/
+
+# Environment / Secrets
+.env
+.env.local
+*.pem
+*.key
+
+# OS
+.DS_Store
+Thumbs.db
