@@ -32,6 +32,8 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		r2.POST("/buckets", h.CreateR2Bucket)
 		r2.DELETE("/buckets/:name", h.DeleteR2Bucket)
 		r2.GET("/buckets/:name/objects", h.ListR2Objects)
+		r2.GET("/buckets/:name/objects/*key", h.GetR2Object)
+		r2.DELETE("/buckets/:name/objects/*key", h.DeleteR2Object)
 		r2.POST("/buckets/:name/upload", h.UploadR2Object)
 	}
 

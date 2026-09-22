@@ -27,6 +27,8 @@ import type {
 import type {
   BadRequestResponse,
   CreateDeploymentRequest,
+  DeployDirectBodyTwo,
+  DeployDirectRequest,
   Deployment,
   DeploymentLogEntry,
   InternalErrorResponse,
@@ -101,6 +103,70 @@ export const useDeployApplication = <TError = NotFoundResponse | InternalErrorRe
       > => {
 
       const mutationOptions = getDeployApplicationMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * @summary Direct bundle deployment (e.g. from wrangler CLI or CI/CD)
+ */
+export const deployDirect = (
+    id: string,
+    deployDirectBody: DeployDirectRequest | DeployDirectBodyTwo,
+ signal?: AbortSignal
+) => {
+      
+      
+      return customInstance<Deployment>(
+      {url: `/applications/${id}/deploy/direct`, method: 'POST',
+      data: deployDirectBody, signal
+    },
+      );
+    }
+  
+
+
+export const getDeployDirectMutationOptions = <TError = BadRequestResponse | NotFoundResponse | InternalErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deployDirect>>, TError,{id: string;data: DeployDirectRequest | DeployDirectBodyTwo}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof deployDirect>>, TError,{id: string;data: DeployDirectRequest | DeployDirectBodyTwo}, TContext> => {
+
+const mutationKey = ['deployDirect'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deployDirect>>, {id: string;data: DeployDirectRequest | DeployDirectBodyTwo}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  deployDirect(id,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeployDirectMutationResult = NonNullable<Awaited<ReturnType<typeof deployDirect>>>
+    export type DeployDirectMutationBody = DeployDirectRequest | DeployDirectBodyTwo
+    export type DeployDirectMutationError = BadRequestResponse | NotFoundResponse | InternalErrorResponse
+
+    /**
+ * @summary Direct bundle deployment (e.g. from wrangler CLI or CI/CD)
+ */
+export const useDeployDirect = <TError = BadRequestResponse | NotFoundResponse | InternalErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deployDirect>>, TError,{id: string;data: DeployDirectRequest | DeployDirectBodyTwo}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deployDirect>>,
+        TError,
+        {id: string;data: DeployDirectRequest | DeployDirectBodyTwo},
+        TContext
+      > => {
+
+      const mutationOptions = getDeployDirectMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }

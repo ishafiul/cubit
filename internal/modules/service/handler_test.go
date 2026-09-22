@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/ishaf/cubit/internal/adapters/out/storage"
 	"github.com/ishaf/cubit/internal/domain"
 	"github.com/ishaf/cubit/internal/infrastructure/db"
 	srvModule "github.com/ishaf/cubit/internal/modules/service"
@@ -31,7 +32,11 @@ func setupTestGinRouter(t *testing.T) (*gin.Engine, *srvModule.ServicesService) 
 	t.Cleanup(func() { database.Close() })
 
 	repo := srvModule.NewRepository(database, tempDir)
-	svc := srvModule.NewService(repo, nil, nil, nil, "cubit-fleet")
+	storageAdapter, err := storage.NewLocalStorageAdapter(tempDir, string(storage.DriverGarageLocal))
+	if err != nil {
+		t.Fatalf("failed creating storage adapter: %v", err)
+	}
+	svc := srvModule.NewService(repo, nil, nil, storageAdapter, "cubit-fleet")
 	handler := srvModule.NewHandler(svc)
 
 	r := gin.New()
@@ -192,6 +197,59 @@ func TestServicesHandler(t *testing.T) {
 			t.Run("Then message is sent with 201 Created", func(t *testing.T) {
 				if msgRec.Code != http.StatusCreated {
 					t.Fatalf("expected 201, got %d: %s", msgRec.Code, msgRec.Body.String())
+				}
+			})
+		})
+	})
+
+	t.Run("Given R2 REST endpoints", func(t *testing.T) {
+		bucketName := "assets-bucket"
+
+		t.Run("When creating a bucket and managing objects", func(t *testing.T) {
+			bktBody := []byte(`{"name": "assets-bucket"}`)
+			bktReq := httptest.NewRequest(http.MethodPost, "/api/v1/r2/buckets", bytes.NewReader(bktBody))
+			bktReq.Header.Set("Content-Type", "application/json")
+			bktRec := httptest.NewRecorder()
+			router.ServeHTTP(bktRec, bktReq)
+
+			t.Run("Then bucket is created with 201 Created", func(t *testing.T) {
+				if bktRec.Code != http.StatusCreated {
+					t.Fatalf("expected 201, got %d: %s", bktRec.Code, bktRec.Body.String())
+				}
+			})
+
+			upBody := []byte(`{"key": "docs/readme.txt", "content": "hello R2 object"}`)
+			upReq := httptest.NewRequest(http.MethodPost, "/api/v1/r2/buckets/"+bucketName+"/upload", bytes.NewReader(upBody))
+			upReq.Header.Set("Content-Type", "application/json")
+			upRec := httptest.NewRecorder()
+			router.ServeHTTP(upRec, upReq)
+
+			t.Run("Then object upload succeeds with 200 OK", func(t *testing.T) {
+				if upRec.Code != http.StatusOK {
+					t.Fatalf("expected 200, got %d: %s", upRec.Code, upRec.Body.String())
+				}
+			})
+
+			getReq := httptest.NewRequest(http.MethodGet, "/api/v1/r2/buckets/"+bucketName+"/objects/docs/readme.txt", nil)
+			getRec := httptest.NewRecorder()
+			router.ServeHTTP(getRec, getReq)
+
+			t.Run("Then object is retrieved with 200 OK and expected content", func(t *testing.T) {
+				if getRec.Code != http.StatusOK {
+					t.Fatalf("expected 200, got %d: %s", getRec.Code, getRec.Body.String())
+				}
+				if getRec.Body.String() != "hello R2 object" {
+					t.Fatalf("expected 'hello R2 object', got '%s'", getRec.Body.String())
+				}
+			})
+
+			delReq := httptest.NewRequest(http.MethodDelete, "/api/v1/r2/buckets/"+bucketName+"/objects/docs/readme.txt", nil)
+			delRec := httptest.NewRecorder()
+			router.ServeHTTP(delRec, delReq)
+
+			t.Run("Then object deletion responds with 204 No Content", func(t *testing.T) {
+				if delRec.Code != http.StatusNoContent {
+					t.Fatalf("expected 204, got %d: %s", delRec.Code, delRec.Body.String())
 				}
 			})
 		})

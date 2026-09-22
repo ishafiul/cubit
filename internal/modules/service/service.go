@@ -29,6 +29,7 @@ type StoragePort interface {
 	DriverName() string
 	ListObjects(ctx context.Context, bucketName string) ([]*domain.R2Object, error)
 	DeleteBucket(ctx context.Context, bucketName string) error
+	DeleteObject(ctx context.Context, bucketName, objectKey string) error
 }
 
 // ApplicationRepository checks application existence.
@@ -114,6 +115,13 @@ func (u *ServicesService) DeleteKVNamespace(ctx context.Context, id string) erro
 }
 
 func (u *ServicesService) PutKVPair(ctx context.Context, namespaceID, key, value string, ttl int, metadata string) (*domain.KVPair, error) {
+	if ns, err := u.repo.GetKVNamespace(ctx, namespaceID); err == nil {
+		namespaceID = ns.ID
+	} else {
+		if created, errCreate := u.CreateKVNamespace(ctx, namespaceID); errCreate == nil {
+			namespaceID = created.ID
+		}
+	}
 	pair, err := domain.NewKVPair(namespaceID, key, value, ttl, metadata)
 	if err != nil {
 		return nil, err
@@ -125,14 +133,23 @@ func (u *ServicesService) PutKVPair(ctx context.Context, namespaceID, key, value
 }
 
 func (u *ServicesService) GetKVPair(ctx context.Context, namespaceID, key string) (*domain.KVPair, error) {
+	if ns, err := u.repo.GetKVNamespace(ctx, namespaceID); err == nil {
+		namespaceID = ns.ID
+	}
 	return u.repo.GetKVPair(ctx, namespaceID, key)
 }
 
 func (u *ServicesService) ListKVPairs(ctx context.Context, namespaceID string) ([]*domain.KVPair, error) {
+	if ns, err := u.repo.GetKVNamespace(ctx, namespaceID); err == nil {
+		namespaceID = ns.ID
+	}
 	return u.repo.ListKVPairs(ctx, namespaceID)
 }
 
 func (u *ServicesService) DeleteKVPair(ctx context.Context, namespaceID, key string) error {
+	if ns, err := u.repo.GetKVNamespace(ctx, namespaceID); err == nil {
+		namespaceID = ns.ID
+	}
 	return u.repo.DeleteKVPair(ctx, namespaceID, key)
 }
 
@@ -307,6 +324,31 @@ func (u *ServicesService) ListR2Objects(ctx context.Context, bucketName string) 
 	return []*domain.R2Object{}, nil
 }
 
+func (u *ServicesService) GetR2Object(ctx context.Context, bucketName, key string) ([]byte, error) {
+	bucketName = strings.TrimSpace(bucketName)
+	key = strings.TrimPrefix(key, "/")
+	if u.storage != nil {
+		return u.storage.DownloadBundle(ctx, bucketName, key)
+	}
+	return nil, domain.NewNotFoundError("storage object not found")
+}
+
+func (u *ServicesService) DeleteR2Object(ctx context.Context, bucketName, key string) error {
+	bucketName = strings.TrimSpace(bucketName)
+	key = strings.TrimPrefix(key, "/")
+	sysBucketName := u.bucketName
+	if sysBucketName == "" {
+		sysBucketName = "cubit-fleet"
+	}
+	if bucketName == sysBucketName || bucketName == "cubit-fleet" {
+		return domain.NewForbiddenError("fleet system bucket is reserved for Cubit daemon; object deletions are restricted")
+	}
+	if u.storage != nil {
+		return u.storage.DeleteObject(ctx, bucketName, key)
+	}
+	return nil
+}
+
 // -----------------------------------------------------------------------------
 // Queues Operations
 // -----------------------------------------------------------------------------
@@ -394,7 +436,11 @@ func (u *ServicesService) RunTriggerNow(ctx context.Context, triggerID string) (
 	status := "success"
 
 	if u.appInvoker != nil && target.TargetAppID != "" {
-		code, _, _, err := u.appInvoker.InvokeApplication(ctx, target.TargetAppID, "GET", "/scheduled", nil, nil)
+		cronHeaders := map[string]string{
+			"X-Cubit-Event": "scheduled",
+			"X-Cubit-Cron":  target.CronExpression,
+		}
+		code, _, _, err := u.appInvoker.InvokeApplication(ctx, target.TargetAppID, "GET", "/scheduled", cronHeaders, nil)
 		if err != nil {
 			statusCode = 500
 			status = "failed"

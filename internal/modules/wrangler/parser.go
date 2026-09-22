@@ -61,6 +61,13 @@ type TriggerConfig struct {
 	Crons []string `json:"crons,omitempty" toml:"crons,omitempty"`
 }
 
+// AssetsConfig represents static assets configuration in wrangler.
+type AssetsConfig struct {
+	Directory    string `json:"directory,omitempty" toml:"directory,omitempty"`
+	Binding      string `json:"binding,omitempty" toml:"binding,omitempty"`
+	HTMLHandling string `json:"html_handling,omitempty" toml:"html_handling,omitempty"`
+}
+
 // WranglerConfig represents the schema of wrangler.json, wrangler.jsonc, and wrangler.toml.
 type WranglerConfig struct {
 	Name               string                    `json:"name,omitempty" toml:"name,omitempty"`
@@ -74,6 +81,7 @@ type WranglerConfig struct {
 	Services           []ServiceBinding          `json:"services,omitempty" toml:"services,omitempty"`
 	Queues             *QueueConfig              `json:"queues,omitempty" toml:"queues,omitempty"`
 	Triggers           *TriggerConfig            `json:"triggers,omitempty" toml:"triggers,omitempty"`
+	Assets             *AssetsConfig             `json:"assets,omitempty" toml:"assets,omitempty"`
 	Env                map[string]WranglerConfig `json:"env,omitempty" toml:"env,omitempty"`
 }
 
@@ -333,6 +341,9 @@ func MergeEnvironment(base *WranglerConfig, envName string) *WranglerConfig {
 	if envCfg.Triggers != nil {
 		merged.Triggers = envCfg.Triggers
 	}
+	if envCfg.Assets != nil {
+		merged.Assets = envCfg.Assets
+	}
 
 	return &merged
 }
@@ -513,6 +524,21 @@ func ApplyToApplication(app *domain.Application, cfg *WranglerConfig, envName st
 			}
 			importedBindings++
 		}
+	}
+
+	// Static Assets
+	if effective.Assets != nil && effective.Assets.Directory != "" {
+		bName := effective.Assets.Binding
+		if bName == "" {
+			bName = "ASSETS"
+		}
+		bKey := string(domain.BindingTypeAssets) + ":" + bName
+		bindingMap[bKey] = domain.ResourceBinding{
+			Type:       domain.BindingTypeAssets,
+			Name:       bName,
+			ResourceID: effective.Assets.Directory,
+		}
+		importedBindings++
 	}
 
 	var finalBindings []domain.ResourceBinding

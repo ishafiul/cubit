@@ -2,6 +2,9 @@ package application_test
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -380,6 +383,368 @@ export default {
 				}
 			})
 		})
+
+		t.Run("When accessing Cloudflare edge context request.cf", func(t *testing.T) {
+			workerScript := []byte(`
+export default {
+    async fetch(req, env) {
+        return new Response(JSON.stringify({
+            country: req.cf?.country,
+            city: req.cf?.city,
+            asn: req.cf?.asn,
+            connectingIp: req.headers.get("cf-connecting-ip")
+        }), { headers: { "Content-Type": "application/json" } });
+    }
+};
+`)
+			headers := map[string]string{
+				"CF-IPCountry":     "GB",
+				"CF-Connecting-IP": "82.165.197.1",
+			}
+			res, err := application.RunWorkerBundleWithEnvAndBindings(
+				context.Background(),
+				workerScript,
+				"GET",
+				"/cf-test",
+				headers,
+				nil,
+				nil,
+				nil,
+				"http://localhost:8000",
+				"fetch",
+			)
+
+			t.Run("Then isolate populates request.cf and Cloudflare headers", func(t *testing.T) {
+				if err != nil {
+					t.Fatalf("expected no error, got %v", err)
+				}
+				var cfData struct {
+					Country      string `json:"country"`
+					City         string `json:"city"`
+					ASN          int    `json:"asn"`
+					ConnectingIP string `json:"connectingIp"`
+				}
+				if err := json.Unmarshal(res.Body, &cfData); err != nil {
+					t.Fatalf("failed unmarshaling body %s: %v", string(res.Body), err)
+				}
+				if cfData.Country != "GB" {
+					t.Errorf("expected country GB, got %s", cfData.Country)
+				}
+				if cfData.ConnectingIP != "82.165.197.1" {
+					t.Errorf("expected connecting IP 82.165.197.1, got %s", cfData.ConnectingIP)
+				}
+				if cfData.ASN != 13335 {
+					t.Errorf("expected ASN 13335, got %d", cfData.ASN)
+				}
+			})
+		})
+
+		t.Run("When worker uses ctx.waitUntil for background execution", func(t *testing.T) {
+			workerScript := []byte(`
+export default {
+    async fetch(req, env, ctx) {
+        ctx.waitUntil(new Promise((resolve) => {
+            setTimeout(() => {
+                console.log("Background promise settled successfully");
+                resolve();
+            }, 30);
+        }));
+        return new Response("OK");
+    }
+};
+`)
+			res, err := application.RunWorkerBundleWithEnvAndBindings(
+				context.Background(),
+				workerScript,
+				"GET",
+				"/wait-until",
+				nil,
+				nil,
+				nil,
+				nil,
+				"http://localhost:8000",
+				"fetch",
+			)
+
+			t.Run("Then isolate awaits background promise and captures logs", func(t *testing.T) {
+				if err != nil {
+					t.Fatalf("expected no error, got %v", err)
+				}
+				var foundLog bool
+				for _, log := range res.Logs {
+					if strings.Contains(log.Message, "Background promise settled successfully") {
+						foundLog = true
+						break
+					}
+				}
+				if !foundLog {
+					t.Errorf("expected background log from ctx.waitUntil, logs: %+v", res.Logs)
+				}
+			})
+		})
+
+		t.Run("When worker uses global Cache API caches.default", func(t *testing.T) {
+			workerScript := []byte(`
+export default {
+    async fetch(req, env) {
+        const cache = caches.default;
+        const cacheKey = "http://localhost/cached-asset";
+        let match = await cache.match(cacheKey);
+        if (!match) {
+            await cache.put(cacheKey, new Response("freshly-cached-data", {
+                headers: { "x-cubit-cache": "MISS" }
+            }));
+            return new Response("miss-stored");
+        }
+        const text = await match.text();
+        return new Response("hit:" + text);
+    }
+};
+`)
+			res, err := application.RunWorkerBundleWithEnvAndBindings(
+				context.Background(),
+				workerScript,
+				"GET",
+				"/cache",
+				nil,
+				nil,
+				nil,
+				nil,
+				"http://localhost:8000",
+				"fetch",
+			)
+
+			t.Run("Then Cache API stores response without throwing errors", func(t *testing.T) {
+				if err != nil {
+					t.Fatalf("expected no error, got %v", err)
+				}
+				if string(res.Body) != "miss-stored" {
+					t.Errorf("expected 'miss-stored', got %s", string(res.Body))
+				}
+			})
+		})
+
+		t.Run("When worker constructs WebSocketPair", func(t *testing.T) {
+			workerScript := []byte(`
+export default {
+    async fetch(req) {
+        const pair = new WebSocketPair();
+        const [client, server] = Object.values(pair);
+        server.accept();
+        return new Response(null, { status: 101, webSocket: client });
+    }
+};
+`)
+			res, err := application.RunWorkerBundleWithEnvAndBindings(
+				context.Background(),
+				workerScript,
+				"GET",
+				"/ws",
+				nil,
+				nil,
+				nil,
+				nil,
+				"http://localhost:8000",
+				"fetch",
+			)
+
+			t.Run("Then WebSocketPair instantiates and returns 101 Switching Protocols", func(t *testing.T) {
+				if err != nil {
+					t.Fatalf("expected no error, got %v", err)
+				}
+				if res.Status != 101 {
+					t.Fatalf("expected status 101, got %d (body: %s)", res.Status, string(res.Body))
+				}
+			})
+		})
+
+		t.Run("When invoking scheduled lifecycle event", func(t *testing.T) {
+			workerScript := []byte(`
+export default {
+    async scheduled(event, env, ctx) {
+        console.log("Cron executed with schedule: " + event.cron);
+    }
+};
+`)
+			headers := map[string]string{
+				"X-Cubit-Event": "scheduled",
+				"X-Cubit-Cron":  "*/10 * * * *",
+			}
+			res, err := application.RunWorkerBundleWithEnvAndBindings(
+				context.Background(),
+				workerScript,
+				"GET",
+				"/scheduled",
+				headers,
+				nil,
+				nil,
+				nil,
+				"http://localhost:8000",
+				"scheduled",
+			)
+
+			t.Run("Then scheduled handler executes successfully", func(t *testing.T) {
+				if err != nil {
+					t.Fatalf("expected no error, got %v", err)
+				}
+				if res.Status != 200 {
+					t.Fatalf("expected status 200, got %d", res.Status)
+				}
+				var foundLog bool
+				for _, log := range res.Logs {
+					if strings.Contains(log.Message, "Cron executed with schedule: */10 * * * *") {
+						foundLog = true
+						break
+					}
+				}
+				if !foundLog {
+					t.Errorf("expected scheduled cron log, got: %+v", res.Logs)
+				}
+			})
+		})
+
+		t.Run("When invoking queue consumer lifecycle event", func(t *testing.T) {
+			workerScript := []byte(`
+export default {
+    async queue(batch, env, ctx) {
+        for (const msg of batch.messages) {
+            console.log("Queue message received: " + msg.body.task);
+            msg.ack();
+        }
+    }
+};
+`)
+			headers := map[string]string{
+				"X-Cubit-Event": "queue",
+				"X-Cubit-Queue": "email-tasks",
+			}
+			batchBody := []byte(`[{"id":"msg_1","body":{"task":"send_welcome_email"}}]`)
+			res, err := application.RunWorkerBundleWithEnvAndBindings(
+				context.Background(),
+				workerScript,
+				"POST",
+				"/queue",
+				headers,
+				batchBody,
+				nil,
+				nil,
+				"http://localhost:8000",
+				"queue",
+			)
+
+			t.Run("Then queue handler processes message batch", func(t *testing.T) {
+				if err != nil {
+					t.Fatalf("expected no error, got %v", err)
+				}
+				if res.Status != 200 {
+					t.Fatalf("expected status 200, got %d", res.Status)
+				}
+				var foundLog bool
+				for _, log := range res.Logs {
+					if strings.Contains(log.Message, "Queue message received: send_welcome_email") {
+						foundLog = true
+						break
+					}
+				}
+				if !foundLog {
+					t.Errorf("expected queue message log, got: %+v", res.Logs)
+				}
+			})
+		})
+
+		t.Run("When invoking worker with in-isolate KV, D1, and R2 bindings", func(t *testing.T) {
+			// Setup a mock control plane server mimicking Cubit REST API
+			mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.URL.Path == "/api/v1/kv/namespaces/kv-ns-1/values/user_config" && r.Method == http.MethodGet:
+					_ = json.NewEncoder(w).Encode(map[string]any{"value": `{"theme":"dark"}`})
+				case r.URL.Path == "/api/v1/d1/databases/d1-users/query" && r.Method == http.MethodPost:
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"columns":      []string{"id", "username"},
+						"rows":         []map[string]any{{"id": "u1", "username": "alice"}},
+						"rowsAffected": 0,
+						"durationMs":   1.2,
+					})
+				case r.URL.Path == "/api/v1/r2/buckets/assets-bkt/upload" && r.Method == http.MethodPost:
+					_ = json.NewEncoder(w).Encode(map[string]string{"status": "uploaded"})
+				case r.URL.Path == "/api/v1/r2/buckets/assets-bkt/objects/avatar.png" && r.Method == http.MethodGet:
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write([]byte("fake-png-binary-data"))
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer mockServer.Close()
+
+			workerScript := []byte(`
+export default {
+    async fetch(req, env) {
+        // Test KV
+        const config = await env.CONFIG_KV.get("user_config", "json");
+
+        // Test D1
+        const user = await env.USERS_DB.prepare("SELECT * FROM users WHERE id = ?").bind("u1").first();
+
+        // Test R2 put and get
+        await env.ASSETS.put("avatar.png", "fake-png-binary-data");
+        const obj = await env.ASSETS.get("avatar.png");
+        const objText = await obj.text();
+
+        return new Response(JSON.stringify({
+            theme: config?.theme,
+            user: user?.username,
+            avatar: objText
+        }), { headers: { "Content-Type": "application/json" } });
+    }
+};
+`)
+			bindings := []domain.ResourceBinding{
+				{Type: domain.BindingTypeKV, Name: "CONFIG_KV", ResourceID: "kv-ns-1"},
+				{Type: domain.BindingTypeD1, Name: "USERS_DB", ResourceID: "d1-users"},
+				{Type: domain.BindingTypeR2, Name: "ASSETS", ResourceID: "assets-bkt"},
+			}
+
+			res, err := application.RunWorkerBundleWithEnvAndBindings(
+				context.Background(),
+				workerScript,
+				"GET",
+				"/bindings-test",
+				nil,
+				nil,
+				nil,
+				bindings,
+				mockServer.URL,
+				"fetch",
+			)
+
+			t.Run("Then worker isolate interacts with KV, D1, and R2 natively", func(t *testing.T) {
+				if err != nil {
+					t.Fatalf("expected no error, got %v (body: %s)", err, string(res.Body))
+				}
+				if res.Status != 200 {
+					t.Fatalf("expected 200, got %d (body: %s)", res.Status, string(res.Body))
+				}
+				var out struct {
+					Theme  string `json:"theme"`
+					User   string `json:"user"`
+					Avatar string `json:"avatar"`
+				}
+				if err := json.Unmarshal(res.Body, &out); err != nil {
+					t.Fatalf("failed parsing body %s: %v", string(res.Body), err)
+				}
+				if out.Theme != "dark" {
+					t.Errorf("expected theme dark, got %s", out.Theme)
+				}
+				if out.User != "alice" {
+					t.Errorf("expected user alice, got %s", out.User)
+				}
+				if out.Avatar != "fake-png-binary-data" {
+					t.Errorf("expected avatar fake-png-binary-data, got %s", out.Avatar)
+				}
+			})
+		})
 	})
 }
+
 

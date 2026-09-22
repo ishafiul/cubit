@@ -4,10 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
+	"path/filepath"
+	"strings"
 
-		"github.com/ishaf/cubit/internal/domain"
 	"github.com/gin-gonic/gin"
+	"github.com/ishaf/cubit/internal/domain"
 )
 
 // ServicesHandler handles HTTP requests for all 12 celld services.
@@ -309,6 +312,31 @@ func (h *Handler) UploadR2Object(c *gin.Context) {
 		return
 	}
 	h.respondJSON(c, http.StatusOK, map[string]string{"status": "uploaded", "key": req.Key})
+}
+
+func (h *Handler) GetR2Object(c *gin.Context) {
+	bucketName := c.Param("name")
+	key := strings.TrimPrefix(c.Param("key"), "/")
+	data, err := h.service.GetR2Object(c.Request.Context(), bucketName, key)
+	if err != nil {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	contentType := mime.TypeByExtension(filepath.Ext(key))
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	c.Data(http.StatusOK, contentType, data)
+}
+
+func (h *Handler) DeleteR2Object(c *gin.Context) {
+	bucketName := c.Param("name")
+	key := strings.TrimPrefix(c.Param("key"), "/")
+	if err := h.service.DeleteR2Object(c.Request.Context(), bucketName, key); err != nil {
+		h.respondError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 // --- Queues Endpoints ---

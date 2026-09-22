@@ -31,7 +31,10 @@ import type {
   ForbiddenResponse,
   InternalErrorResponse,
   NotFoundResponse,
-  R2Bucket
+  R2Bucket,
+  R2Object,
+  UploadR2Object200,
+  UploadR2ObjectRequest
 } from '../../model';
 
 import { customInstance } from '../../custom-instance';
@@ -252,6 +255,323 @@ export const useDeleteR2Bucket = <TError = ForbiddenResponse | NotFoundResponse 
       > => {
 
       const mutationOptions = getDeleteR2BucketMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * @summary List all objects in an R2 bucket
+ */
+export const listR2Objects = (
+    name: string,
+ signal?: AbortSignal
+) => {
+      
+      
+      return customInstance<R2Object[]>(
+      {url: `/r2/buckets/${name}/objects`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getListR2ObjectsQueryKey = (name?: string,) => {
+    return [
+    `/r2/buckets/${name}/objects`
+    ] as const;
+    }
+
+    
+export const getListR2ObjectsQueryOptions = <TData = Awaited<ReturnType<typeof listR2Objects>>, TError = NotFoundResponse | InternalErrorResponse>(name: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listR2Objects>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListR2ObjectsQueryKey(name);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listR2Objects>>> = ({ signal }) => listR2Objects(name, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(name), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listR2Objects>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListR2ObjectsQueryResult = NonNullable<Awaited<ReturnType<typeof listR2Objects>>>
+export type ListR2ObjectsQueryError = NotFoundResponse | InternalErrorResponse
+
+
+export function useListR2Objects<TData = Awaited<ReturnType<typeof listR2Objects>>, TError = NotFoundResponse | InternalErrorResponse>(
+ name: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listR2Objects>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listR2Objects>>,
+          TError,
+          Awaited<ReturnType<typeof listR2Objects>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListR2Objects<TData = Awaited<ReturnType<typeof listR2Objects>>, TError = NotFoundResponse | InternalErrorResponse>(
+ name: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listR2Objects>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listR2Objects>>,
+          TError,
+          Awaited<ReturnType<typeof listR2Objects>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListR2Objects<TData = Awaited<ReturnType<typeof listR2Objects>>, TError = NotFoundResponse | InternalErrorResponse>(
+ name: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listR2Objects>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List all objects in an R2 bucket
+ */
+
+export function useListR2Objects<TData = Awaited<ReturnType<typeof listR2Objects>>, TError = NotFoundResponse | InternalErrorResponse>(
+ name: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listR2Objects>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListR2ObjectsQueryOptions(name,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+/**
+ * @summary Upload an object into an R2 bucket
+ */
+export const uploadR2Object = (
+    name: string,
+    uploadR2ObjectRequest: UploadR2ObjectRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return customInstance<UploadR2Object200>(
+      {url: `/r2/buckets/${name}/upload`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: uploadR2ObjectRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getUploadR2ObjectMutationOptions = <TError = BadRequestResponse | NotFoundResponse | InternalErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadR2Object>>, TError,{name: string;data: UploadR2ObjectRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof uploadR2Object>>, TError,{name: string;data: UploadR2ObjectRequest}, TContext> => {
+
+const mutationKey = ['uploadR2Object'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof uploadR2Object>>, {name: string;data: UploadR2ObjectRequest}> = (props) => {
+          const {name,data} = props ?? {};
+
+          return  uploadR2Object(name,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UploadR2ObjectMutationResult = NonNullable<Awaited<ReturnType<typeof uploadR2Object>>>
+    export type UploadR2ObjectMutationBody = UploadR2ObjectRequest
+    export type UploadR2ObjectMutationError = BadRequestResponse | NotFoundResponse | InternalErrorResponse
+
+    /**
+ * @summary Upload an object into an R2 bucket
+ */
+export const useUploadR2Object = <TError = BadRequestResponse | NotFoundResponse | InternalErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadR2Object>>, TError,{name: string;data: UploadR2ObjectRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof uploadR2Object>>,
+        TError,
+        {name: string;data: UploadR2ObjectRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getUploadR2ObjectMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * @summary Get raw object contents from an R2 bucket
+ */
+export const getR2Object = (
+    name: string,
+    key: string,
+ signal?: AbortSignal
+) => {
+      
+      
+      return customInstance<Blob>(
+      {url: `/r2/buckets/${name}/objects/${key}`, method: 'GET',
+        responseType: 'blob', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetR2ObjectQueryKey = (name?: string,
+    key?: string,) => {
+    return [
+    `/r2/buckets/${name}/objects/${key}`
+    ] as const;
+    }
+
+    
+export const getGetR2ObjectQueryOptions = <TData = Awaited<ReturnType<typeof getR2Object>>, TError = NotFoundResponse | InternalErrorResponse>(name: string,
+    key: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getR2Object>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetR2ObjectQueryKey(name,key);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getR2Object>>> = ({ signal }) => getR2Object(name,key, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(name && key), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getR2Object>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetR2ObjectQueryResult = NonNullable<Awaited<ReturnType<typeof getR2Object>>>
+export type GetR2ObjectQueryError = NotFoundResponse | InternalErrorResponse
+
+
+export function useGetR2Object<TData = Awaited<ReturnType<typeof getR2Object>>, TError = NotFoundResponse | InternalErrorResponse>(
+ name: string,
+    key: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getR2Object>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getR2Object>>,
+          TError,
+          Awaited<ReturnType<typeof getR2Object>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetR2Object<TData = Awaited<ReturnType<typeof getR2Object>>, TError = NotFoundResponse | InternalErrorResponse>(
+ name: string,
+    key: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getR2Object>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getR2Object>>,
+          TError,
+          Awaited<ReturnType<typeof getR2Object>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetR2Object<TData = Awaited<ReturnType<typeof getR2Object>>, TError = NotFoundResponse | InternalErrorResponse>(
+ name: string,
+    key: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getR2Object>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Get raw object contents from an R2 bucket
+ */
+
+export function useGetR2Object<TData = Awaited<ReturnType<typeof getR2Object>>, TError = NotFoundResponse | InternalErrorResponse>(
+ name: string,
+    key: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getR2Object>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetR2ObjectQueryOptions(name,key,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+/**
+ * @summary Delete an object from an R2 bucket
+ */
+export const deleteR2Object = (
+    name: string,
+    key: string,
+ ) => {
+      
+      
+      return customInstance<void>(
+      {url: `/r2/buckets/${name}/objects/${key}`, method: 'DELETE'
+    },
+      );
+    }
+  
+
+
+export const getDeleteR2ObjectMutationOptions = <TError = NotFoundResponse | InternalErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteR2Object>>, TError,{name: string;key: string}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof deleteR2Object>>, TError,{name: string;key: string}, TContext> => {
+
+const mutationKey = ['deleteR2Object'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteR2Object>>, {name: string;key: string}> = (props) => {
+          const {name,key} = props ?? {};
+
+          return  deleteR2Object(name,key,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteR2ObjectMutationResult = NonNullable<Awaited<ReturnType<typeof deleteR2Object>>>
+    
+    export type DeleteR2ObjectMutationError = NotFoundResponse | InternalErrorResponse
+
+    /**
+ * @summary Delete an object from an R2 bucket
+ */
+export const useDeleteR2Object = <TError = NotFoundResponse | InternalErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteR2Object>>, TError,{name: string;key: string}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deleteR2Object>>,
+        TError,
+        {name: string;key: string},
+        TContext
+      > => {
+
+      const mutationOptions = getDeleteR2ObjectMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }

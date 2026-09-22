@@ -7,12 +7,13 @@ export interface CustomInstanceConfig {
   data?: unknown;
   headers?: Record<string, string>;
   signal?: AbortSignal;
+  responseType?: string;
 }
 
 export const customInstance = async <T>(
   config: CustomInstanceConfig
 ): Promise<T> => {
-  const { url, method = 'GET', params, headers, data, signal } = config;
+  const { url, method = 'GET', params, headers, data, signal, responseType } = config;
 
   let requestUrl = url;
   if (!requestUrl.startsWith('http://') && !requestUrl.startsWith('https://')) {
@@ -33,13 +34,16 @@ export const customInstance = async <T>(
     }
   }
 
+  const isFormData = typeof FormData !== 'undefined' && data instanceof FormData;
+  const baseHeaders: Record<string, string> = isFormData ? {} : { 'Content-Type': 'application/json' };
+
   const response = await fetch(requestUrl, {
     method,
     headers: {
-      'Content-Type': 'application/json',
+      ...baseHeaders,
       ...headers,
     },
-    body: data !== undefined ? (typeof data === 'string' ? data : JSON.stringify(data)) : undefined,
+    body: data !== undefined ? (isFormData || typeof data === 'string' ? (data as BodyInit) : JSON.stringify(data)) : undefined,
     signal,
   });
 
@@ -55,6 +59,13 @@ export const customInstance = async <T>(
 
   if (response.status === 204) {
     return {} as T;
+  }
+
+  if (responseType === 'blob') {
+    return response.blob() as Promise<T>;
+  }
+  if (responseType === 'text') {
+    return response.text() as Promise<T>;
   }
 
   return response.json() as Promise<T>;

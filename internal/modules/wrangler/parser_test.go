@@ -324,3 +324,44 @@ func TestApplyToApplication_EnvironmentOverride(t *testing.T) {
 		t.Errorf("expected base DEBUG false preserved, got: %s", varMap["DEBUG"].Value)
 	}
 }
+
+func TestParseWranglerJSON_WithAssets(t *testing.T) {
+	// Given
+	rawJSON := []byte(`{
+		"name": "fullstack-remix-app",
+		"main": "build/server/index.js",
+		"assets": {
+			"directory": "./build/client",
+			"binding": "STATIC_ASSETS"
+		}
+	}`)
+
+	// When
+	cfg, _, err := wrangler.Parse(rawJSON, "auto")
+	if err != nil {
+		t.Fatalf("unexpected error parsing assets: %v", err)
+	}
+
+	app, _ := domain.NewApplicationWithSource("app-fullstack", "remix-app", domain.SourceTypeInline, "", "", "", nil, nil)
+	summary, err := wrangler.ApplyToApplication(app, cfg, "", "json")
+
+	// Then
+	if err != nil {
+		t.Fatalf("unexpected error applying assets: %v", err)
+	}
+	if summary.ImportedBindingsCount != 1 {
+		t.Errorf("expected 1 imported binding, got %d", summary.ImportedBindingsCount)
+	}
+
+	var foundAssetBinding bool
+	for _, b := range app.Bindings {
+		if b.Type == domain.BindingTypeAssets && b.Name == "STATIC_ASSETS" && b.ResourceID == "./build/client" {
+			foundAssetBinding = true
+			break
+		}
+	}
+	if !foundAssetBinding {
+		t.Errorf("expected STATIC_ASSETS binding with ./build/client, got: %+v", app.Bindings)
+	}
+}
+

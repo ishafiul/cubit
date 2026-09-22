@@ -298,6 +298,50 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /applications/{id}/deploy/direct:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      summary: Direct bundle deployment (e.g. from wrangler CLI or CI/CD)
+      operationId: deployDirect
+      tags:
+        - deployments
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeployDirectRequest'
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                bundle:
+                  type: string
+                  format: binary
+                commitMessage:
+                  type: string
+                wranglerConfig:
+                  type: string
+      responses:
+        '201':
+          description: Direct deployment deployed and active
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deployment'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /applications/{id}/deployments:
     parameters:
       - name: id
@@ -672,6 +716,111 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /r2/buckets/{name}/objects:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      summary: List all objects in an R2 bucket
+      operationId: listR2Objects
+      tags:
+        - r2
+      responses:
+        '200':
+          description: List of objects in the bucket
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/R2Object'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /r2/buckets/{name}/upload:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      summary: Upload an object into an R2 bucket
+      operationId: uploadR2Object
+      tags:
+        - r2
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadR2ObjectRequest'
+      responses:
+        '200':
+          description: Object uploaded successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  key:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /r2/buckets/{name}/objects/{key}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: key
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Get raw object contents from an R2 bucket
+      operationId: getR2Object
+      tags:
+        - r2
+      responses:
+        '200':
+          description: Object binary or text content
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      summary: Delete an object from an R2 bucket
+      operationId: deleteR2Object
+      tags:
+        - r2
+      responses:
+        '204':
+          description: Object deleted successfully
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
 components:
   responses:
     BadRequest:
@@ -739,6 +888,45 @@ components:
         name:
           type: string
           example: "user-assets"
+
+    R2Object:
+      type: object
+      required:
+        - key
+        - sizeBytes
+        - contentType
+        - etag
+        - lastModified
+      properties:
+        key:
+          type: string
+          example: "avatars/user-123.png"
+        sizeBytes:
+          type: integer
+          format: int64
+          example: 20480
+        contentType:
+          type: string
+          example: "image/png"
+        etag:
+          type: string
+          example: "\"d41d8cd98f00b204e9800998ecf8427e\""
+        lastModified:
+          type: string
+          format: date-time
+
+    UploadR2ObjectRequest:
+      type: object
+      required:
+        - key
+        - content
+      properties:
+        key:
+          type: string
+          example: "data.json"
+        content:
+          type: string
+          description: Raw or base64 text content of the object
 
     NodeStatus:
       type: string
@@ -1247,6 +1435,21 @@ components:
         forceRebuild:
           type: boolean
           default: false
+
+    DeployDirectRequest:
+      type: object
+      required:
+        - bundle
+      properties:
+        bundle:
+          type: string
+          description: JavaScript bundle code
+        commitMessage:
+          type: string
+          description: Optional deployment message or commit description
+        wranglerConfig:
+          type: string
+          description: Optional wrangler.json or wrangler.toml configuration content
 
     RollbackApplicationRequest:
       type: object

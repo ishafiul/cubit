@@ -136,12 +136,12 @@ func (r *SQLiteRepository) GetKVNamespace(ctx context.Context, id string) (*doma
 		SELECT n.id, n.name, n.created_at, COUNT(e.key) as key_count
 		FROM kv_namespaces n
 		LEFT JOIN kv_entries e ON n.id = e.namespace_id
-		WHERE n.id = ?
+		WHERE n.id = ? OR n.name = ?
 		GROUP BY n.id, n.name, n.created_at
 	`
 	var ns domain.KVNamespace
 	var createdAtStr string
-	err := r.db.QueryRowContext(ctx, query, id).Scan(&ns.ID, &ns.Name, &createdAtStr, &ns.KeyCount)
+	err := r.db.QueryRowContext(ctx, query, id, id).Scan(&ns.ID, &ns.Name, &createdAtStr, &ns.KeyCount)
 	if err == sql.ErrNoRows {
 		return nil, domain.NewNotFoundError("KV namespace not found")
 	}
@@ -230,7 +230,9 @@ func (r *SQLiteRepository) SaveD1Database(ctx context.Context, d1 *domain.D1Data
 	}
 
 	// Initialize database file
-	dbPath := filepath.Join(r.baseDir, "d1", fmt.Sprintf("%s.db", d1.ID))
+	d1Dir := filepath.Join(r.baseDir, "d1")
+	_ = os.MkdirAll(d1Dir, 0755)
+	dbPath := filepath.Join(d1Dir, fmt.Sprintf("%s.db", d1.ID))
 	subDB, err := sql.Open("sqlite", dbPath)
 	if err == nil {
 		_, _ = subDB.Exec("CREATE TABLE IF NOT EXISTS _d1_migrations (id INTEGER PRIMARY KEY, name TEXT, applied_at TIMESTAMP)")
@@ -267,10 +269,10 @@ func (r *SQLiteRepository) ListD1Databases(ctx context.Context) ([]*domain.D1Dat
 }
 
 func (r *SQLiteRepository) GetD1Database(ctx context.Context, id string) (*domain.D1Database, error) {
-	query := `SELECT id, name, size_bytes, created_at FROM d1_databases WHERE id = ?`
+	query := `SELECT id, name, size_bytes, created_at FROM d1_databases WHERE id = ? OR name = ?`
 	var d1 domain.D1Database
 	var createdAtStr string
-	err := r.db.QueryRowContext(ctx, query, id).Scan(&d1.ID, &d1.Name, &d1.SizeBytes, &createdAtStr)
+	err := r.db.QueryRowContext(ctx, query, id, id).Scan(&d1.ID, &d1.Name, &d1.SizeBytes, &createdAtStr)
 	if err == sql.ErrNoRows {
 		return nil, domain.NewNotFoundError("D1 database not found")
 	}
@@ -298,7 +300,12 @@ func (r *SQLiteRepository) DeleteD1Database(ctx context.Context, id string) erro
 }
 
 func (r *SQLiteRepository) ExecuteD1Query(ctx context.Context, id, queryStr string) (*domain.D1QueryResult, error) {
-	dbPath := filepath.Join(r.baseDir, "d1", fmt.Sprintf("%s.db", id))
+	if d1, err := r.GetD1Database(ctx, id); err == nil {
+		id = d1.ID
+	}
+	d1Dir := filepath.Join(r.baseDir, "d1")
+	_ = os.MkdirAll(d1Dir, 0755)
+	dbPath := filepath.Join(d1Dir, fmt.Sprintf("%s.db", id))
 	subDB, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed opening D1 database: %w", err)

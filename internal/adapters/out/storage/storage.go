@@ -132,3 +132,12 @@ func (a *LocalStorageAdapter) DeleteBucket(ctx context.Context, bucketName strin
 	bucketPath := filepath.Join(a.baseDir, bucketName)
 	return os.RemoveAll(bucketPath)
 }
+
+// DeleteObject removes an object from a bucket.
+func (a *LocalStorageAdapter) DeleteObject(ctx context.Context, bucketName, objectKey string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	targetPath := filepath.Join(a.baseDir, bucketName, objectKey)
+	return os.Remove(targetPath)
+}

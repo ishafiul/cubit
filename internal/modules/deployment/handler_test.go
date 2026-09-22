@@ -82,5 +82,28 @@ func TestDeploymentHandler(t *testing.T) {
 				}
 			})
 		})
+
+		t.Run("When deploying directly via POST /api/v1/applications/:id/deploy/direct", func(t *testing.T) {
+			body := []byte(`{"bundle":"export default { fetch: () => new Response('direct') };","commitMessage":"direct push"}`)
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(http.MethodPost, "/api/v1/applications/app-test/deploy/direct", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(w, req)
+
+			t.Run("Then it returns 201 Created with active status and new build version", func(t *testing.T) {
+				if w.Code != http.StatusCreated {
+					t.Fatalf("expected status 201, got %d: %s", w.Code, w.Body.String())
+				}
+
+				var resp map[string]interface{}
+				_ = json.Unmarshal(w.Body.Bytes(), &resp)
+				if resp["status"] != "active" {
+					t.Fatalf("expected status active, got %v", resp["status"])
+				}
+				if resp["buildVersion"] != float64(2) {
+					t.Fatalf("expected buildVersion 2, got %v", resp["buildVersion"])
+				}
+			})
+		})
 	})
 }

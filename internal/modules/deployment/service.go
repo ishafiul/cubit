@@ -36,6 +36,7 @@ type RouteSyncer interface {
 type Service interface {
 	Deploy(ctx context.Context, appID string, commitHash string) (*domain.Deployment, error)
 	DeployWithDetails(ctx context.Context, appID, commitHash, commitMessage string) (*domain.Deployment, error)
+	DeployDirect(ctx context.Context, appID string, bundle []byte, commitMessage string, rawWranglerConfig string) (*domain.Deployment, error)
 	Rollback(ctx context.Context, appID, deploymentID string) (*domain.Deployment, error)
 	GetByID(ctx context.Context, id string) (*domain.Deployment, error)
 	ListByApp(ctx context.Context, appID string) ([]*domain.Deployment, error)
@@ -257,6 +258,117 @@ func (s *DeploymentService) GetLogs(ctx context.Context, depID string) ([]domain
 // AppendLog appends a log entry to a deployment.
 func (s *DeploymentService) AppendLog(ctx context.Context, depID string, entry domain.DeploymentLog) error {
 	return s.repo.AppendLog(ctx, depID, entry)
+}
+
+// DeployDirect creates and activates a deployment immediately from raw worker bundle bytes (CLI / CI deployment).
+func (s *DeploymentService) DeployDirect(ctx context.Context, appID string, bundle []byte, commitMessage string, rawWranglerConfig string) (*domain.Deployment, error) {
+	app, err := s.appMgr.GetByID(ctx, appID)
+	if err != nil {
+		return nil, err
+	}
+
+	depID := generateID()
+	commitHash := generateShortHash()
+	if commitMessage == "" {
+		commitMessage = "Direct deployment via API/CLI"
+	}
+
+	maxVer, _ := s.repo.GetLatestBuildVersion(ctx, appID)
+	buildVer := maxVer + 1
+
+	now := time.Now().UTC()
+	dep, err := domain.NewDeploymentWithVersion(depID, app.ID, commitHash, commitMessage, buildVer)
+	if err != nil {
+		return nil, err
+	}
+	_ = dep.StartBuilding()
+
+	if err := s.repo.Save(ctx, dep); err != nil {
+		return nil, err
+	}
+
+	_ = s.repo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
+		Timestamp: now,
+		Step:      domain.LogStepEsbuild,
+		Message:   fmt.Sprintf("Direct release %s received for application %s", dep.VersionTag(), app.Name),
+		Level:     domain.LogLevelInfo,
+	})
+
+	// If wrangler configuration is supplied, sync variables, bindings, and compat settings
+	if rawWranglerConfig != "" {
+		_, summary, err := s.appMgr.ImportWrangler(ctx, app.ID, rawWranglerConfig, "auto", "")
+		if err == nil && summary != nil {
+			_ = s.repo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
+				Timestamp: time.Now().UTC(),
+				Step:      domain.LogStepEsbuild,
+				Message:   fmt.Sprintf("Synchronized %d environment variables and %d bindings from wrangler configuration", summary.ImportedVarsCount, summary.ImportedBindingsCount),
+				Level:     domain.LogLevelInfo,
+			})
+		}
+	}
+
+	if len(bundle) == 0 {
+		if app.InlineCode != "" {
+			bundle = []byte(app.InlineCode)
+		} else {
+			bundle = []byte(domain.DefaultHelloWorldWorker)
+		}
+	}
+
+	// Upload compiled bundle to storage
+	if s.storage != nil {
+		objectKey := fmt.Sprintf("deployments/%s/%s/bundle.js", app.Name, dep.ID)
+		if err := s.storage.UploadBundle(ctx, s.fleetBucket, objectKey, bundle); err != nil {
+			dep.MarkFailed(err.Error())
+			_ = s.repo.Update(ctx, dep)
+			return nil, fmt.Errorf("failed to upload bundle: %w", err)
+		}
+	}
+
+	_ = s.repo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
+		Timestamp: time.Now().UTC(),
+		Step:      domain.LogStepS3Upload,
+		Message:   fmt.Sprintf("Worker bundle (%d bytes) stored successfully", len(bundle)),
+		Level:     domain.LogLevelInfo,
+	})
+
+	// Supersede any existing active deployments
+	allDeps, _ := s.repo.ListByAppID(ctx, app.ID)
+	for _, oldDep := range allDeps {
+		if oldDep.ID != dep.ID && oldDep.Status == domain.DeploymentStatusActive {
+			oldDep.MarkSuperseded()
+			_ = s.repo.Update(ctx, oldDep)
+		}
+	}
+
+	_ = dep.StartDeploying(int64(len(bundle)))
+	_ = dep.MarkActive()
+	if err := s.repo.Update(ctx, dep); err != nil {
+		return nil, err
+	}
+
+	if err := s.appMgr.SetActiveDeployment(ctx, app.ID, dep.ID); err != nil {
+		return nil, err
+	}
+
+	if s.routeSyncer != nil {
+		_ = s.routeSyncer.SyncRoutes(ctx)
+		_ = s.repo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
+			Timestamp: time.Now().UTC(),
+			Step:      domain.LogStepRouteSync,
+			Message:   fmt.Sprintf("Synchronized Traefik routing rules for %s (%s)", app.Name, dep.VersionTag()),
+			Level:     domain.LogLevelInfo,
+		})
+	}
+
+	_ = s.repo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
+		Timestamp: time.Now().UTC(),
+		Step:      domain.LogStepCelldDeploy,
+		Message:   fmt.Sprintf("Direct deployment %s is now active on %s", dep.VersionTag(), app.Subdomain),
+		Level:     domain.LogLevelInfo,
+	})
+
+	return dep, nil
 }
 
 func generateID() string {

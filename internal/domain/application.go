@@ -51,6 +51,7 @@ const (
 	BindingTypeQueue    BindingType = "queue"
 	BindingTypeWorkflow BindingType = "workflow"
 	BindingTypeService  BindingType = "service"
+	BindingTypeAssets   BindingType = "assets"
 )
 
 // EnvironmentVariable represents a key-value pair injected into a Worker isolate.

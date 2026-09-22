@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -101,6 +103,65 @@ func (h *Handler) Deploy(c *gin.Context) {
 	}
 
 	dep, err := h.service.Deploy(c.Request.Context(), appID, commitHash)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusCreated, toDeploymentResponse(dep))
+}
+
+type deployDirectRequest struct {
+	Bundle         string  `json:"bundle"`
+	CommitMessage  *string `json:"commitMessage,omitempty"`
+	WranglerConfig *string `json:"wranglerConfig,omitempty"`
+}
+
+// DeployDirect POST /applications/:id/deploy/direct
+func (h *Handler) DeployDirect(c *gin.Context) {
+	appID := c.Param("id")
+
+	var bundleBytes []byte
+	var commitMessage string
+	var wranglerConfig string
+
+	if strings.HasPrefix(c.GetHeader("Content-Type"), "multipart/form-data") {
+		form, err := c.MultipartForm()
+		if err == nil {
+			if files := form.File["bundle"]; len(files) > 0 {
+				f, err := files[0].Open()
+				if err == nil {
+					bundleBytes, _ = io.ReadAll(f)
+					_ = f.Close()
+				}
+			} else if files := form.File["file"]; len(files) > 0 {
+				f, err := files[0].Open()
+				if err == nil {
+					bundleBytes, _ = io.ReadAll(f)
+					_ = f.Close()
+				}
+			}
+			if len(form.Value["commitMessage"]) > 0 {
+				commitMessage = form.Value["commitMessage"][0]
+			}
+			if len(form.Value["wranglerConfig"]) > 0 {
+				wranglerConfig = form.Value["wranglerConfig"][0]
+			}
+		}
+	} else {
+		var req deployDirectRequest
+		if err := c.ShouldBindJSON(&req); err == nil {
+			bundleBytes = []byte(req.Bundle)
+			if req.CommitMessage != nil {
+				commitMessage = *req.CommitMessage
+			}
+			if req.WranglerConfig != nil {
+				wranglerConfig = *req.WranglerConfig
+			}
+		}
+	}
+
+	dep, err := h.service.DeployDirect(c.Request.Context(), appID, bundleBytes, commitMessage, wranglerConfig)
 	if err != nil {
 		respondError(c, err)
 		return
