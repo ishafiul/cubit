@@ -8,6 +8,7 @@
 import type { RequestLogEventRequestHeaders } from './requestLogEventRequestHeaders';
 import type { RequestLogEventResponseHeaders } from './requestLogEventResponseHeaders';
 import type { ConsoleLogEntry } from './consoleLogEntry';
+import type { RequestLogEventCf } from './requestLogEventCf';
 
 export interface RequestLogEvent {
   id: string;
@@ -26,4 +27,6 @@ export interface RequestLogEvent {
   responseBody?: string;
   logs?: ConsoleLogEntry[];
   exceptions?: string[];
+  /** Cloudflare edge context and geolocation telemetry */
+  cf?: RequestLogEventCf;
 }

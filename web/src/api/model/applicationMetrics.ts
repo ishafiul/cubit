@@ -5,6 +5,9 @@
  * Strict REST API for Cubit, an open-source bare-metal PaaS for running Cloudflare Workers and Durable Objects using celld, Traefik, and S3 storage.
  * OpenAPI spec version: 1.0.0
  */
+import type { ApplicationMetricsRequestsByCountry } from './applicationMetricsRequestsByCountry';
+import type { ApplicationMetricsRequestsByColo } from './applicationMetricsRequestsByColo';
+import type { RequestLogEvent } from './requestLogEvent';
 
 export interface ApplicationMetrics {
   totalRequests: number;
@@ -13,4 +16,11 @@ export interface ApplicationMetrics {
   status5xx: number;
   avgDurationMs: number;
   p99DurationMs: number;
+  successRate?: number;
+  errorRate?: number;
+  requestsByCountry?: ApplicationMetricsRequestsByCountry;
+  requestsByColo?: ApplicationMetricsRequestsByColo;
+  /** @nullable */
+  lastInvokedAt?: string | null;
+  recentEvents?: RequestLogEvent[];
 }

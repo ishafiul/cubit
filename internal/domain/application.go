@@ -70,12 +70,18 @@ type ResourceBinding struct {
 
 // ApplicationMetrics encapsulates real-time worker execution telemetry.
 type ApplicationMetrics struct {
-	TotalRequests int64   `json:"totalRequests"`
-	Status2xx     int64   `json:"status2xx"`
-	Status4xx     int64   `json:"status4xx"`
-	Status5xx     int64   `json:"status5xx"`
-	AvgDurationMs float64 `json:"avgDurationMs"`
-	P99DurationMs float64 `json:"p99DurationMs"`
+	TotalRequests     int64                  `json:"totalRequests"`
+	Status2xx         int64                  `json:"status2xx"`
+	Status4xx         int64                  `json:"status4xx"`
+	Status5xx         int64                  `json:"status5xx"`
+	AvgDurationMs     float64                `json:"avgDurationMs"`
+	P99DurationMs     float64                `json:"p99DurationMs"`
+	SuccessRate       float64                `json:"successRate"`
+	ErrorRate         float64                `json:"errorRate"`
+	RequestsByCountry map[string]int64       `json:"requestsByCountry,omitempty"`
+	RequestsByColo    map[string]int64       `json:"requestsByColo,omitempty"`
+	LastInvokedAt     *time.Time             `json:"lastInvokedAt,omitempty"`
+	RecentEvents      []RequestLogEvent      `json:"recentEvents,omitempty"`
 }
 
 // ConsoleLogEntry represents an isolate console log output.
@@ -87,22 +93,23 @@ type ConsoleLogEntry struct {
 
 // RequestLogEvent represents a live streaming event from a worker isolate request.
 type RequestLogEvent struct {
-	ID              string            `json:"id"`
-	Timestamp       time.Time         `json:"timestamp"`
-	Method          string            `json:"method"`
-	Path            string            `json:"path"`
-	URL             string            `json:"url"`
-	StatusCode      int               `json:"statusCode"`
-	DurationMs      float64           `json:"durationMs"`
-	ClientIP        string            `json:"clientIp"`
-	Message         string            `json:"message"`
-	Outcome         string            `json:"outcome"`
-	RequestHeaders  map[string]string `json:"requestHeaders"`
-	RequestBody     string            `json:"requestBody,omitempty"`
-	ResponseHeaders map[string]string `json:"responseHeaders"`
-	ResponseBody    string            `json:"responseBody,omitempty"`
-	Logs            []ConsoleLogEntry `json:"logs,omitempty"`
-	Exceptions      []string          `json:"exceptions,omitempty"`
+	ID              string                 `json:"id"`
+	Timestamp       time.Time              `json:"timestamp"`
+	Method          string                 `json:"method"`
+	Path            string                 `json:"path"`
+	URL             string                 `json:"url"`
+	StatusCode      int                    `json:"statusCode"`
+	DurationMs      float64                `json:"durationMs"`
+	ClientIP        string                 `json:"clientIp"`
+	Message         string                 `json:"message"`
+	Outcome         string                 `json:"outcome"`
+	RequestHeaders  map[string]string      `json:"requestHeaders"`
+	RequestBody     string                 `json:"requestBody,omitempty"`
+	ResponseHeaders map[string]string      `json:"responseHeaders"`
+	ResponseBody    string                 `json:"responseBody,omitempty"`
+	Logs            []ConsoleLogEntry      `json:"logs,omitempty"`
+	Exceptions      []string               `json:"exceptions,omitempty"`
+	CF              map[string]interface{} `json:"cf,omitempty"`
 }
 
 // Application represents a Cloudflare Worker application running on the celld fleet.

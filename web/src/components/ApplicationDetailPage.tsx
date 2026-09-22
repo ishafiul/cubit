@@ -296,7 +296,7 @@ export function ApplicationDetailPage({
   const [logMethodFilter, setLogMethodFilter] = useState<'ALL' | 'GET' | 'POST' | 'PUT' | 'DELETE'>('ALL');
   const [logStatusFilter, setLogStatusFilter] = useState<'ALL' | '2xx' | '4xx' | '5xx'>('ALL');
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
-  const [activeLogDetailTab, setActiveLogDetailTab] = useState<'headers' | 'payload' | 'logs' | 'json'>('headers');
+  const [activeLogDetailTab, setActiveLogDetailTab] = useState<'headers' | 'payload' | 'logs' | 'cf' | 'json'>('headers');
   const [copiedLogSection, setCopiedLogSection] = useState<string | null>(null);
 
   const handleCopyLogSection = (text: string, sectionKey: string) => {
@@ -1115,7 +1115,7 @@ export function ApplicationDetailPage({
         {activeTab === 'overview' && (
           <div className="space-y-6 max-w-6xl">
             {/* Top Metrics Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
               {/* Total Invocations */}
               <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-xl p-4 space-y-2">
                 <div className="flex items-center justify-between text-xs text-zinc-400">
@@ -1133,11 +1133,33 @@ export function ApplicationDetailPage({
                 </p>
               </div>
 
+              {/* Success Rate & Health */}
+              <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-xl p-4 space-y-2">
+                <div className="flex items-center justify-between text-xs text-zinc-400">
+                  <span className="font-semibold uppercase tracking-wider">Success Rate</span>
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                </div>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-2xl font-bold font-mono text-emerald-400">
+                    {metrics?.successRate !== undefined ? metrics.successRate.toFixed(1) : '100.0'}%
+                  </span>
+                  <span className="text-[11px] text-zinc-500">
+                    {metrics?.errorRate !== undefined && metrics.errorRate > 0
+                      ? `${metrics.errorRate.toFixed(1)}% err`
+                      : '0.0% err'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">
+                  <span className={`w-2 h-2 rounded-full ${(metrics?.errorRate ?? 0) === 0 ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                  <span>{(metrics?.errorRate ?? 0) === 0 ? 'Healthy edge availability' : 'Errors detected'}</span>
+                </div>
+              </div>
+
               {/* HTTP Status Breakdown */}
               <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-xl p-4 space-y-2">
                 <div className="flex items-center justify-between text-xs text-zinc-400">
                   <span className="font-semibold uppercase tracking-wider">Response Codes</span>
-                  <ShieldCheck className="w-4 h-4 text-sky-400" />
+                  <Activity className="w-4 h-4 text-sky-400" />
                 </div>
                 <div className="flex items-center gap-3 text-xs font-mono">
                   <div className="flex items-center gap-1 text-emerald-400">
@@ -1222,6 +1244,207 @@ export function ApplicationDetailPage({
                   <span>celld worker active</span>
                 </div>
               </div>
+            </div>
+
+            {/* Edge Telemetry & Real-Time Monitoring Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Traffic by Geolocation (Country) */}
+              <div className="bg-zinc-900/30 border border-zinc-800/80 rounded-xl p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Globe className="w-4 h-4 text-sky-400" />
+                    <h3 className="text-sm font-bold text-zinc-200">Traffic by Geolocation (request.cf)</h3>
+                  </div>
+                  <span className="text-xs text-zinc-500 font-mono">
+                    {Object.keys(metrics?.requestsByCountry || {}).length} Countries
+                  </span>
+                </div>
+
+                {Object.keys(metrics?.requestsByCountry || {}).length === 0 ? (
+                  <div className="text-xs text-zinc-500 italic py-6 text-center border border-dashed border-zinc-800 rounded-lg">
+                    No edge geolocation traffic recorded yet. Requests to this worker will stream country telemetry here.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {Object.entries(metrics?.requestsByCountry || {})
+                      .sort(([, a], [, b]) => (b as number) - (a as number))
+                      .slice(0, 5)
+                      .map(([countryCode, count]) => {
+                        const total = metrics?.totalRequests || 1;
+                        const pct = Math.round(((count as number) / total) * 100);
+                        return (
+                          <div key={countryCode} className="space-y-1">
+                            <div className="flex items-center justify-between text-xs">
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold font-mono px-1.5 py-0.5 rounded bg-zinc-950 border border-zinc-800 text-sky-300 text-[10px]">
+                                  {countryCode}
+                                </span>
+                                <span className="text-zinc-300 font-medium">
+                                  {countryCode === 'US' ? 'United States' : countryCode === 'GB' ? 'United Kingdom' : countryCode === 'DE' ? 'Germany' : countryCode === 'JP' ? 'Japan' : countryCode === 'FR' ? 'France' : countryCode}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2 font-mono text-zinc-400">
+                                <span>{(count as number).toLocaleString()} reqs</span>
+                                <span className="text-zinc-500 text-[11px]">({pct}%)</span>
+                              </div>
+                            </div>
+                            <div className="w-full h-1.5 bg-zinc-950 rounded-full overflow-hidden border border-zinc-800/40">
+                              <div
+                                style={{ width: `${Math.max(pct, 2)}%` }}
+                                className="bg-sky-500 h-full rounded-full transition-all duration-500"
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
+              </div>
+
+              {/* Edge Datacenters / Points of Presence (Colos) */}
+              <div className="bg-zinc-900/30 border border-zinc-800/80 rounded-xl p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Radio className="w-4 h-4 text-emerald-400" />
+                    <h3 className="text-sm font-bold text-zinc-200">Edge Points of Presence (Colos)</h3>
+                  </div>
+                  <span className="text-xs text-zinc-500 font-mono">
+                    {Object.keys(metrics?.requestsByColo || {}).length} PoPs
+                  </span>
+                </div>
+
+                {Object.keys(metrics?.requestsByColo || {}).length === 0 ? (
+                  <div className="text-xs text-zinc-500 italic py-6 text-center border border-dashed border-zinc-800 rounded-lg">
+                    No PoP telemetry recorded yet. Edge requests will populate datacenter routing distributions here.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {Object.entries(metrics?.requestsByColo || {})
+                      .sort(([, a], [, b]) => (b as number) - (a as number))
+                      .slice(0, 5)
+                      .map(([coloCode, count]) => {
+                        const total = metrics?.totalRequests || 1;
+                        const pct = Math.round(((count as number) / total) * 100);
+                        return (
+                          <div key={coloCode} className="space-y-1">
+                            <div className="flex items-center justify-between text-xs">
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold font-mono px-1.5 py-0.5 rounded bg-zinc-950 border border-zinc-800 text-emerald-300 text-[10px]">
+                                  {coloCode}
+                                </span>
+                                <span className="text-zinc-300 font-medium">
+                                  {coloCode === 'SFO' ? 'San Francisco, US' : coloCode === 'IAD' ? 'Washington DC, US' : coloCode === 'LHR' ? 'London, UK' : coloCode === 'FRA' ? 'Frankfurt, DE' : `${coloCode} Edge Node`}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2 font-mono text-zinc-400">
+                                <span>{(count as number).toLocaleString()} reqs</span>
+                                <span className="text-zinc-500 text-[11px]">({pct}%)</span>
+                              </div>
+                            </div>
+                            <div className="w-full h-1.5 bg-zinc-950 rounded-full overflow-hidden border border-zinc-800/40">
+                              <div
+                                style={{ width: `${Math.max(pct, 2)}%` }}
+                                className="bg-emerald-500 h-full rounded-full transition-all duration-500"
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Real-Time Request Activity Stream */}
+            <div className="bg-zinc-900/30 border border-zinc-800/80 rounded-xl p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-emerald-400" />
+                  <h3 className="text-sm font-bold text-zinc-200">Recent Request Telemetry</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    switchTab('builds');
+                    setBuildsViewMode('tail');
+                  }}
+                  className="text-xs text-sky-400 hover:text-sky-300 hover:underline flex items-center gap-1 font-semibold transition"
+                >
+                  <span>Open Full Live Tail</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {((metrics?.recentEvents && metrics.recentEvents.length > 0) || liveLogs.length > 0) ? (
+                <div className="space-y-2">
+                  {(metrics?.recentEvents && metrics.recentEvents.length > 0 ? metrics.recentEvents : liveLogs)
+                    .slice(0, 5)
+                    .map((ev, idx) => {
+                      const code = ev.statusCode ?? 200;
+                      return (
+                        <div
+                          key={ev.id || `rec-${idx}`}
+                          onClick={() => {
+                            switchTab('builds');
+                            setBuildsViewMode('tail');
+                            setExpandedLogId(ev.id);
+                          }}
+                          className="flex items-center justify-between p-2.5 rounded-lg bg-zinc-950/70 border border-zinc-800/70 hover:border-zinc-700 hover:bg-zinc-900/50 cursor-pointer transition text-xs select-none"
+                        >
+                          <div className="flex items-center gap-3">
+                            <span
+                              className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase ${
+                                ev.method === 'GET'
+                                  ? 'bg-sky-950 text-sky-400 border border-sky-800'
+                                  : ev.method === 'POST'
+                                    ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                                    : 'bg-zinc-800 text-zinc-300'
+                              }`}
+                            >
+                              {ev.method}
+                            </span>
+                            <span className="font-mono text-zinc-200 font-semibold truncate max-w-xs sm:max-w-sm md:max-w-md">
+                              {ev.path || '/'}
+                            </span>
+                            {ev.cf && (ev.cf as any).country && (
+                              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-zinc-900 border border-zinc-800 text-sky-300">
+                                {String((ev.cf as any).country)} · {String((ev.cf as any).colo || 'SFO')}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-4 font-mono text-[11px]">
+                            <span
+                              className={`font-bold ${
+                                code >= 200 && code < 300
+                                  ? 'text-emerald-400'
+                                  : code >= 400 && code < 500
+                                    ? 'text-amber-400'
+                                    : 'text-rose-400'
+                              }`}
+                            >
+                              {code}
+                            </span>
+                            <span className="text-zinc-400">{Math.round(ev.durationMs)}ms</span>
+                            <span className="text-zinc-500 hidden sm:inline">{new Date(ev.timestamp).toLocaleTimeString()}</span>
+                            <ChevronRight className="w-3.5 h-3.5 text-zinc-600" />
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              ) : (
+                <div className="p-8 text-center border border-dashed border-zinc-800 rounded-lg text-xs text-zinc-500 italic space-y-2">
+                  <p>No recent isolate execution events recorded yet.</p>
+                  <button
+                    type="button"
+                    onClick={() => onTestApp(app)}
+                    className="px-3 py-1.5 rounded-lg bg-emerald-950 text-emerald-400 border border-emerald-800 hover:bg-emerald-900 font-semibold transition"
+                  >
+                    Send Test Invocation
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Architecture & Quotas Card */}
@@ -1688,10 +1911,10 @@ export function ApplicationDetailPage({
                 <div className="grid grid-cols-12 gap-2 px-3 py-2 border-b border-zinc-800/80 text-zinc-500 text-[11px] font-semibold uppercase tracking-wider">
                   <span className="col-span-2">TIMESTAMP</span>
                   <span className="col-span-1">METHOD</span>
-                  <span className="col-span-4">PATH / URL</span>
+                  <span className="col-span-3">PATH / URL</span>
                   <span className="col-span-1 text-center">STATUS</span>
                   <span className="col-span-1 text-right">LATENCY</span>
-                  <span className="col-span-1 text-center">CLIENT IP</span>
+                  <span className="col-span-2 text-center">EDGE & CLIENT IP</span>
                   <span className="col-span-2 text-right">RAY ID</span>
                 </div>
 
@@ -1710,8 +1933,10 @@ export function ApplicationDetailPage({
                         const url = (log.url || '').toLowerCase();
                         const id = (log.id || '').toLowerCase();
                         const ip = (log.clientIp || '').toLowerCase();
+                        const country = String((log.cf as any)?.country || '').toLowerCase();
+                        const colo = String((log.cf as any)?.colo || '').toLowerCase();
                         const codeStr = String(code);
-                        return path.includes(q) || url.includes(q) || id.includes(q) || ip.includes(q) || codeStr.includes(q);
+                        return path.includes(q) || url.includes(q) || id.includes(q) || ip.includes(q) || codeStr.includes(q) || country.includes(q) || colo.includes(q);
                       }
                       return true;
                     });
@@ -1794,7 +2019,7 @@ export function ApplicationDetailPage({
                               </span>
                             </div>
 
-                            <div className="col-span-4 truncate font-mono text-zinc-200" title={entry.url || entry.path}>
+                            <div className="col-span-3 truncate font-mono text-zinc-200" title={entry.url || entry.path}>
                               <span>{entry.path || '/'}</span>
                             </div>
 
@@ -1818,8 +2043,16 @@ export function ApplicationDetailPage({
                               {Math.round(entry.durationMs)}ms
                             </div>
 
-                            <div className="col-span-1 text-center text-zinc-500 truncate" title={entry.clientIp}>
-                              {entry.clientIp || '127.0.0.1'}
+                            <div className="col-span-2 flex items-center justify-center gap-1 font-mono text-[10px] truncate" title={entry.clientIp}>
+                              {entry.cf && (entry.cf as any).country && (
+                                <span
+                                  className="px-1.5 py-0.2 rounded bg-sky-950/80 text-sky-300 border border-sky-800/80 font-bold shrink-0"
+                                  title={`Country: ${String((entry.cf as any).country)}, PoP: ${String((entry.cf as any).colo || 'SFO')}`}
+                                >
+                                  {String((entry.cf as any).country)} · {String((entry.cf as any).colo || 'SFO')}
+                                </span>
+                              )}
+                              <span className="text-zinc-500 truncate">{entry.clientIp || '127.0.0.1'}</span>
                             </div>
 
                             <div className="col-span-2 text-right text-zinc-500 font-mono text-[10px] truncate" title={entry.id}>
@@ -1958,6 +2191,24 @@ export function ApplicationDetailPage({
                                   {totalLogsCount > 0 && (
                                     <span className="text-[10px] bg-sky-950 text-sky-400 px-1.5 py-0.2 rounded border border-sky-800">
                                       {totalLogsCount}
+                                    </span>
+                                  )}
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => setActiveLogDetailTab('cf')}
+                                  className={`px-3 py-1.5 rounded-md font-semibold text-xs transition flex items-center gap-1.5 ${
+                                    activeLogDetailTab === 'cf'
+                                      ? 'bg-zinc-800 text-zinc-100 border border-zinc-700'
+                                      : 'text-zinc-400 hover:text-zinc-200'
+                                  }`}
+                                >
+                                  <Globe className="w-3.5 h-3.5 text-sky-400" />
+                                  <span>Edge / request.cf</span>
+                                  {entry.cf && (entry.cf as any).country && (
+                                    <span className="text-[10px] bg-sky-950 text-sky-300 px-1.5 py-0.2 rounded border border-sky-800 font-mono">
+                                      {String((entry.cf as any).country)} · {String((entry.cf as any).colo || 'SFO')}
                                     </span>
                                   )}
                                 </button>
@@ -2206,6 +2457,83 @@ export function ApplicationDetailPage({
                                         ))}
                                       </div>
                                     )}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Tab Content: Edge / request.cf */}
+                              {activeLogDetailTab === 'cf' && (
+                                <div className="space-y-3">
+                                  <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xs font-bold text-zinc-200">Cloudflare Edge Context & Geolocation</span>
+                                      <span className="text-[10px] bg-sky-950 text-sky-400 border border-sky-800 px-1.5 py-0.5 rounded font-mono font-bold">
+                                        request.cf
+                                      </span>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCopyLogSection(JSON.stringify(entry.cf || {}, null, 2), `cfjson-${logId}`)}
+                                      className="text-[11px] text-zinc-400 hover:text-zinc-200 flex items-center gap-1 transition"
+                                    >
+                                      {copiedLogSection === `cfjson-${logId}` ? (
+                                        <span className="text-emerald-400 flex items-center gap-1">
+                                          <Check className="w-3 h-3" /> Copied CF Data
+                                        </span>
+                                      ) : (
+                                        <>
+                                          <Copy className="w-3 h-3" /> Copy CF Data
+                                        </>
+                                      )}
+                                    </button>
+                                  </div>
+
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                                    <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800/80 space-y-1">
+                                      <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-semibold block">Edge PoP (Colo)</span>
+                                      <span className="text-base font-mono font-bold text-sky-400 block">{String((entry.cf as any)?.colo || 'SFO')}</span>
+                                      <span className="text-[10px] text-zinc-500">Datacenter Location</span>
+                                    </div>
+                                    <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800/80 space-y-1">
+                                      <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-semibold block">Client Location</span>
+                                      <span className="text-base font-mono font-bold text-emerald-400 block">{String((entry.cf as any)?.country || 'US')}</span>
+                                      <span className="text-[10px] text-zinc-500 truncate block">
+                                        {String((entry.cf as any)?.city || 'San Francisco')}, {String((entry.cf as any)?.region || 'CA')}
+                                      </span>
+                                    </div>
+                                    <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800/80 space-y-1">
+                                      <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-semibold block">ASN & Network</span>
+                                      <span className="text-base font-mono font-bold text-purple-400 block">AS{String((entry.cf as any)?.asn || 13335)}</span>
+                                      <span className="text-[10px] text-zinc-500 truncate block">{String((entry.cf as any)?.asOrganization || 'Cloudflare, Inc.')}</span>
+                                    </div>
+                                    <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800/80 space-y-1">
+                                      <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-semibold block">Security & Bot Score</span>
+                                      <span className="text-base font-mono font-bold text-amber-400 block">
+                                        Score: {((entry.cf as any)?.botManagement?.score) ?? 99}
+                                      </span>
+                                      <span className="text-[10px] text-zinc-500">
+                                        {((entry.cf as any)?.botManagement?.verifiedBot) ? 'Verified Bot' : 'Human traffic'}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  <div className="bg-zinc-950 rounded-lg border border-zinc-800/80 p-3 space-y-2">
+                                    <div className="flex items-center justify-between border-b border-zinc-900 pb-1.5">
+                                      <span className="text-[11px] font-bold text-zinc-300">All request.cf Properties</span>
+                                      <span className="text-[10px] text-zinc-500 font-mono">
+                                        {Object.keys(entry.cf || {}).length} attributes
+                                      </span>
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 font-mono text-[11px] max-h-[250px] overflow-y-auto pr-1">
+                                      {Object.entries(entry.cf || {}).map(([k, v]) => (
+                                        <div key={k} className="p-2 rounded bg-zinc-900/60 border border-zinc-800/50 flex flex-col justify-between">
+                                          <span className="text-sky-400 text-[10px] font-semibold">{k}</span>
+                                          <span className="text-zinc-200 font-bold truncate text-[11px]" title={typeof v === 'object' ? JSON.stringify(v) : String(v)}>
+                                            {typeof v === 'object' ? JSON.stringify(v) : String(v)}
+                                          </span>
+                                        </div>
+                                      ))}
+                                    </div>
                                   </div>
                                 </div>
                               )}

@@ -1201,6 +1201,36 @@ components:
           type: number
           format: float
           example: 45.2
+        successRate:
+          type: number
+          format: float
+          example: 98.5
+        errorRate:
+          type: number
+          format: float
+          example: 1.5
+        requestsByCountry:
+          type: object
+          additionalProperties:
+            type: integer
+          example:
+            US: 120
+            GB: 45
+        requestsByColo:
+          type: object
+          additionalProperties:
+            type: integer
+          example:
+            SFO: 110
+            IAD: 40
+        lastInvokedAt:
+          type: string
+          format: date-time
+          nullable: true
+        recentEvents:
+          type: array
+          items:
+            $ref: '#/components/schemas/RequestLogEvent'
 
     ConsoleLogEntry:
       type: object
@@ -1283,6 +1313,10 @@ components:
           type: array
           items:
             type: string
+        cf:
+          type: object
+          description: Cloudflare edge context and geolocation telemetry
+          additionalProperties: true
 
     CreateApplicationRequest:
       type: object

@@ -744,6 +744,89 @@ export default {
 				}
 			})
 		})
+
+		t.Run("When recording execution events with edge context and fetching metrics", func(t *testing.T) {
+			app, _ := svc.Create(
+				context.Background(),
+				"metrics-telemetry-worker",
+				domain.SourceTypeInline,
+				"",
+				"main",
+				"export default { async fetch() { return new Response('ok'); } };",
+				false,
+				nil,
+				nil,
+			)
+
+			// Record 2xx event from US / SFO
+			svc.RecordExecutionEvent(app.ID, domain.RequestLogEvent{
+				ID:         "ray_test_1",
+				Timestamp:  time.Now().UTC(),
+				Method:     "GET",
+				Path:       "/api/hello",
+				URL:        "http://test.localhost/api/hello",
+				StatusCode: 200,
+				DurationMs: 15.5,
+				ClientIP:   "1.2.3.4",
+				CF: map[string]interface{}{
+					"country": "US",
+					"colo":    "SFO",
+					"city":    "San Francisco",
+				},
+			})
+
+			// Record 500 event from DE / FRA
+			svc.RecordExecutionEvent(app.ID, domain.RequestLogEvent{
+				ID:         "ray_test_2",
+				Timestamp:  time.Now().UTC(),
+				Method:     "POST",
+				Path:       "/api/fail",
+				URL:        "http://test.localhost/api/fail",
+				StatusCode: 500,
+				DurationMs: 42.0,
+				ClientIP:   "5.6.7.8",
+				CF: map[string]interface{}{
+					"country": "DE",
+					"colo":    "FRA",
+					"city":    "Frankfurt",
+				},
+			})
+
+			metrics, err := svc.GetMetrics(context.Background(), app.ID)
+
+			t.Run("Then metrics snapshot contains edge telemetry and recent event stream", func(t *testing.T) {
+				if err != nil {
+					t.Fatalf("expected no error getting metrics, got %v", err)
+				}
+				if metrics.TotalRequests != 2 {
+					t.Errorf("expected 2 total requests, got %d", metrics.TotalRequests)
+				}
+				if metrics.Status2xx != 1 || metrics.Status5xx != 1 {
+					t.Errorf("expected 1 2xx and 1 5xx, got %d and %d", metrics.Status2xx, metrics.Status5xx)
+				}
+				if metrics.SuccessRate != 50.0 {
+					t.Errorf("expected 50%% success rate, got %f", metrics.SuccessRate)
+				}
+				if metrics.ErrorRate != 50.0 {
+					t.Errorf("expected 50%% error rate, got %f", metrics.ErrorRate)
+				}
+				if metrics.RequestsByCountry["US"] != 1 || metrics.RequestsByCountry["DE"] != 1 {
+					t.Errorf("expected 1 US and 1 DE, got %v", metrics.RequestsByCountry)
+				}
+				if metrics.RequestsByColo["SFO"] != 1 || metrics.RequestsByColo["FRA"] != 1 {
+					t.Errorf("expected 1 SFO and 1 FRA, got %v", metrics.RequestsByColo)
+				}
+				if len(metrics.RecentEvents) != 2 {
+					t.Fatalf("expected 2 recent events, got %d", len(metrics.RecentEvents))
+				}
+				if metrics.RecentEvents[0].CF["country"] != "DE" {
+					t.Errorf("expected newest event first with country DE, got %v", metrics.RecentEvents[0].CF)
+				}
+				if metrics.RecentEvents[1].CF["country"] != "US" {
+					t.Errorf("expected oldest event second with country US, got %v", metrics.RecentEvents[1].CF)
+				}
+			})
+		})
 	})
 }
 

@@ -8,6 +8,8 @@
 
 export * from './application';
 export * from './applicationMetrics';
+export * from './applicationMetricsRequestsByColo';
+export * from './applicationMetricsRequestsByCountry';
 export * from './applicationStatus';
 export * from './badRequestResponse';
 export * from './conflictResponse';
@@ -37,6 +39,7 @@ export * from './notFoundResponse';
 export * from './r2Bucket';
 export * from './r2Object';
 export * from './requestLogEvent';
+export * from './requestLogEventCf';
 export * from './requestLogEventRequestHeaders';
 export * from './requestLogEventResponseHeaders';
 export * from './resourceBinding';

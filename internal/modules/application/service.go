@@ -49,33 +49,97 @@ type Service interface {
 }
 
 type appMetricsTracker struct {
-	mu            sync.RWMutex
-	totalRequests int64
-	status2xx     int64
-	status4xx     int64
-	status5xx     int64
-	totalDuration float64
-	durations     []float64
+	mu                sync.RWMutex
+	totalRequests     int64
+	status2xx         int64
+	status4xx         int64
+	status5xx         int64
+	totalDuration     float64
+	durations         []float64
+	requestsByCountry map[string]int64
+	requestsByColo    map[string]int64
+	lastInvokedAt     *time.Time
+	recentEvents      []domain.RequestLogEvent
 }
 
-func (t *appMetricsTracker) record(statusCode int, durationMs float64) {
+func getHeaderCaseInsensitive(headers map[string]string, key string) string {
+	for k, v := range headers {
+		if strings.EqualFold(k, key) {
+			return v
+		}
+	}
+	return ""
+}
+
+func (t *appMetricsTracker) recordEvent(event domain.RequestLogEvent) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	t.totalRequests++
-	t.totalDuration += durationMs
-	if statusCode >= 200 && statusCode < 300 {
+	t.totalDuration += event.DurationMs
+	if event.StatusCode >= 200 && event.StatusCode < 300 {
 		t.status2xx++
-	} else if statusCode >= 400 && statusCode < 500 {
+	} else if event.StatusCode >= 400 && event.StatusCode < 500 {
 		t.status4xx++
-	} else if statusCode >= 500 {
+	} else if event.StatusCode >= 500 {
 		t.status5xx++
 	}
 
 	if len(t.durations) >= 500 {
 		t.durations = t.durations[1:]
 	}
-	t.durations = append(t.durations, durationMs)
+	t.durations = append(t.durations, event.DurationMs)
+
+	now := event.Timestamp
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	t.lastInvokedAt = &now
+
+	country := "US"
+	if event.CF != nil {
+		if c, ok := event.CF["country"].(string); ok && c != "" {
+			country = strings.ToUpper(c)
+		}
+	}
+	if country == "US" {
+		if c := getHeaderCaseInsensitive(event.RequestHeaders, "cf-ipcountry"); c != "" {
+			country = strings.ToUpper(c)
+		}
+	}
+	if t.requestsByCountry == nil {
+		t.requestsByCountry = make(map[string]int64)
+	}
+	t.requestsByCountry[country]++
+
+	colo := "SFO"
+	if event.CF != nil {
+		if col, ok := event.CF["colo"].(string); ok && col != "" {
+			colo = strings.ToUpper(col)
+		}
+	}
+	if colo == "SFO" {
+		if col := getHeaderCaseInsensitive(event.RequestHeaders, "cf-colo"); col != "" {
+			colo = strings.ToUpper(col)
+		}
+	}
+	if t.requestsByColo == nil {
+		t.requestsByColo = make(map[string]int64)
+	}
+	t.requestsByColo[colo]++
+
+	t.recentEvents = append([]domain.RequestLogEvent{event}, t.recentEvents...)
+	if len(t.recentEvents) > 10 {
+		t.recentEvents = t.recentEvents[:10]
+	}
+}
+
+func (t *appMetricsTracker) record(statusCode int, durationMs float64) {
+	t.recordEvent(domain.RequestLogEvent{
+		Timestamp:  time.Now().UTC(),
+		StatusCode: statusCode,
+		DurationMs: durationMs,
+	})
 }
 
 func (t *appMetricsTracker) snapshot() domain.ApplicationMetrics {
@@ -99,13 +163,39 @@ func (t *appMetricsTracker) snapshot() domain.ApplicationMetrics {
 		p99 = sorted[idx]
 	}
 
+	successRate := 100.0
+	errorRate := 0.0
+	if t.totalRequests > 0 {
+		successRate = (float64(t.status2xx) / float64(t.totalRequests)) * 100.0
+		errorRate = (float64(t.status4xx+t.status5xx) / float64(t.totalRequests)) * 100.0
+	}
+
+	countryMap := make(map[string]int64)
+	for k, v := range t.requestsByCountry {
+		countryMap[k] = v
+	}
+
+	coloMap := make(map[string]int64)
+	for k, v := range t.requestsByColo {
+		coloMap[k] = v
+	}
+
+	eventsCopy := make([]domain.RequestLogEvent, len(t.recentEvents))
+	copy(eventsCopy, t.recentEvents)
+
 	return domain.ApplicationMetrics{
-		TotalRequests: t.totalRequests,
-		Status2xx:     t.status2xx,
-		Status4xx:     t.status4xx,
-		Status5xx:     t.status5xx,
-		AvgDurationMs: avg,
-		P99DurationMs: p99,
+		TotalRequests:     t.totalRequests,
+		Status2xx:         t.status2xx,
+		Status4xx:         t.status4xx,
+		Status5xx:         t.status5xx,
+		AvgDurationMs:     avg,
+		P99DurationMs:     p99,
+		SuccessRate:       successRate,
+		ErrorRate:         errorRate,
+		RequestsByCountry: countryMap,
+		RequestsByColo:    coloMap,
+		LastInvokedAt:     t.lastInvokedAt,
+		RecentEvents:      eventsCopy,
 	}
 }
 
@@ -318,7 +408,7 @@ func (s *ApplicationService) RecordExecutionEvent(appID string, event domain.Req
 	}
 	s.metricsMu.Unlock()
 
-	tracker.record(event.StatusCode, event.DurationMs)
+	tracker.recordEvent(event)
 
 	s.subscribersMu.RLock()
 	if subs, ok := s.subscribers[appID]; ok {
@@ -423,9 +513,9 @@ func (s *ApplicationService) Invoke(ctx context.Context, appID string, method, p
 
 	start := time.Now()
 	clientIP := "127.0.0.1"
-	if ip, ok := headers["CF-Connecting-IP"]; ok && ip != "" {
+	if ip := getHeaderCaseInsensitive(headers, "CF-Connecting-IP"); ip != "" {
 		clientIP = ip
-	} else if xff, ok := headers["X-Forwarded-For"]; ok && xff != "" {
+	} else if xff := getHeaderCaseInsensitive(headers, "X-Forwarded-For"); xff != "" {
 		clientIP = strings.TrimSpace(strings.Split(xff, ",")[0])
 	}
 
@@ -465,6 +555,50 @@ func (s *ApplicationService) Invoke(ctx context.Context, appID string, method, p
 		outcome = "exception"
 	}
 
+	cfData := res.CF
+	if cfData == nil {
+		country := strings.ToUpper(getHeaderCaseInsensitive(headers, "cf-ipcountry"))
+		if country == "" {
+			country = "US"
+		}
+		colo := strings.ToUpper(getHeaderCaseInsensitive(headers, "cf-colo"))
+		if colo == "" {
+			switch country {
+			case "DE":
+				colo = "FRA"
+			case "GB":
+				colo = "LHR"
+			case "JP":
+				colo = "NRT"
+			case "AU":
+				colo = "SYD"
+			case "SG":
+				colo = "SIN"
+			default:
+				colo = "SFO"
+			}
+		}
+		city := getHeaderCaseInsensitive(headers, "cf-ipcity")
+		if city == "" {
+			switch country {
+			case "DE":
+				city = "Frankfurt"
+			case "GB":
+				city = "London"
+			case "JP":
+				city = "Tokyo"
+			default:
+				city = "San Francisco"
+			}
+		}
+		cfData = map[string]interface{}{
+			"country": country,
+			"colo":    colo,
+			"city":    city,
+			"asn":     13335,
+		}
+	}
+
 	event := domain.RequestLogEvent{
 		ID:              generateRayID(),
 		Timestamp:       time.Now().UTC(),
@@ -482,6 +616,7 @@ func (s *ApplicationService) Invoke(ctx context.Context, appID string, method, p
 		ResponseBody:    string(res.Body),
 		Logs:            res.Logs,
 		Exceptions:      res.Exceptions,
+		CF:              cfData,
 	}
 	s.RecordExecutionEvent(appID, event)
 
@@ -500,6 +635,7 @@ type WorkerExecutionResult struct {
 	Body       []byte                   `json:"body"`
 	Logs       []domain.ConsoleLogEntry `json:"logs"`
 	Exceptions []string                 `json:"exceptions"`
+	CF         map[string]interface{}   `json:"cf"`
 }
 
 type bindingDTO struct {
@@ -577,17 +713,13 @@ func RunWorkerBundleWithEnvAndBindings(
 	bindingsJSON, _ := json.Marshal(dtos)
 
 	clientIP := "127.0.0.1"
-	if ip, ok := headers["CF-Connecting-IP"]; ok && ip != "" {
+	if ip := getHeaderCaseInsensitive(headers, "CF-Connecting-IP"); ip != "" {
 		clientIP = ip
-	} else if ip, ok := headers["cf-connecting-ip"]; ok && ip != "" {
-		clientIP = ip
-	} else if xff, ok := headers["X-Forwarded-For"]; ok && xff != "" {
+	} else if xff := getHeaderCaseInsensitive(headers, "X-Forwarded-For"); xff != "" {
 		clientIP = strings.TrimSpace(strings.Split(xff, ",")[0])
 	}
 	rayID := generateRayID()
-	if r, ok := headers["CF-Ray"]; ok && r != "" {
-		rayID = r
-	} else if r, ok := headers["cf-ray"]; ok && r != "" {
+	if r := getHeaderCaseInsensitive(headers, "CF-Ray"); r != "" {
 		rayID = r
 	}
 
@@ -956,16 +1088,26 @@ if (method !== "GET" && method !== "HEAD" && reqBody) {
 }
 const request = new Request("http://localhost" + path, reqInit);
 
-const country = headers["cf-ipcountry"] || headers["CF-IPCountry"] || "US";
-const clientIPVal = clientIP || headers["cf-connecting-ip"] || headers["CF-Connecting-IP"] || "127.0.0.1";
+function getHeader(name) {
+    const target = name.toLowerCase();
+    for (const [k, v] of Object.entries(headers || {})) {
+        if (k.toLowerCase() === target) return v;
+    }
+    return undefined;
+}
+
+const country = (getHeader("cf-ipcountry") || "US").toUpperCase();
+const defaultColo = country === "DE" ? "FRA" : country === "GB" ? "LHR" : country === "JP" ? "NRT" : country === "AU" ? "SYD" : country === "SG" ? "SIN" : "SFO";
+const coloVal = (getHeader("cf-colo") || defaultColo).toUpperCase();
+const clientIPVal = clientIP || getHeader("cf-connecting-ip") || "127.0.0.1";
 request.cf = {
     asn: 13335,
     asOrganization: "Cloudflare, Inc.",
-    city: headers["cf-ipcity"] || "San Francisco",
-    colo: "SFO",
-    continent: "NA",
+    city: getHeader("cf-ipcity") || (country === "DE" ? "Frankfurt" : country === "GB" ? "London" : country === "JP" ? "Tokyo" : "San Francisco"),
+    colo: coloVal,
+    continent: (country === "GB" || country === "DE" || country === "FR") ? "EU" : (country === "JP" || country === "SG") ? "AS" : country === "AU" ? "OC" : "NA",
     country: country,
-    isEUCountry: country === "GB" || country === "DE" || country === "FR" ? "1" : "0",
+    isEUCountry: (country === "GB" || country === "DE" || country === "FR") ? "1" : "0",
     latitude: "37.7749",
     longitude: "-122.4194",
     metroCode: "807",
@@ -1048,7 +1190,8 @@ try {
         headers: respHeaders,
         body: respText,
         logs: logs,
-        exceptions: []
+        exceptions: [],
+        cf: request.cf
     }));
 } catch (err) {
     if (waitPromises.length > 0) {
@@ -1059,7 +1202,8 @@ try {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ error: err.message, stack: err.stack }),
         logs: logs,
-        exceptions: [err.stack || err.message]
+        exceptions: [err.stack || err.message],
+        cf: request.cf
     }));
 }
 `, b64Bundle, method, path, string(headersJSON), bodyStr, string(envJSON), string(bindingsJSON), baseURL, eventType, clientIP, rayID)
@@ -1081,6 +1225,12 @@ try {
 				Body:       []byte("Hello from Cubit! Running on celld isolate."),
 				Logs:       []domain.ConsoleLogEntry{},
 				Exceptions: []string{},
+				CF: map[string]interface{}{
+					"country": "US",
+					"colo":    "SFO",
+					"city":    "San Francisco",
+					"asn":     13335,
+				},
 			}, nil
 		}
 		return WorkerExecutionResult{
@@ -1089,6 +1239,12 @@ try {
 			Body:       []byte(fmt.Sprintf(`{"error":%q}`, errMsg)),
 			Logs:       []domain.ConsoleLogEntry{},
 			Exceptions: []string{errMsg},
+			CF: map[string]interface{}{
+				"country": "US",
+				"colo":    "SFO",
+				"city":    "San Francisco",
+				"asn":     13335,
+			},
 		}, nil
 	}
 
@@ -1098,6 +1254,7 @@ try {
 		Body       string                   `json:"body"`
 		Logs       []domain.ConsoleLogEntry `json:"logs"`
 		Exceptions []string                 `json:"exceptions"`
+		CF         map[string]interface{}   `json:"cf"`
 	}
 	if err := json.Unmarshal(out, &parsed); err != nil {
 		return WorkerExecutionResult{
@@ -1106,6 +1263,12 @@ try {
 			Body:       out,
 			Logs:       []domain.ConsoleLogEntry{},
 			Exceptions: []string{},
+			CF: map[string]interface{}{
+				"country": "US",
+				"colo":    "SFO",
+				"city":    "San Francisco",
+				"asn":     13335,
+			},
 		}, nil
 	}
 
@@ -1125,6 +1288,7 @@ try {
 		Body:       []byte(parsed.Body),
 		Logs:       parsed.Logs,
 		Exceptions: parsed.Exceptions,
+		CF:         parsed.CF,
 	}, nil
 }
 
