@@ -153,10 +153,22 @@ func TestApplicationHandler(t *testing.T) {
 				foundAPI := false
 				for _, evRaw := range envVars {
 					ev := evRaw.(map[string]interface{})
-					if ev["Key"] == "EXISTING_SECRET" && ev["IsSecret"] == true {
+					k := ev["key"]
+					if k == nil {
+						k = ev["Key"]
+					}
+					v := ev["value"]
+					if v == nil {
+						v = ev["Value"]
+					}
+					isSec := ev["isSecret"]
+					if isSec == nil {
+						isSec = ev["IsSecret"]
+					}
+					if k == "EXISTING_SECRET" && isSec == true {
 						foundSecret = true
 					}
-					if ev["Key"] == "API_URL" && ev["Value"] == "https://api.example.com" {
+					if k == "API_URL" && v == "https://api.example.com" {
 						foundAPI = true
 					}
 				}

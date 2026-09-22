@@ -56,16 +56,16 @@ const (
 
 // EnvironmentVariable represents a key-value pair injected into a Worker isolate.
 type EnvironmentVariable struct {
-	Key      string
-	Value    string
-	IsSecret bool
+	Key      string `json:"key"`
+	Value    string `json:"value"`
+	IsSecret bool   `json:"isSecret"`
 }
 
 // ResourceBinding represents a cloud binding to a Worker (e.g. KV, R2, D1, Service RPC).
 type ResourceBinding struct {
-	Type       BindingType
-	Name       string
-	ResourceID string
+	Type       BindingType `json:"type"`
+	Name       string      `json:"name"`
+	ResourceID string      `json:"resourceId"`
 }
 
 // ApplicationMetrics encapsulates real-time worker execution telemetry.

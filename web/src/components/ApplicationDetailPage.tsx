@@ -454,7 +454,13 @@ export function ApplicationDetailPage({
   };
 
   // Service Bindings State
-  const [bindings, setBindings] = useState<ResourceBinding[]>(app.bindings || []);
+  const normalizeBinding = (b: any): ResourceBinding => ({
+    type: (b?.type || b?.Type || 'kv_namespace') as ResourceBindingType,
+    name: b?.name || b?.Name || '',
+    resourceId: b?.resourceId || b?.ResourceId || b?.ResourceID || '',
+  });
+
+  const [bindings, setBindings] = useState<ResourceBinding[]>((app.bindings || []).map(normalizeBinding));
   const [isSavingBindings, setIsSavingBindings] = useState(false);
   const [showAddBindingModal, setShowAddBindingModal] = useState(false);
 
@@ -480,7 +486,7 @@ export function ApplicationDetailPage({
 
   // Sync bindings when app updates
   useEffect(() => {
-    setBindings(app.bindings || []);
+    setBindings((app.bindings || []).map(normalizeBinding));
   }, [app.bindings]);
 
   // Fetch fleet services and available resources
@@ -895,7 +901,7 @@ export function ApplicationDetailPage({
           setNodejsCompat(data.application.compatibilityFlags.includes('nodejs_compat'));
         }
         if (data.application.bindings) {
-          setBindings(data.application.bindings);
+          setBindings(data.application.bindings.map(normalizeBinding));
         }
       }
       onRefreshApps();
@@ -3597,7 +3603,8 @@ export function ApplicationDetailPage({
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                  {bindings.map((b, idx) => {
+                  {bindings.map((rawB, idx) => {
+                    const b = normalizeBinding(rawB);
                     const tabKey = getServiceTabForBindingType(b.type);
                     const label = getServiceLabelForBindingType(b.type);
                     return (
