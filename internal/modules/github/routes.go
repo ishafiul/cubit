@@ -12,6 +12,8 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		gh.GET("/manifest", h.GetManifest)
 		gh.GET("/manifest/callback", h.ManifestCallback)
 		gh.POST("/manifest/exchange", h.ExchangeManifest)
+		gh.GET("/sync", h.SyncInstallations)
+		gh.POST("/sync", h.SyncInstallations)
 		gh.GET("/repositories", h.ListRepositories)
 		gh.GET("/repositories/:owner/:repo/branches", h.ListBranches)
 		gh.POST("/webhook", h.HandleWebhook)

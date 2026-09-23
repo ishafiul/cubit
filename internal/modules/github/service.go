@@ -16,6 +16,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -111,6 +112,7 @@ func (s *Service) GenerateManifest(ctx context.Context, baseURL string, webhookU
 		"url":           baseURL,
 		"redirect_url":  callbackURL,
 		"callback_urls": []string{callbackURL},
+		"setup_url":     callbackURL,
 		"public":        false,
 		"default_permissions": map[string]string{
 			"contents":      "read",
@@ -164,6 +166,7 @@ func (s *Service) ExchangeManifestCode(ctx context.Context, code string) (*domai
 	var conversion struct {
 		ID            int64  `json:"id"`
 		Name          string `json:"name"`
+		Slug          string `json:"slug"`
 		ClientID      string `json:"client_id"`
 		ClientSecret  string `json:"client_secret"`
 		WebhookSecret string `json:"webhook_secret"`
@@ -177,6 +180,7 @@ func (s *Service) ExchangeManifestCode(ctx context.Context, code string) (*domai
 	settings := &domain.GitHubAppSettings{
 		AppID:         fmt.Sprintf("%d", conversion.ID),
 		AppName:       conversion.Name,
+		AppSlug:       conversion.Slug,
 		ClientID:      conversion.ClientID,
 		ClientSecret:  conversion.ClientSecret,
 		WebhookSecret: conversion.WebhookSecret,
@@ -235,13 +239,92 @@ func GenerateAppJWT(appID, privateKeyPEM string) (string, error) {
 	return unsignedToken + "." + b64Sig, nil
 }
 
+// DiscoverInstallations queries GitHub for all installations of this GitHub App using JWT authentication.
+// If settings.InstallationID is empty and installations exist, it auto-configures the first installation ID.
+func (s *Service) DiscoverInstallations(ctx context.Context) ([]domain.GitHubInstallation, error) {
+	settings, err := s.repo.GetSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !settings.IsConfigured || settings.AppID == "" || settings.PrivateKey == "" {
+		return []domain.GitHubInstallation{}, nil
+	}
+
+	jwt, err := GenerateAppJWT(settings.AppID, settings.PrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed generating app jwt: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/app/installations?per_page=100", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+jwt)
+	req.Header.Set("Accept", "application/vnd.github+json")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed contacting github installations API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("github error fetching installations (HTTP %d): %s", resp.StatusCode, string(body))
+	}
+
+	var rawList []struct {
+		ID      int64  `json:"id"`
+		HTMLURL string `json:"html_url"`
+		Account struct {
+			Login     string `json:"login"`
+			Type      string `json:"type"`
+			AvatarURL string `json:"avatar_url"`
+		} `json:"account"`
+		TargetID   int64  `json:"target_id"`
+		TargetType string `json:"target_type"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&rawList); err != nil {
+		return nil, fmt.Errorf("failed decoding installations response: %w", err)
+	}
+
+	var installations []domain.GitHubInstallation
+	for _, raw := range rawList {
+		installations = append(installations, domain.GitHubInstallation{
+			ID:            raw.ID,
+			AccountLogin:  raw.Account.Login,
+			AccountType:   raw.Account.Type,
+			AccountAvatar: raw.Account.AvatarURL,
+			HTMLURL:       raw.HTMLURL,
+			TargetID:      raw.TargetID,
+			TargetType:    raw.TargetType,
+		})
+	}
+
+	if settings.InstallationID == "" && len(installations) > 0 {
+		settings.InstallationID = strconv.FormatInt(installations[0].ID, 10)
+		_ = s.repo.SaveSettings(ctx, settings)
+	}
+
+	return installations, nil
+}
+
 // GetInstallationAccessToken retrieves a GitHub App installation token.
 func (s *Service) GetInstallationAccessToken(ctx context.Context, appSettings *domain.GitHubAppSettings) (string, error) {
 	if appSettings.InstallationID == "" {
 		if strings.HasPrefix(appSettings.ClientSecret, "ghp_") || strings.HasPrefix(appSettings.ClientSecret, "github_pat_") {
 			return appSettings.ClientSecret, nil
 		}
-		return "", errors.New("github installation ID not configured")
+
+		// Auto-discover installations if not yet bound
+		installs, err := s.DiscoverInstallations(ctx)
+		if err == nil && len(installs) > 0 {
+			appSettings.InstallationID = strconv.FormatInt(installs[0].ID, 10)
+		} else {
+			slug := appSettings.Slug()
+			return "", fmt.Errorf("GitHub App is not yet installed on any account or repository. Please install it at https://github.com/apps/%s/installations/new", slug)
+		}
 	}
 
 	jwt, err := GenerateAppJWT(appSettings.AppID, appSettings.PrivateKey)
@@ -289,7 +372,7 @@ func (s *Service) ListRepositories(ctx context.Context) ([]domain.GitHubReposito
 
 	token, err := s.GetInstallationAccessToken(ctx, settings)
 	if err != nil {
-		return nil, err
+		return []domain.GitHubRepository{}, nil
 	}
 
 	url := "https://api.github.com/installation/repositories?per_page=100"

@@ -12,6 +12,7 @@ import {
   Globe,
   AlertCircle,
   Key,
+  CheckCircle2,
 } from 'lucide-react';
 import { useDashboard } from '../../context/DashboardContext';
 
@@ -19,6 +20,8 @@ interface GitHubSettings {
   id: string;
   appId: string;
   appName: string;
+  appSlug?: string;
+  installUrl?: string;
   clientId: string;
   installationId: string;
   isConfigured: boolean;
@@ -44,6 +47,7 @@ export function GitHubSettingsView() {
   const [repositories, setRepositories] = useState<GitHubRepoItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingRepos, setIsLoadingRepos] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [manifestData, setManifestData] = useState<any>(null);
   const [copiedWebhook, setCopiedWebhook] = useState(false);
 
@@ -115,16 +119,61 @@ export function GitHubSettingsView() {
     }
   };
 
+  const handleSyncInstallations = async () => {
+    setIsSyncing(true);
+    try {
+      const res = await fetch('/api/v1/github/sync', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.settings) {
+          setSettings(data.settings);
+        }
+      }
+      await fetchRepositories();
+    } catch (_) {
+      // ignore
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   useEffect(() => {
     fetchSettings();
     fetchManifest();
+
+    // Auto-refresh when tab regains focus (e.g. after returning from GitHub)
+    const onFocus = () => {
+      fetchSettings();
+    };
+    window.addEventListener('focus', onFocus);
 
     const params = new URLSearchParams(window.location.search);
     const err = params.get('error');
     if (err) {
       setExchangeError(decodeURIComponent(err));
     }
+
+    return () => {
+      window.removeEventListener('focus', onFocus);
+    };
   }, []);
+
+  // While waiting for initial configuration, poll every 4 seconds
+  useEffect(() => {
+    if (settings?.isConfigured) return;
+    const interval = setInterval(() => {
+      fetch('/api/v1/github/settings')
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+          if (data && data.isConfigured) {
+            setSettings(data);
+            fetchRepositories();
+          }
+        })
+        .catch(() => {});
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [settings?.isConfigured]);
 
   const handleCopyWebhook = () => {
     if (!settings?.webhookUrl) return;
@@ -362,6 +411,55 @@ export function GitHubSettingsView() {
       ) : (
         /* Connected GitHub App View */
         <div className="space-y-6">
+          {/* Step 2 Installation Banner if no installation ID or no repositories */}
+          {(!settings.installationId || repositories.length === 0) && (
+            <div className="p-6 rounded-2xl bg-gradient-to-r from-purple-950/40 via-purple-900/20 to-zinc-900/60 border border-purple-500/40 space-y-4">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-purple-500/20 border border-purple-500/40 flex items-center justify-center text-purple-300">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-sm text-zinc-100">
+                      GitHub App Connected! Next: Install on Repositories
+                    </h4>
+                    <p className="text-xs text-zinc-400">
+                      Your GitHub App <span className="text-purple-300 font-mono font-semibold">{settings.appName}</span> is registered in Cubit.
+                    </p>
+                  </div>
+                </div>
+                <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-amber-950/80 text-amber-300 border border-amber-800 font-semibold">
+                  Action Required
+                </span>
+              </div>
+
+              <p className="text-xs text-zinc-300 leading-relaxed">
+                To view and deploy your Cloudflare Worker code repositories, install the app on your GitHub account or organization and select which repositories to grant access to.
+              </p>
+
+              <div className="flex items-center flex-wrap gap-3 pt-1">
+                <a
+                  href={settings.installUrl || `https://github.com/apps/${(settings.appSlug || settings.appName).toLowerCase().replace(/ /g, '-')}/installations/new`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition shadow-sm"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  Install on GitHub Repositories ➔
+                </a>
+                <button
+                  type="button"
+                  onClick={handleSyncInstallations}
+                  disabled={isSyncing}
+                  className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-zinc-700 bg-zinc-800/80 hover:bg-zinc-700 text-xs font-semibold text-zinc-200 transition"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-purple-400' : ''}`} />
+                  {isSyncing ? 'Checking...' : 'Check Installation Status'}
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Status & Configuration Card */}
           <div className="p-6 rounded-2xl border border-zinc-800/80 bg-zinc-900/30 space-y-5">
             <div className="flex items-center justify-between flex-wrap gap-4">
@@ -382,13 +480,13 @@ export function GitHubSettingsView() {
               <div className="flex items-center gap-3">
                 {settings.appName && (
                   <a
-                    href={`https://github.com/apps/${settings.appName}/installations/new`}
+                    href={settings.installUrl || `https://github.com/apps/${(settings.appSlug || settings.appName).toLowerCase().replace(/ /g, '-')}/installations/new`}
                     target="_blank"
                     rel="noreferrer"
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-purple-500/50 bg-purple-950/30 text-purple-300 hover:bg-purple-900/40 text-xs font-semibold transition"
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
-                    Install on More Repos
+                    Configure Repositories
                   </a>
                 )}
                 <button
@@ -476,7 +574,7 @@ export function GitHubSettingsView() {
                 </p>
                 {settings.appName && (
                   <a
-                    href={`https://github.com/apps/${settings.appName}/installations/new`}
+                    href={settings.installUrl || `https://github.com/apps/${(settings.appSlug || settings.appName).toLowerCase().replace(/ /g, '-')}/installations/new`}
                     target="_blank"
                     rel="noreferrer"
                     className="inline-flex items-center gap-1 text-xs text-purple-400 hover:underline"

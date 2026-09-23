@@ -92,7 +92,7 @@ func (h *Handler) GetManifest(c *gin.Context) {
 	c.JSON(http.StatusOK, manifest)
 }
 
-// ManifestCallback handles the redirect from GitHub after manifest registration.
+// ManifestCallback handles the redirect from GitHub after manifest registration or app installation.
 func (h *Handler) ManifestCallback(c *gin.Context) {
 	code := c.Query("code")
 	if code != "" {
@@ -102,7 +102,41 @@ func (h *Handler) ManifestCallback(c *gin.Context) {
 			return
 		}
 	}
+
+	installationID := c.Query("installation_id")
+	if installationID != "" {
+		settings, err := h.service.GetSettings(c.Request.Context())
+		if err == nil && settings.IsConfigured {
+			settings.InstallationID = installationID
+			_ = h.service.SaveSettings(c.Request.Context(), settings)
+		}
+	}
+
+	// In background or before redirect, discover and bind active installations
+	_, _ = h.service.DiscoverInstallations(c.Request.Context())
+
 	c.Redirect(http.StatusTemporaryRedirect, "/github")
+}
+
+// SyncInstallations queries GitHub to discover installations and automatically binds the first active installation.
+func (h *Handler) SyncInstallations(c *gin.Context) {
+	installs, err := h.service.DiscoverInstallations(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	settings, err := h.service.GetSettings(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	baseURL := h.getBaseURL(c)
+	c.JSON(http.StatusOK, gin.H{
+		"installations": installs,
+		"settings":      settings.MaskedSettings(baseURL),
+	})
 }
 
 // ExchangeManifest converts the manifest creation code from GitHub callback.

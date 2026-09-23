@@ -15,6 +15,7 @@ type GitHubAppSettings struct {
 	ID             string    `json:"id"`
 	AppID          string    `json:"appId"`
 	AppName        string    `json:"appName"`
+	AppSlug        string    `json:"appSlug"`
 	ClientID       string    `json:"clientId"`
 	ClientSecret   string    `json:"clientSecret"`
 	WebhookSecret  string    `json:"webhookSecret"`
@@ -25,25 +26,53 @@ type GitHubAppSettings struct {
 	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
+// Slug returns the URL-friendly slug for the GitHub App.
+func (s *GitHubAppSettings) Slug() string {
+	if s.AppSlug != "" {
+		return s.AppSlug
+	}
+	slug := strings.ToLower(strings.TrimSpace(s.AppName))
+	slug = strings.ReplaceAll(slug, " ", "-")
+	return slug
+}
+
 // MaskedSettings returns a sanitized version of settings safe to return in HTTP responses.
 func (s *GitHubAppSettings) MaskedSettings(baseURL string) map[string]any {
 	webhookURL := strings.TrimRight(baseURL, "/") + "/api/v1/github/webhook"
 	hasKey := strings.TrimSpace(s.PrivateKey) != ""
 	hasSecret := strings.TrimSpace(s.WebhookSecret) != ""
+	slug := s.Slug()
+	installURL := ""
+	if slug != "" {
+		installURL = "https://github.com/apps/" + slug + "/installations/new"
+	}
 
 	return map[string]any{
-		"id":             s.ID,
-		"appId":          s.AppID,
-		"appName":        s.AppName,
-		"clientId":       s.ClientID,
-		"installationId": s.InstallationID,
-		"isConfigured":   s.IsConfigured,
-		"hasPrivateKey":  hasKey,
+		"id":               s.ID,
+		"appId":            s.AppID,
+		"appName":          s.AppName,
+		"appSlug":          slug,
+		"installUrl":       installURL,
+		"clientId":         s.ClientID,
+		"installationId":   s.InstallationID,
+		"isConfigured":     s.IsConfigured,
+		"hasPrivateKey":    hasKey,
 		"hasWebhookSecret": hasSecret,
-		"webhookUrl":     webhookURL,
-		"createdAt":      s.CreatedAt,
-		"updatedAt":      s.UpdatedAt,
+		"webhookUrl":       webhookURL,
+		"createdAt":        s.CreatedAt,
+		"updatedAt":        s.UpdatedAt,
 	}
+}
+
+// GitHubInstallation represents an account/org installation of the GitHub App.
+type GitHubInstallation struct {
+	ID            int64  `json:"id"`
+	AccountLogin  string `json:"accountLogin"`
+	AccountType   string `json:"accountType"`
+	AccountAvatar string `json:"accountAvatar"`
+	HTMLURL       string `json:"htmlUrl"`
+	TargetID      int64  `json:"targetId"`
+	TargetType    string `json:"targetType"`
 }
 
 // GitHubRepository represents a repository accessible through GitHub App or token.
