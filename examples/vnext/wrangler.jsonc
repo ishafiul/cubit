@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "vnext-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-09-23",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  },
+  "vars": {
+    "APP_NAME": "vNext Cloudflare Worker",
+    "FRAMEWORK": "Next.js / OpenNext Edge",
+    "ENVIRONMENT": "production"
+  }
+}
