@@ -29,11 +29,11 @@ type RouteSyncer interface {
 
 // Service defines application business operations.
 type Service interface {
-	Create(ctx context.Context, name string, sourceType domain.SourceType, gitRepo, branch, inlineCode string, autoDeploy bool, envVars []domain.EnvironmentVariable, bindings []domain.ResourceBinding) (*domain.Application, error)
+	Create(ctx context.Context, name string, sourceType domain.SourceType, gitRepo, branch, rootDir, inlineCode string, autoDeploy bool, envVars []domain.EnvironmentVariable, bindings []domain.ResourceBinding) (*domain.Application, error)
 	GetByID(ctx context.Context, id string) (*domain.Application, error)
 	GetBySubdomain(ctx context.Context, subdomain string) (*domain.Application, error)
 	List(ctx context.Context) ([]*domain.Application, error)
-	Update(ctx context.Context, id, branch, inlineCode string, autoDeploy *bool, envVars []domain.EnvironmentVariable, bindings []domain.ResourceBinding, compatDate *string, compatFlags *[]string, memoryLimitMB *int, maxDurationMs *int) (*domain.Application, error)
+	Update(ctx context.Context, id, branch, rootDir, inlineCode string, autoDeploy *bool, envVars []domain.EnvironmentVariable, bindings []domain.ResourceBinding, compatDate *string, compatFlags *[]string, memoryLimitMB *int, maxDurationMs *int) (*domain.Application, error)
 	UpdateInlineCode(ctx context.Context, appID, newCode string) (*domain.Application, error)
 	Delete(ctx context.Context, id string) error
 	Invoke(ctx context.Context, appID string, method, path string, headers map[string]string, body []byte) (int, map[string]string, []byte, error)
@@ -239,13 +239,13 @@ func (s *ApplicationService) Create(
 	ctx context.Context,
 	name string,
 	sourceType domain.SourceType,
-	gitRepo, branch, inlineCode string,
+	gitRepo, branch, rootDir, inlineCode string,
 	autoDeploy bool,
 	envVars []domain.EnvironmentVariable,
 	bindings []domain.ResourceBinding,
 ) (*domain.Application, error) {
 	appID := generateID()
-	app, err := domain.NewApplicationWithSource(appID, name, sourceType, gitRepo, branch, inlineCode, envVars, bindings)
+	app, err := domain.NewApplicationWithSourceAndDir(appID, name, sourceType, gitRepo, branch, rootDir, inlineCode, envVars, bindings)
 	if err != nil {
 		return nil, err
 	}
@@ -277,10 +277,10 @@ func (s *ApplicationService) List(ctx context.Context) ([]*domain.Application, e
 	return s.repo.List(ctx)
 }
 
-// Update modifies branch, inline code, autoDeploy, env vars, bindings, and runtime settings.
+// Update modifies branch, rootDir, inline code, autoDeploy, env vars, bindings, and runtime settings.
 func (s *ApplicationService) Update(
 	ctx context.Context,
-	id, branch, inlineCode string,
+	id, branch, rootDir, inlineCode string,
 	autoDeploy *bool,
 	envVars []domain.EnvironmentVariable,
 	bindings []domain.ResourceBinding,
@@ -296,6 +296,9 @@ func (s *ApplicationService) Update(
 
 	if err := app.UpdateConfig(branch, inlineCode, envVars, bindings); err != nil {
 		return nil, err
+	}
+	if strings.TrimSpace(rootDir) != "" || rootDir == "." {
+		app.SetRootDir(rootDir)
 	}
 	if autoDeploy != nil {
 		app.AutoDeploy = *autoDeploy

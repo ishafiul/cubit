@@ -89,6 +89,7 @@ func TestApplicationService(t *testing.T) {
 				"https://github.com/example/worker",
 				"main",
 				"",
+				"",
 				true,
 				nil,
 				nil,
@@ -118,6 +119,7 @@ func TestApplicationService(t *testing.T) {
 				"https://github.com/example/worker",
 				"main",
 				"",
+				"",
 				true,
 				nil,
 				nil,
@@ -128,7 +130,7 @@ func TestApplicationService(t *testing.T) {
 			flags := []string{"nodejs_compat"}
 			mem := 256
 			dur := 100
-			updated, err := svc.Update(context.Background(), app.ID, "staging", "", &autoDeployFalse, nil, nil, &cDate, &flags, &mem, &dur)
+			updated, err := svc.Update(context.Background(), app.ID, "staging", "", "", &autoDeployFalse, nil, nil, &cDate, &flags, &mem, &dur)
 
 			t.Run("Then configuration and runtime settings are persisted", func(t *testing.T) {
 				if err != nil {
@@ -162,6 +164,7 @@ func TestApplicationService(t *testing.T) {
 				domain.SourceTypeInline,
 				"",
 				"main",
+				"",
 				"export default {}",
 				true,
 				nil,
@@ -199,6 +202,7 @@ func TestApplicationService(t *testing.T) {
 				domain.SourceTypeInline,
 				"",
 				"main",
+				"",
 				"export default {}",
 				true,
 				nil,
@@ -258,6 +262,7 @@ func TestApplicationService(t *testing.T) {
 				context.Background(),
 				"bundle-worker",
 				domain.SourceTypeInline,
+				"",
 				"",
 				"",
 				inlineCode,
@@ -326,6 +331,7 @@ export default {
 				domain.SourceTypeInline,
 				"",
 				"main",
+				"",
 				"export default {}",
 				false,
 				[]domain.EnvironmentVariable{
@@ -752,6 +758,7 @@ export default {
 				domain.SourceTypeInline,
 				"",
 				"main",
+				"",
 				"export default { async fetch() { return new Response('ok'); } };",
 				false,
 				nil,

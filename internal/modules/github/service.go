@@ -16,6 +16,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -499,6 +500,166 @@ func (s *Service) ListBranches(ctx context.Context, owner, repo string) ([]strin
 		names = append(names, "main")
 	}
 	return names, nil
+}
+
+func isIgnoredGitPath(p string) bool {
+	parts := strings.Split(p, "/")
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		if strings.HasPrefix(part, ".") ||
+			part == "node_modules" ||
+			part == "dist" ||
+			part == "build" ||
+			part == "vendor" ||
+			part == "coverage" ||
+			part == "target" ||
+			part == ".dart_tool" {
+			return true
+		}
+	}
+	return false
+}
+
+// ListFolders retrieves selectable directories in a repository branch and detects wrangler/package.json.
+func (s *Service) ListFolders(ctx context.Context, owner, repo, branch string) ([]domain.RepositoryFolder, error) {
+	fallback := []domain.RepositoryFolder{
+		{
+			Path:           "",
+			Name:           "Root (/)",
+			HasWrangler:    false,
+			HasPackageJSON: false,
+		},
+	}
+
+	settings, err := s.repo.GetSettings(ctx)
+	if err != nil {
+		return fallback, nil
+	}
+
+	token := ""
+	if settings.IsConfigured {
+		token, _ = s.GetInstallationAccessToken(ctx, settings)
+	}
+
+	if branch == "" {
+		branch = "main"
+	}
+
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/trees/%s?recursive=1", owner, repo, url.PathEscape(branch))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return fallback, nil
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "token "+token)
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return fallback, nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fallback, nil
+	}
+
+	var res struct {
+		SHA       string `json:"sha"`
+		Truncated bool   `json:"truncated"`
+		Tree      []struct {
+			Path string `json:"path"`
+			Mode string `json:"mode"`
+			Type string `json:"type"`
+			SHA  string `json:"sha"`
+		} `json:"tree"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return fallback, nil
+	}
+
+	dirMap := make(map[string]*domain.RepositoryFolder)
+	dirMap[""] = &domain.RepositoryFolder{
+		Path:           "",
+		Name:           "Root (/)",
+		HasWrangler:    false,
+		HasPackageJSON: false,
+	}
+
+	for _, item := range res.Tree {
+		if isIgnoredGitPath(item.Path) {
+			continue
+		}
+
+		if item.Type == "tree" {
+			cleanDir := domain.CleanRootDir(item.Path)
+			if cleanDir != "" {
+				if _, exists := dirMap[cleanDir]; !exists {
+					dirMap[cleanDir] = &domain.RepositoryFolder{
+						Path: cleanDir,
+						Name: cleanDir,
+					}
+				}
+			}
+		} else if item.Type == "blob" {
+			cleanPath := strings.Trim(item.Path, "/")
+			lastSlash := strings.LastIndex(cleanPath, "/")
+			var parentDir string
+			var fileName string
+			if lastSlash == -1 {
+				parentDir = ""
+				fileName = cleanPath
+			} else {
+				parentDir = domain.CleanRootDir(cleanPath[:lastSlash])
+				fileName = cleanPath[lastSlash+1:]
+			}
+
+			if _, exists := dirMap[parentDir]; !exists {
+				dirMap[parentDir] = &domain.RepositoryFolder{
+					Path: parentDir,
+					Name: parentDir,
+				}
+			}
+
+			lower := strings.ToLower(fileName)
+			if lower == "wrangler.json" || lower == "wrangler.jsonc" || lower == "wrangler.toml" {
+				dirMap[parentDir].HasWrangler = true
+			} else if lower == "package.json" {
+				dirMap[parentDir].HasPackageJSON = true
+			}
+		}
+	}
+
+	var list []domain.RepositoryFolder
+	for path, folder := range dirMap {
+		if path == "" {
+			continue
+		}
+		depth := strings.Count(path, "/") + 1
+		if folder.HasWrangler || folder.HasPackageJSON || depth <= 3 {
+			list = append(list, *folder)
+		}
+	}
+
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].HasWrangler != list[j].HasWrangler {
+			return list[i].HasWrangler
+		}
+		if list[i].HasPackageJSON != list[j].HasPackageJSON {
+			return list[i].HasPackageJSON
+		}
+		return list[i].Path < list[j].Path
+	})
+
+	finalList := make([]domain.RepositoryFolder, 0, len(list)+1)
+	finalList = append(finalList, *dirMap[""])
+	finalList = append(finalList, list...)
+
+	return finalList, nil
 }
 
 // WebhookResult represents the outcome of processing a GitHub webhook.

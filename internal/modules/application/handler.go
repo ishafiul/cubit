@@ -38,6 +38,7 @@ type createApplicationRequest struct {
 	SourceType *string       `json:"sourceType,omitempty"`
 	GitRepo    *string       `json:"gitRepo,omitempty"`
 	Branch     *string       `json:"branch,omitempty"`
+	RootDir    *string       `json:"rootDir,omitempty"`
 	InlineCode *string       `json:"inlineCode,omitempty"`
 	AutoDeploy *bool         `json:"autoDeploy,omitempty"`
 	EnvVars    *[]envVarReq  `json:"envVars,omitempty"`
@@ -46,6 +47,7 @@ type createApplicationRequest struct {
 
 type updateApplicationRequest struct {
 	Branch             *string       `json:"branch,omitempty"`
+	RootDir            *string       `json:"rootDir,omitempty"`
 	InlineCode         *string       `json:"inlineCode,omitempty"`
 	AutoDeploy         *bool         `json:"autoDeploy,omitempty"`
 	EnvVars            *[]envVarReq  `json:"envVars,omitempty"`
@@ -92,6 +94,7 @@ type applicationResponse struct {
 	TestURL            string                       `json:"testUrl"`
 	GitRepo            *string                      `json:"gitRepo,omitempty"`
 	Branch             string                       `json:"branch"`
+	RootDir            string                       `json:"rootDir"`
 	InlineCode         *string                      `json:"inlineCode,omitempty"`
 	AutoDeploy         bool                         `json:"autoDeploy"`
 	Status             string                       `json:"status"`
@@ -159,6 +162,7 @@ func toResponse(app *domain.Application) applicationResponse {
 		TestURL:            app.DefaultTestURL(8000),
 		GitRepo:            gitRepo,
 		Branch:             app.Branch,
+		RootDir:            app.RootDir,
 		InlineCode:         inlineCode,
 		AutoDeploy:         app.AutoDeploy,
 		Status:             string(app.Status),
@@ -248,7 +252,12 @@ func (h *Handler) Create(c *gin.Context) {
 		}
 	}
 
-	app, err := h.service.Create(c.Request.Context(), req.Name, sourceType, gitRepo, branch, inlineCode, autoDeploy, envVars, bindings)
+	rootDir := ""
+	if req.RootDir != nil {
+		rootDir = *req.RootDir
+	}
+
+	app, err := h.service.Create(c.Request.Context(), req.Name, sourceType, gitRepo, branch, rootDir, inlineCode, autoDeploy, envVars, bindings)
 	if err != nil {
 		respondError(c, err)
 		return
@@ -280,6 +289,10 @@ func (h *Handler) Update(c *gin.Context) {
 	branch := ""
 	if req.Branch != nil {
 		branch = *req.Branch
+	}
+	rootDir := ""
+	if req.RootDir != nil {
+		rootDir = *req.RootDir
 	}
 	inlineCode := ""
 	if req.InlineCode != nil {
@@ -320,6 +333,7 @@ func (h *Handler) Update(c *gin.Context) {
 		c.Request.Context(),
 		id,
 		branch,
+		rootDir,
 		inlineCode,
 		req.AutoDeploy,
 		envVars,

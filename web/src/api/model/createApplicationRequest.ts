@@ -14,6 +14,7 @@ export interface CreateApplicationRequest {
   sourceType?: SourceType;
   gitRepo?: string;
   branch?: string;
+  rootDir?: string;
   inlineCode?: string;
   envVars?: EnvironmentVariable[];
   bindings?: ResourceBinding[];

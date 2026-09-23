@@ -58,7 +58,7 @@ export interface DashboardContextType {
   logs: LogEntry[];
 
   // Form actions
-  handleCreateApp: (e: React.FormEvent, data: { name: string; sourceType: 'inline' | 'git'; gitRepo: string; gitBranch: string; inlineCode: string; autoDeploy: boolean }) => Promise<string | undefined>;
+  handleCreateApp: (e: React.FormEvent, data: { name: string; sourceType: 'inline' | 'git'; gitRepo: string; gitBranch: string; rootDir?: string; inlineCode: string; autoDeploy: boolean }) => Promise<string | undefined>;
   handleUpgradeCelld: (targetVersion: string) => Promise<void>;
   handleCreateDomain: (appId: string, host: string) => Promise<void>;
   handleCreateNode: (data: { name: string; ipAddress: string; workerPort?: number; internalPort?: number }) => Promise<void>;
@@ -217,11 +217,11 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
   const handleCreateApp = async (
     e: React.FormEvent,
-    data: { name: string; sourceType: 'inline' | 'git'; gitRepo: string; gitBranch: string; inlineCode: string; autoDeploy: boolean }
+    data: { name: string; sourceType: 'inline' | 'git'; gitRepo: string; gitBranch: string; rootDir?: string; inlineCode: string; autoDeploy: boolean }
   ) => {
     e.preventDefault();
     const payload = data.sourceType === 'git'
-      ? { name: data.name, sourceType: 'git' as const, gitRepo: data.gitRepo, branch: data.gitBranch || 'main' }
+      ? { name: data.name, sourceType: 'git' as const, gitRepo: data.gitRepo, branch: data.gitBranch || 'main', rootDir: data.rootDir || '' }
       : { name: data.name, sourceType: 'inline' as const, inlineCode: data.inlineCode || undefined };
 
     const res = await createApplicationMutation.mutateAsync({

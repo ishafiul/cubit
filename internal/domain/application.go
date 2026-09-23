@@ -120,6 +120,7 @@ type Application struct {
 	Subdomain          string
 	GitRepo            string
 	Branch             string
+	RootDir            string
 	InlineCode         string
 	AutoDeploy         bool
 	Status             ApplicationStatus
@@ -132,6 +133,18 @@ type Application struct {
 	MaxDurationMs      int
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
+}
+
+// CleanRootDir normalizes a relative directory path.
+func CleanRootDir(dir string) string {
+	d := strings.TrimSpace(dir)
+	d = strings.TrimPrefix(d, "/")
+	d = strings.TrimPrefix(d, "./")
+	d = strings.TrimSuffix(d, "/")
+	if d == "." {
+		return ""
+	}
+	return d
 }
 
 // SanitizeSubdomain converts an application name into a valid RFC-1123 subdomain label.
@@ -165,6 +178,17 @@ func NewApplicationWithSource(
 	id, name string,
 	sourceType SourceType,
 	gitRepo, branch, inlineCode string,
+	envVars []EnvironmentVariable,
+	bindings []ResourceBinding,
+) (*Application, error) {
+	return NewApplicationWithSourceAndDir(id, name, sourceType, gitRepo, branch, "", inlineCode, envVars, bindings)
+}
+
+// NewApplicationWithSourceAndDir constructs and validates an Application with explicit source type and root directory.
+func NewApplicationWithSourceAndDir(
+	id, name string,
+	sourceType SourceType,
+	gitRepo, branch, rootDir, inlineCode string,
 	envVars []EnvironmentVariable,
 	bindings []ResourceBinding,
 ) (*Application, error) {
@@ -210,6 +234,7 @@ func NewApplicationWithSource(
 		Subdomain:          SanitizeSubdomain(name),
 		GitRepo:            gitRepo,
 		Branch:             branch,
+		RootDir:            CleanRootDir(rootDir),
 		InlineCode:         inlineCode,
 		AutoDeploy:         true,
 		Status:             AppStatusCreated,
@@ -222,6 +247,12 @@ func NewApplicationWithSource(
 		CreatedAt:          now,
 		UpdatedAt:          now,
 	}, nil
+}
+
+// SetRootDir updates the application root directory.
+func (a *Application) SetRootDir(dir string) {
+	a.RootDir = CleanRootDir(dir)
+	a.UpdatedAt = time.Now().UTC()
 }
 
 // SetActiveDeployment updates the running deployment for the application.

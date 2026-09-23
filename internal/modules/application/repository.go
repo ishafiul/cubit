@@ -66,11 +66,11 @@ func (r *SQLiteRepository) Save(ctx context.Context, app *domain.Application) er
 	}
 
 	query := `
-		INSERT INTO applications (id, name, source_type, subdomain, git_repo, branch, inline_code, auto_deploy, status, env_vars, bindings, active_deployment_id, compatibility_date, compatibility_flags, memory_limit_mb, max_duration_ms, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO applications (id, name, source_type, subdomain, git_repo, branch, root_dir, inline_code, auto_deploy, status, env_vars, bindings, active_deployment_id, compatibility_date, compatibility_flags, memory_limit_mb, max_duration_ms, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	_, err := r.db.ExecContext(ctx, query,
-		app.ID, app.Name, sourceType, subdomain, app.GitRepo, app.Branch, app.InlineCode, autoDeployInt, string(app.Status),
+		app.ID, app.Name, sourceType, subdomain, app.GitRepo, app.Branch, app.RootDir, app.InlineCode, autoDeployInt, string(app.Status),
 		string(envVarsJSON), string(bindingsJSON), app.ActiveDeploymentID,
 		compatDate, string(compatFlagsJSON), memLimit, maxDuration,
 		app.CreatedAt.Format(time.RFC3339), app.UpdatedAt.Format(time.RFC3339),
@@ -81,7 +81,7 @@ func (r *SQLiteRepository) Save(ctx context.Context, app *domain.Application) er
 // GetByID retrieves an application by its ID.
 func (r *SQLiteRepository) GetByID(ctx context.Context, id string) (*domain.Application, error) {
 	query := `
-		SELECT id, name, source_type, subdomain, git_repo, branch, inline_code, COALESCE(auto_deploy, 1), status, env_vars, bindings, active_deployment_id,
+		SELECT id, name, source_type, subdomain, git_repo, branch, COALESCE(root_dir, ''), inline_code, COALESCE(auto_deploy, 1), status, env_vars, bindings, active_deployment_id,
 		       COALESCE(compatibility_date, '2024-09-23'), COALESCE(compatibility_flags, '[]'), COALESCE(memory_limit_mb, 128), COALESCE(max_duration_ms, 50),
 		       created_at, updated_at
 		FROM applications WHERE id = ?
@@ -97,7 +97,7 @@ func (r *SQLiteRepository) GetByID(ctx context.Context, id string) (*domain.Appl
 	)
 
 	err := row.Scan(
-		&app.ID, &app.Name, &sourceTypeStr, &subdomainStr, &gitRepoNull, &app.Branch, &inlineCodeNull, &autoDeployInt, &statusStr,
+		&app.ID, &app.Name, &sourceTypeStr, &subdomainStr, &gitRepoNull, &app.Branch, &app.RootDir, &inlineCodeNull, &autoDeployInt, &statusStr,
 		&envJSON, &bindingsJSON, &activeDepID,
 		&compatDateStr, &compatFlagsJSON, &memLimitInt, &maxDurationInt,
 		&createdAtStr, &updatedAtStr,
@@ -137,7 +137,7 @@ func (r *SQLiteRepository) GetByID(ctx context.Context, id string) (*domain.Appl
 // GetBySubdomain retrieves an application by its subdomain or name.
 func (r *SQLiteRepository) GetBySubdomain(ctx context.Context, subdomain string) (*domain.Application, error) {
 	query := `
-		SELECT id, name, source_type, subdomain, git_repo, branch, inline_code, COALESCE(auto_deploy, 1), status, env_vars, bindings, active_deployment_id,
+		SELECT id, name, source_type, subdomain, git_repo, branch, COALESCE(root_dir, ''), inline_code, COALESCE(auto_deploy, 1), status, env_vars, bindings, active_deployment_id,
 		       COALESCE(compatibility_date, '2024-09-23'), COALESCE(compatibility_flags, '[]'), COALESCE(memory_limit_mb, 128), COALESCE(max_duration_ms, 50),
 		       created_at, updated_at
 		FROM applications WHERE subdomain = ? OR name = ?
@@ -153,7 +153,7 @@ func (r *SQLiteRepository) GetBySubdomain(ctx context.Context, subdomain string)
 	)
 
 	err := row.Scan(
-		&app.ID, &app.Name, &sourceTypeStr, &subdomainStr, &gitRepoNull, &app.Branch, &inlineCodeNull, &autoDeployInt, &statusStr,
+		&app.ID, &app.Name, &sourceTypeStr, &subdomainStr, &gitRepoNull, &app.Branch, &app.RootDir, &inlineCodeNull, &autoDeployInt, &statusStr,
 		&envJSON, &bindingsJSON, &activeDepID,
 		&compatDateStr, &compatFlagsJSON, &memLimitInt, &maxDurationInt,
 		&createdAtStr, &updatedAtStr,
@@ -193,7 +193,7 @@ func (r *SQLiteRepository) GetBySubdomain(ctx context.Context, subdomain string)
 // List retrieves all registered applications.
 func (r *SQLiteRepository) List(ctx context.Context) ([]*domain.Application, error) {
 	query := `
-		SELECT id, name, source_type, subdomain, git_repo, branch, inline_code, COALESCE(auto_deploy, 1), status, env_vars, bindings, active_deployment_id,
+		SELECT id, name, source_type, subdomain, git_repo, branch, COALESCE(root_dir, ''), inline_code, COALESCE(auto_deploy, 1), status, env_vars, bindings, active_deployment_id,
 		       COALESCE(compatibility_date, '2024-09-23'), COALESCE(compatibility_flags, '[]'), COALESCE(memory_limit_mb, 128), COALESCE(max_duration_ms, 50),
 		       created_at, updated_at
 		FROM applications ORDER BY created_at DESC
@@ -215,7 +215,7 @@ func (r *SQLiteRepository) List(ctx context.Context) ([]*domain.Application, err
 		)
 
 		err := rows.Scan(
-			&app.ID, &app.Name, &sourceTypeStr, &subdomainStr, &gitRepoNull, &app.Branch, &inlineCodeNull, &autoDeployInt, &statusStr,
+			&app.ID, &app.Name, &sourceTypeStr, &subdomainStr, &gitRepoNull, &app.Branch, &app.RootDir, &inlineCodeNull, &autoDeployInt, &statusStr,
 			&envJSON, &bindingsJSON, &activeDepID,
 			&compatDateStr, &compatFlagsJSON, &memLimitInt, &maxDurationInt,
 			&createdAtStr, &updatedAtStr,
@@ -315,12 +315,12 @@ func (r *SQLiteRepository) Update(ctx context.Context, app *domain.Application) 
 
 	query := `
 		UPDATE applications
-		SET name = ?, source_type = ?, subdomain = ?, git_repo = ?, branch = ?, inline_code = ?, auto_deploy = ?, status = ?,
+		SET name = ?, source_type = ?, subdomain = ?, git_repo = ?, branch = ?, root_dir = ?, inline_code = ?, auto_deploy = ?, status = ?,
 		    env_vars = ?, bindings = ?, active_deployment_id = ?, compatibility_date = ?, compatibility_flags = ?, memory_limit_mb = ?, max_duration_ms = ?, updated_at = ?
 		WHERE id = ?
 	`
 	res, err := r.db.ExecContext(ctx, query,
-		app.Name, sourceType, subdomain, app.GitRepo, app.Branch, app.InlineCode, autoDeployInt, string(app.Status),
+		app.Name, sourceType, subdomain, app.GitRepo, app.Branch, app.RootDir, app.InlineCode, autoDeployInt, string(app.Status),
 		string(envVarsJSON), string(bindingsJSON), app.ActiveDeploymentID,
 		compatDate, string(compatFlagsJSON), memLimit, maxDuration,
 		app.UpdatedAt.Format(time.RFC3339), app.ID,

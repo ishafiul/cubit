@@ -16,6 +16,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		gh.POST("/sync", h.SyncInstallations)
 		gh.GET("/repositories", h.ListRepositories)
 		gh.GET("/repositories/:owner/:repo/branches", h.ListBranches)
+		gh.GET("/repositories/:owner/:repo/folders", h.ListFolders)
 		gh.POST("/webhook", h.HandleWebhook)
 	}
 }

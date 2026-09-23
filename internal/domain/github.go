@@ -75,6 +75,14 @@ type GitHubInstallation struct {
 	TargetType    string `json:"targetType"`
 }
 
+// RepositoryFolder represents a selectable folder inside a Git repository.
+type RepositoryFolder struct {
+	Path           string `json:"path"`
+	Name           string `json:"name"`
+	HasWrangler    bool   `json:"hasWrangler"`
+	HasPackageJSON bool   `json:"hasPackageJson"`
+}
+
 // GitHubRepository represents a repository accessible through GitHub App or token.
 type GitHubRepository struct {
 	ID            int64  `json:"id"`

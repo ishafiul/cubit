@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS applications (
     subdomain TEXT NOT NULL DEFAULT '',
     git_repo TEXT,
     branch TEXT NOT NULL,
+    root_dir TEXT NOT NULL DEFAULT '',
     inline_code TEXT,
     status TEXT NOT NULL,
     env_vars TEXT,

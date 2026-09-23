@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Zap, GitBranch, Globe, RefreshCw, AlertCircle, ExternalLink } from 'lucide-react';
+import { X, Zap, GitBranch, Globe, RefreshCw, AlertCircle, ExternalLink, Folder } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
 import { useDashboard } from '../../context/DashboardContext';
 
@@ -13,6 +13,13 @@ interface GitHubRepoItem {
   htmlUrl: string;
 }
 
+interface GitHubFolderItem {
+  path: string;
+  name: string;
+  hasWrangler: boolean;
+  hasPackageJson: boolean;
+}
+
 export function NewAppModal() {
   const navigate = useNavigate();
   const { showNewAppModal, setShowNewAppModal, handleCreateApp } = useDashboard();
@@ -21,6 +28,7 @@ export function NewAppModal() {
   const [sourceType, setSourceType] = useState<'inline' | 'github' | 'git'>('inline');
   const [gitRepo, setGitRepo] = useState('');
   const [gitBranch, setGitBranch] = useState('main');
+  const [rootDir, setRootDir] = useState('');
   const [autoDeploy, setAutoDeploy] = useState(true);
   const [inlineCode, setInlineCode] = useState(
 `export default {
@@ -38,6 +46,10 @@ export function NewAppModal() {
   const [isLoadingRepos, setIsLoadingRepos] = useState(false);
   const [availableBranches, setAvailableBranches] = useState<string[]>(['main']);
   const [isLoadingBranches, setIsLoadingBranches] = useState(false);
+  const [availableFolders, setAvailableFolders] = useState<GitHubFolderItem[]>([
+    { path: '', name: 'Root (/)', hasWrangler: false, hasPackageJson: false },
+  ]);
+  const [isLoadingFolders, setIsLoadingFolders] = useState(false);
 
   useEffect(() => {
     if (showNewAppModal) {
@@ -71,6 +83,32 @@ export function NewAppModal() {
     }
   };
 
+  const loadFolders = async (owner: string, repo: string, branch: string) => {
+    setIsLoadingFolders(true);
+    try {
+      const res = await fetch(`/api/v1/github/repositories/${owner}/${repo}/folders?branch=${encodeURIComponent(branch)}`);
+      if (res.ok) {
+        const folders: GitHubFolderItem[] = await res.json();
+        if (Array.isArray(folders) && folders.length > 0) {
+          setAvailableFolders(folders);
+          const wranglerFolder = folders.find(f => f.hasWrangler);
+          if (wranglerFolder) {
+            setRootDir(wranglerFolder.path);
+          } else {
+            setRootDir(folders[0].path);
+          }
+          return;
+        }
+      }
+    } catch (_) {
+      // fallback
+    } finally {
+      setIsLoadingFolders(false);
+    }
+    setAvailableFolders([{ path: '', name: 'Root (/)', hasWrangler: false, hasPackageJson: false }]);
+    setRootDir('');
+  };
+
   const handleSelectGitHubRepo = async (fullName: string) => {
     const selected = gitHubRepos.find(r => r.fullName === fullName);
     if (!selected) return;
@@ -82,27 +120,42 @@ export function NewAppModal() {
     const defBranch = selected.defaultBranch || 'main';
     setGitBranch(defBranch);
 
-    // Fetch branches for this repository
+    // Fetch branches and folders for this repository
     const parts = selected.fullName.split('/');
     if (parts.length === 2) {
       setIsLoadingBranches(true);
       try {
         const res = await fetch(`/api/v1/github/repositories/${parts[0]}/${parts[1]}/branches`);
+        let chosenBranch = defBranch;
         if (res.ok) {
           const branches = await res.json();
           if (Array.isArray(branches) && branches.length > 0) {
             setAvailableBranches(branches);
             if (branches.includes(defBranch)) {
-              setGitBranch(defBranch);
+              chosenBranch = defBranch;
             } else {
-              setGitBranch(branches[0]);
+              chosenBranch = branches[0];
             }
           }
         }
+        setGitBranch(chosenBranch);
+        loadFolders(parts[0], parts[1], chosenBranch);
       } catch (_) {
         setAvailableBranches([defBranch]);
+        loadFolders(parts[0], parts[1], defBranch);
       } finally {
         setIsLoadingBranches(false);
+      }
+    }
+  };
+
+  const handleBranchChange = (newBranch: string) => {
+    setGitBranch(newBranch);
+    const selected = gitHubRepos.find(r => r.cloneUrl === gitRepo || `https://github.com/${r.fullName}.git` === gitRepo);
+    if (selected) {
+      const parts = selected.fullName.split('/');
+      if (parts.length === 2) {
+        loadFolders(parts[0], parts[1], newBranch);
       }
     }
   };
@@ -116,6 +169,7 @@ export function NewAppModal() {
       sourceType: actualSourceType,
       gitRepo,
       gitBranch,
+      rootDir,
       inlineCode,
       autoDeploy,
     });
@@ -275,7 +329,7 @@ export function NewAppModal() {
                     ) : availableBranches.length > 1 ? (
                       <select
                         value={gitBranch}
-                        onChange={e => setGitBranch(e.target.value)}
+                        onChange={e => handleBranchChange(e.target.value)}
                         className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-purple-500 font-mono"
                       >
                         {availableBranches.map(b => (
@@ -286,10 +340,55 @@ export function NewAppModal() {
                       <input
                         type="text"
                         value={gitBranch}
-                        onChange={e => setGitBranch(e.target.value)}
+                        onChange={e => handleBranchChange(e.target.value)}
                         className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-purple-500 font-mono"
                       />
                     )}
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
+                        <Folder className="w-3.5 h-3.5 text-purple-400" />
+                        Worker Root Directory / Subfolder
+                      </label>
+                      {availableFolders.length > 1 && (
+                        <span className="text-[10px] text-purple-400 font-medium">
+                          {availableFolders.some(f => f.hasWrangler) ? '⚡ Worker detected' : `${availableFolders.length} folders discovered`}
+                        </span>
+                      )}
+                    </div>
+                    {isLoadingFolders ? (
+                      <div className="text-xs text-zinc-500 p-2">Scanning directories and wrangler configs...</div>
+                    ) : (
+                      <div className="space-y-2">
+                        <select
+                          value={rootDir}
+                          onChange={e => setRootDir(e.target.value)}
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-purple-500 font-mono"
+                        >
+                          {availableFolders.map(f => (
+                            <option key={f.path} value={f.path}>
+                              {f.path === '' ? '/ (Repository Root)' : f.path}
+                              {f.hasWrangler ? ' ⚡ (wrangler config)' : f.hasPackageJson ? ' 📦 (package.json)' : ''}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            placeholder="Custom subfolder path (e.g. packages/worker)"
+                            value={rootDir}
+                            onChange={e => setRootDir(e.target.value)}
+                            className="flex-1 bg-zinc-950/60 border border-zinc-800/80 rounded-md px-2.5 py-1.5 text-[11px] text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-purple-500 font-mono"
+                          />
+                          <span className="text-[10px] text-zinc-500 whitespace-nowrap">or custom path</span>
+                        </div>
+                      </div>
+                    )}
+                    <p className="text-[10px] text-zinc-500 mt-1">
+                      For monorepos, choose the subfolder containing your worker's <code className="text-zinc-400">wrangler.json</code> or source files.
+                    </p>
                   </div>
 
                   <div className="p-3 rounded-xl bg-purple-950/20 border border-purple-900/40 space-y-2">
@@ -336,6 +435,20 @@ export function NewAppModal() {
                   onChange={e => setGitBranch(e.target.value)}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-500 font-mono"
                 />
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-zinc-400 mb-1 block">Root Directory / Subfolder (Optional)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. packages/worker or leave empty for repository root"
+                  value={rootDir}
+                  onChange={e => setRootDir(e.target.value)}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-emerald-500 font-mono"
+                />
+                <p className="text-[10px] text-zinc-500 mt-1">
+                  For monorepos, specify the relative path to the worker folder.
+                </p>
               </div>
 
               <label className="flex items-center gap-2.5 text-xs text-zinc-400 cursor-pointer select-none">

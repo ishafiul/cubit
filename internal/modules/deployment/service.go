@@ -441,6 +441,27 @@ func (s *DeploymentService) buildGitWorker(ctx context.Context, app *domain.Appl
 		return []byte(domain.DefaultHelloWorldWorker)
 	}
 
+	workDir := repoPath
+	if cleanRoot := domain.CleanRootDir(app.RootDir); cleanRoot != "" {
+		targetDir := filepath.Join(repoPath, cleanRoot)
+		if stat, err := os.Stat(targetDir); err == nil && stat.IsDir() {
+			workDir = targetDir
+			_ = s.repo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
+				Timestamp: time.Now().UTC(),
+				Step:      domain.LogStepGitClone,
+				Message:   fmt.Sprintf("Using configured root directory: %s", cleanRoot),
+				Level:     domain.LogLevelInfo,
+			})
+		} else {
+			_ = s.repo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
+				Timestamp: time.Now().UTC(),
+				Step:      domain.LogStepGitClone,
+				Message:   fmt.Sprintf("Configured root directory '%s' not found, falling back to repository root", cleanRoot),
+				Level:     domain.LogLevelWarn,
+			})
+		}
+	}
+
 	// 2. Scan for wrangler.json, wrangler.jsonc, or wrangler.toml
 	candidates := []string{
 		"wrangler.json",
@@ -453,7 +474,7 @@ func (s *DeploymentService) buildGitWorker(ctx context.Context, app *domain.Appl
 	var foundFile string
 	var wranglerData []byte
 	for _, c := range candidates {
-		fp := filepath.Join(repoPath, c)
+		fp := filepath.Join(workDir, c)
 		if data, err := os.ReadFile(fp); err == nil && len(data) > 0 {
 			foundFile = c
 			wranglerData = data
@@ -495,7 +516,7 @@ func (s *DeploymentService) buildGitWorker(ctx context.Context, app *domain.Appl
 			"index.js",
 		}
 		for _, ec := range entryCandidates {
-			if _, err := os.Stat(filepath.Join(repoPath, ec)); err == nil {
+			if _, err := os.Stat(filepath.Join(workDir, ec)); err == nil {
 				entrypoint = ec
 				break
 			}
@@ -503,14 +524,14 @@ func (s *DeploymentService) buildGitWorker(ctx context.Context, app *domain.Appl
 	}
 
 	if entrypoint != "" {
-		entryPath := filepath.Join(repoPath, entrypoint)
-		outPath := filepath.Join(repoPath, "dist-worker.js")
+		entryPath := filepath.Join(workDir, entrypoint)
+		outPath := filepath.Join(workDir, "dist-worker.js")
 
 		buildCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
 
 		cmd := exec.CommandContext(buildCtx, "npx", "--yes", "esbuild", entryPath, "--bundle", "--format=esm", "--target=es2022", "--outfile="+outPath)
-		cmd.Dir = repoPath
+		cmd.Dir = workDir
 		if out, err := cmd.CombinedOutput(); err == nil {
 			if bundled, err := os.ReadFile(outPath); err == nil && len(bundled) > 0 {
 				_ = s.repo.AppendLog(ctx, dep.ID, domain.DeploymentLog{

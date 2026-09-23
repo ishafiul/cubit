@@ -91,7 +91,9 @@ export function ApplicationCard({
           {app.sourceType === 'inline' ? (
             <p className="text-xs text-zinc-500 font-mono">Standalone Cloudflare Worker template</p>
           ) : (
-            <p className="text-xs text-zinc-400 font-mono">{app.gitRepo} ({app.branch || 'main'})</p>
+            <p className="text-xs text-zinc-400 font-mono">
+              {app.gitRepo} ({app.branch || 'main'}{app.rootDir ? ` • ${app.rootDir}` : ''})
+            </p>
           )}
 
           {/* Subdomain / Test URL Badge */}

@@ -192,6 +192,25 @@ func (h *Handler) ListBranches(c *gin.Context) {
 	c.JSON(http.StatusOK, branches)
 }
 
+// ListFolders returns directories in a repository branch with wrangler detection.
+func (h *Handler) ListFolders(c *gin.Context) {
+	owner := c.Param("owner")
+	repo := c.Param("repo")
+	branch := c.Query("branch")
+	if owner == "" || repo == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "owner and repo parameters required"})
+		return
+	}
+
+	folders, err := h.service.ListFolders(c.Request.Context(), owner, repo, branch)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, folders)
+}
+
 // HandleWebhook receives push and ping webhooks from GitHub.
 func (h *Handler) HandleWebhook(c *gin.Context) {
 	payload, err := io.ReadAll(c.Request.Body)

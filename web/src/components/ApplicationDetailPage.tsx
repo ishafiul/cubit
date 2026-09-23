@@ -223,6 +223,8 @@ export function ApplicationDetailPage({
   // Git branch state
   const [gitBranch, setGitBranch] = useState(app.branch || 'main');
   const [isSavingBranch, setIsSavingBranch] = useState(false);
+  const [rootDir, setRootDir] = useState(app.rootDir || '');
+  const [isSavingRootDir, setIsSavingRootDir] = useState(false);
 
   // Custom Domains state
   const { data: allDomainsData, refetch: refetchDomains } = useListDomains();
@@ -697,6 +699,20 @@ export function ApplicationDetailPage({
       onRefreshApps();
     } finally {
       setIsSavingBranch(false);
+    }
+  };
+
+  // Save Git root directory
+  const handleSaveRootDir = async () => {
+    setIsSavingRootDir(true);
+    try {
+      await updateAppMutation.mutateAsync({
+        id: app.id,
+        data: { rootDir: rootDir.trim() },
+      });
+      onRefreshApps();
+    } finally {
+      setIsSavingRootDir(false);
     }
   };
 
@@ -2687,6 +2703,30 @@ export function ApplicationDetailPage({
                         {isSavingBranch ? 'Updating...' : 'Update Branch'}
                       </button>
                     </div>
+                  </div>
+
+                  <div>
+                    <label className="text-zinc-500 block mb-1">Root Directory / Subfolder</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        placeholder="e.g. packages/worker or empty for root"
+                        value={rootDir}
+                        onChange={e => setRootDir(e.target.value)}
+                        className="w-64 bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-zinc-200 outline-none focus:border-emerald-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleSaveRootDir}
+                        disabled={isSavingRootDir || rootDir === (app.rootDir || '')}
+                        className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-zinc-200 text-xs font-semibold transition"
+                      >
+                        {isSavingRootDir ? 'Updating...' : 'Update Root Dir'}
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-zinc-500 mt-1">
+                      For monorepos, specify the relative path containing your worker's wrangler.json or source entrypoint.
+                    </p>
                   </div>
 
                   <div className="p-3 rounded-xl bg-purple-950/20 border border-purple-900/40 space-y-1">

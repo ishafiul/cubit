@@ -98,6 +98,7 @@ func TestApplicationHandler(t *testing.T) {
 				domain.SourceTypeInline,
 				"",
 				"main",
+				"",
 				"export default {}",
 				false,
 				[]domain.EnvironmentVariable{
