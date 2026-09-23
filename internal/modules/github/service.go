@@ -376,22 +376,30 @@ func (s *Service) ListRepositories(ctx context.Context) ([]domain.GitHubReposito
 		return []domain.GitHubRepository{}, nil
 	}
 
-	url := "https://api.github.com/installation/repositories?per_page=100"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "token "+token)
-	req.Header.Set("Accept", "application/vnd.github+json")
+	var repos []domain.GitHubRepository
+	page := 1
 
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
+	for {
+		url := fmt.Sprintf("https://api.github.com/installation/repositories?per_page=100&page=%d", page)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "token "+token)
+		req.Header.Set("Accept", "application/vnd.github+json")
 
-	if resp.StatusCode == http.StatusOK {
+		resp, err := s.httpClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			break
+		}
+
 		var res struct {
+			TotalCount   int `json:"total_count"`
 			Repositories []struct {
 				ID            int64  `json:"id"`
 				Name          string `json:"name"`
@@ -402,21 +410,36 @@ func (s *Service) ListRepositories(ctx context.Context) ([]domain.GitHubReposito
 				HTMLURL       string `json:"html_url"`
 			} `json:"repositories"`
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&res); err == nil && len(res.Repositories) > 0 {
-			var repos []domain.GitHubRepository
-			for _, r := range res.Repositories {
-				repos = append(repos, domain.GitHubRepository{
-					ID:            r.ID,
-					Name:          r.Name,
-					FullName:      r.FullName,
-					DefaultBranch: r.DefaultBranch,
-					Private:       r.Private,
-					CloneURL:      r.CloneURL,
-					HTMLURL:       r.HTMLURL,
-				})
-			}
-			return repos, nil
+
+		decodeErr := json.NewDecoder(resp.Body).Decode(&res)
+		resp.Body.Close()
+		if decodeErr != nil || len(res.Repositories) == 0 {
+			break
 		}
+
+		for _, r := range res.Repositories {
+			repos = append(repos, domain.GitHubRepository{
+				ID:            r.ID,
+				Name:          r.Name,
+				FullName:      r.FullName,
+				DefaultBranch: r.DefaultBranch,
+				Private:       r.Private,
+				CloneURL:      r.CloneURL,
+				HTMLURL:       r.HTMLURL,
+			})
+		}
+
+		if len(repos) >= res.TotalCount || len(res.Repositories) < 100 {
+			break
+		}
+		page++
+	}
+
+	if len(repos) > 0 {
+		sort.Slice(repos, func(i, j int) bool {
+			return strings.ToLower(repos[i].FullName) < strings.ToLower(repos[j].FullName)
+		})
+		return repos, nil
 	}
 
 	userReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/user/repos?per_page=100", nil)

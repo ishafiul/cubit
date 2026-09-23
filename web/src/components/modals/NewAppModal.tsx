@@ -331,19 +331,23 @@ export function NewAppModal() {
                               </button>
                             )}
                             <span className="text-[10px] text-zinc-500 font-mono">
-                              {gitHubRepos.filter(r =>
-                                r.fullName.toLowerCase().includes(repoSearch.toLowerCase()) ||
-                                r.name.toLowerCase().includes(repoSearch.toLowerCase())
-                              ).length}/{gitHubRepos.length}
+                              {(() => {
+                                const q = repoSearch.trim().toLowerCase();
+                                return (!q ? gitHubRepos : gitHubRepos.filter(r =>
+                                  r.fullName.toLowerCase().includes(q) ||
+                                  r.name.toLowerCase().includes(q)
+                                )).length;
+                              })()}/{gitHubRepos.length}
                             </span>
                           </div>
                         </div>
 
                         {/* Dropdown */}
                         {(() => {
-                          const filtered = gitHubRepos.filter(r =>
-                            r.fullName.toLowerCase().includes(repoSearch.toLowerCase()) ||
-                            r.name.toLowerCase().includes(repoSearch.toLowerCase())
+                          const q = repoSearch.trim().toLowerCase();
+                          const filtered = !q ? gitHubRepos : gitHubRepos.filter(r =>
+                            r.fullName.toLowerCase().includes(q) ||
+                            r.name.toLowerCase().includes(q)
                           );
                           const selected = gitHubRepos.find(r => r.cloneUrl === gitRepo || `https://github.com/${r.fullName}.git` === gitRepo);
 
@@ -356,7 +360,7 @@ export function NewAppModal() {
                                 className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-purple-500 font-mono"
                               >
                                 <option value="">
-                                  {filtered.length === 0 ? '-- No matching repositories --' : '-- Choose a repository --'}
+                                  {filtered.length === 0 ? `-- No matching repositories (${gitHubRepos.length} total) --` : '-- Choose a repository --'}
                                 </option>
                                 {selected && !filtered.some(r => r.id === selected.id) && (
                                   <option key={selected.id} value={selected.fullName}>
