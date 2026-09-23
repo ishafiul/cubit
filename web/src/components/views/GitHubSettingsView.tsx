@@ -63,6 +63,10 @@ export function GitHubSettingsView() {
   const [isExchanging, setIsExchanging] = useState(false);
   const [exchangeError, setExchangeError] = useState<string | null>(null);
 
+  // Optional tunnel / public webhook state for localhost
+  const [publicWebhookUrl, setPublicWebhookUrl] = useState('');
+  const [showTunnelInput, setShowTunnelInput] = useState(false);
+
   const fetchSettings = async () => {
     setIsLoading(true);
     try {
@@ -81,9 +85,12 @@ export function GitHubSettingsView() {
     }
   };
 
-  const fetchManifest = async () => {
+  const fetchManifest = async (customWebhook?: string) => {
     try {
-      const res = await fetch('/api/v1/github/manifest');
+      const url = customWebhook?.trim()
+        ? `/api/v1/github/manifest?webhookUrl=${encodeURIComponent(customWebhook.trim())}`
+        : '/api/v1/github/manifest';
+      const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         setManifestData(data);
@@ -111,6 +118,12 @@ export function GitHubSettingsView() {
   useEffect(() => {
     fetchSettings();
     fetchManifest();
+
+    const params = new URLSearchParams(window.location.search);
+    const err = params.get('error');
+    if (err) {
+      setExchangeError(decodeURIComponent(err));
+    }
   }, []);
 
   const handleCopyWebhook = () => {
@@ -222,6 +235,49 @@ export function GitHubSettingsView() {
                   Automatically create and configure a GitHub App with read-only repository permissions and webhook events configured.
                 </p>
               </div>
+
+              {typeof window !== 'undefined' &&
+                (window.location.hostname === 'localhost' ||
+                  window.location.hostname === '127.0.0.1' ||
+                  window.location.hostname.endsWith('.local')) &&
+                !publicWebhookUrl && (
+                  <div className="rounded-xl bg-purple-950/20 border border-purple-900/40 p-3 space-y-1.5 text-xs">
+                    <div className="flex items-center gap-1.5 font-semibold text-purple-300">
+                      <ShieldCheck className="w-4 h-4 text-purple-400" />
+                      Localhost Mode (Webhooks Disabled)
+                    </div>
+                    <p className="text-zinc-400 leading-relaxed text-[11px]">
+                      GitHub blocks webhook deliveries to <code className="text-purple-300 font-mono">localhost</code>. The manifest is automatically optimized to register without errors. You can browse and deploy repositories immediately.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setShowTunnelInput(!showTunnelInput)}
+                      className="text-[11px] text-purple-400 hover:text-purple-300 underline font-medium pt-0.5 inline-block text-left"
+                    >
+                      {showTunnelInput ? 'Hide tunnel options' : 'Using Cloudflare Tunnel, ngrok, or smee.io? Click here'}
+                    </button>
+                  </div>
+                )}
+
+              {showTunnelInput && (
+                <div className="space-y-1.5 pt-1">
+                  <label className="text-[11px] font-medium text-zinc-400">
+                    Public Webhook URL (e.g. Cloudflare Tunnel / ngrok)
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="url"
+                      placeholder="https://your-tunnel.trycloudflare.com/api/v1/github/webhook"
+                      value={publicWebhookUrl}
+                      onChange={e => {
+                        setPublicWebhookUrl(e.target.value);
+                        fetchManifest(e.target.value);
+                      }}
+                      className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-purple-500 font-mono"
+                    />
+                  </div>
+                </div>
+              )}
 
               {manifestData && (
                 <form

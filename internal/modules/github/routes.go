@@ -10,6 +10,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		gh.POST("/settings", h.SaveSettings)
 		gh.DELETE("/settings", h.ClearSettings)
 		gh.GET("/manifest", h.GetManifest)
+		gh.GET("/manifest/callback", h.ManifestCallback)
 		gh.POST("/manifest/exchange", h.ExchangeManifest)
 		gh.GET("/repositories", h.ListRepositories)
 		gh.GET("/repositories/:owner/:repo/branches", h.ListBranches)

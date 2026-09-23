@@ -13,7 +13,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -72,21 +74,41 @@ func (s *Service) ClearSettings(ctx context.Context) error {
 	return s.repo.ClearSettings(ctx)
 }
 
+func isLocalhostOrPrivate(rawURL string) bool {
+	if rawURL == "" {
+		return true
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		lower := strings.ToLower(rawURL)
+		return strings.Contains(lower, "localhost") || strings.Contains(lower, "127.0.0.1")
+	}
+	host := u.Hostname()
+	if host == "" {
+		host = rawURL
+	}
+	host = strings.ToLower(host)
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" || strings.HasSuffix(host, ".localhost") || strings.HasSuffix(host, ".local") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip != nil {
+		return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
+	}
+	return false
+}
+
 // GenerateManifest creates the GitHub App manifest JSON payload for 1-click app creation.
-func (s *Service) GenerateManifest(ctx context.Context, baseURL string) (map[string]any, error) {
+func (s *Service) GenerateManifest(ctx context.Context, baseURL string, webhookURL string) (map[string]any, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
 	if baseURL == "" {
 		baseURL = "http://localhost:8000"
 	}
-	webhookURL := baseURL + "/api/v1/github/webhook"
 	callbackURL := baseURL + "/api/v1/github/manifest/callback"
 
 	manifest := map[string]any{
-		"name": fmt.Sprintf("Cubit-Fleet-%d", time.Now().Unix()%10000),
-		"url":  baseURL,
-		"hook_attributes": map[string]any{
-			"url": webhookURL,
-		},
+		"name":          fmt.Sprintf("Cubit-Fleet-%d", time.Now().Unix()%10000),
+		"url":           baseURL,
 		"redirect_url":  callbackURL,
 		"callback_urls": []string{callbackURL},
 		"public":        false,
@@ -96,7 +118,20 @@ func (s *Service) GenerateManifest(ctx context.Context, baseURL string) (map[str
 			"pull_requests": "read",
 			"emails":        "read",
 		},
-		"default_events": []string{"push"},
+	}
+
+	webhookURL = strings.TrimSpace(webhookURL)
+	if webhookURL == "" && !isLocalhostOrPrivate(baseURL) {
+		webhookURL = baseURL + "/api/v1/github/webhook"
+	}
+
+	// GitHub requires hook_attributes.url to be publicly reachable.
+	// For localhost / private network addresses, hook_attributes must be omitted so registration succeeds.
+	if webhookURL != "" && !isLocalhostOrPrivate(webhookURL) {
+		manifest["hook_attributes"] = map[string]any{
+			"url": webhookURL,
+		}
+		manifest["default_events"] = []string{"push"}
 	}
 
 	return manifest, nil

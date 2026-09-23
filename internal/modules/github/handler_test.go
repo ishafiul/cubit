@@ -112,7 +112,7 @@ func TestGitHubHandler(t *testing.T) {
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, req)
 
-			t.Run("Then returns 200 OK with valid manifest structure", func(t *testing.T) {
+			t.Run("Then returns 200 OK with valid manifest structure and webhook attributes", func(t *testing.T) {
 				if rec.Code != http.StatusOK {
 					t.Fatalf("expected 200 OK, got %d", rec.Code)
 				}
@@ -120,6 +120,62 @@ func TestGitHubHandler(t *testing.T) {
 				_ = json.NewDecoder(rec.Body).Decode(&manifest)
 				if manifest["url"] != "https://fleet.example.com" {
 					t.Errorf("expected manifest url https://fleet.example.com, got %v", manifest["url"])
+				}
+				if manifest["hook_attributes"] == nil {
+					t.Errorf("expected hook_attributes for public baseURL")
+				}
+			})
+		})
+
+		t.Run("When requesting manifest for localhost without webhook", func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/github/manifest?baseUrl=http://localhost:8000", nil)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			t.Run("Then omits hook_attributes to satisfy GitHub public Internet requirement", func(t *testing.T) {
+				if rec.Code != http.StatusOK {
+					t.Fatalf("expected 200 OK, got %d", rec.Code)
+				}
+				var manifest map[string]any
+				_ = json.NewDecoder(rec.Body).Decode(&manifest)
+				if manifest["hook_attributes"] != nil {
+					t.Errorf("expected hook_attributes to be omitted for localhost, got %v", manifest["hook_attributes"])
+				}
+				if manifest["default_events"] != nil {
+					t.Errorf("expected default_events to be omitted when hook_attributes is absent, got %v", manifest["default_events"])
+				}
+			})
+		})
+
+		t.Run("When requesting manifest for localhost with public tunnel webhook", func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/github/manifest?baseUrl=http://localhost:8000&webhookUrl=https://tunnel.trycloudflare.com/webhook", nil)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			t.Run("Then includes hook_attributes pointing to public tunnel", func(t *testing.T) {
+				if rec.Code != http.StatusOK {
+					t.Fatalf("expected 200 OK, got %d", rec.Code)
+				}
+				var manifest map[string]any
+				_ = json.NewDecoder(rec.Body).Decode(&manifest)
+				hook, ok := manifest["hook_attributes"].(map[string]any)
+				if !ok || hook["url"] != "https://tunnel.trycloudflare.com/webhook" {
+					t.Errorf("expected tunnel webhook url, got %v", manifest["hook_attributes"])
+				}
+			})
+		})
+
+		t.Run("When handling manifest callback redirect", func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/github/manifest/callback", nil)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			t.Run("Then redirects to /github UI", func(t *testing.T) {
+				if rec.Code != http.StatusTemporaryRedirect {
+					t.Fatalf("expected 307 redirect, got %d", rec.Code)
+				}
+				if rec.Header().Get("Location") != "/github" {
+					t.Errorf("expected redirect to /github, got %s", rec.Header().Get("Location"))
 				}
 			})
 		})

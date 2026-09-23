@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -80,14 +81,28 @@ func (h *Handler) GetManifest(c *gin.Context) {
 	if baseURL == "" {
 		baseURL = h.getBaseURL(c)
 	}
+	webhookURL := c.Query("webhookUrl")
 
-	manifest, err := h.service.GenerateManifest(c.Request.Context(), baseURL)
+	manifest, err := h.service.GenerateManifest(c.Request.Context(), baseURL, webhookURL)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	c.JSON(http.StatusOK, manifest)
+}
+
+// ManifestCallback handles the redirect from GitHub after manifest registration.
+func (h *Handler) ManifestCallback(c *gin.Context) {
+	code := c.Query("code")
+	if code != "" {
+		_, err := h.service.ExchangeManifestCode(c.Request.Context(), code)
+		if err != nil {
+			c.Redirect(http.StatusTemporaryRedirect, "/github?error="+url.QueryEscape(err.Error()))
+			return
+		}
+	}
+	c.Redirect(http.StatusTemporaryRedirect, "/github")
 }
 
 // ExchangeManifest converts the manifest creation code from GitHub callback.
