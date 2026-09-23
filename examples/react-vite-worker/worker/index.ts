@@ -42,7 +42,10 @@ export default {
         }
         // SPA Fallback: Serve index.html for client-side routing
         const spaRequest = new Request(new URL('/index.html', request.url), request);
-        return await env.ASSETS.fetch(spaRequest);
+        const spaResponse = await env.ASSETS.fetch(spaRequest);
+        if (spaResponse.status !== 404) {
+          return spaResponse;
+        }
       } catch (_) {
         // pass through to fallback
       }

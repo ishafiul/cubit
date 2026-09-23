@@ -89,6 +89,7 @@ type WranglerConfig struct {
 type ImportSummary struct {
 	Name                  string   `json:"name,omitempty"`
 	Main                  string   `json:"main,omitempty"`
+	AssetsDirectory       string   `json:"assetsDirectory,omitempty"`
 	CompatibilityDate     string   `json:"compatibilityDate,omitempty"`
 	CompatibilityFlags    []string `json:"compatibilityFlags,omitempty"`
 	ImportedVarsCount     int      `json:"importedVarsCount"`
@@ -528,6 +529,7 @@ func ApplyToApplication(app *domain.Application, cfg *WranglerConfig, envName st
 
 	// Static Assets
 	if effective.Assets != nil && effective.Assets.Directory != "" {
+		summary.AssetsDirectory = effective.Assets.Directory
 		bName := effective.Assets.Binding
 		if bName == "" {
 			bName = "ASSETS"

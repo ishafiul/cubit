@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -483,6 +484,7 @@ func (s *DeploymentService) buildGitWorker(ctx context.Context, app *domain.Appl
 	}
 
 	var entrypoint string
+	var assetsDir string
 	if len(wranglerData) > 0 {
 		_, summary, err := s.appMgr.ImportWrangler(ctx, app.ID, string(wranglerData), "auto", app.Branch)
 		if err == nil && summary != nil {
@@ -495,6 +497,9 @@ func (s *DeploymentService) buildGitWorker(ctx context.Context, app *domain.Appl
 			if summary.Main != "" {
 				entrypoint = summary.Main
 			}
+			if summary.AssetsDirectory != "" {
+				assetsDir = summary.AssetsDirectory
+			}
 		} else if err != nil {
 			_ = s.repo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
 				Timestamp: time.Now().UTC(),
@@ -505,7 +510,112 @@ func (s *DeploymentService) buildGitWorker(ctx context.Context, app *domain.Appl
 		}
 	}
 
-	// 3. Detect entrypoint file
+	if assetsDir == "" {
+		for _, b := range app.Bindings {
+			if b.Type == domain.BindingTypeAssets && b.ResourceID != "" {
+				assetsDir = b.ResourceID
+				break
+			}
+		}
+	}
+
+	// 3. Optional frontend build if package.json has a build script
+	pkgJSONPath := filepath.Join(workDir, "package.json")
+	if pkgData, err := os.ReadFile(pkgJSONPath); err == nil && len(pkgData) > 0 {
+		var pkg struct {
+			Scripts map[string]string `json:"scripts"`
+		}
+		if json.Unmarshal(pkgData, &pkg) == nil {
+			if _, hasBuild := pkg.Scripts["build"]; hasBuild {
+				targetAssetsDir := ""
+				if assetsDir != "" {
+					targetAssetsDir = filepath.Join(workDir, assetsDir)
+				}
+				needsBuild := true
+				if targetAssetsDir != "" {
+					if entries, err := os.ReadDir(targetAssetsDir); err == nil && len(entries) > 0 {
+						needsBuild = false
+					}
+				}
+				if needsBuild {
+					buildCmdName := "npm"
+					if _, err := exec.LookPath("pnpm"); err == nil {
+						buildCmdName = "pnpm"
+					}
+					_ = s.repo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
+						Timestamp: time.Now().UTC(),
+						Step:      domain.LogStepEsbuild,
+						Message:   fmt.Sprintf("[%s] Installing dependencies and running build script...", buildCmdName),
+						Level:     domain.LogLevelInfo,
+					})
+					instCtx, instCancel := context.WithTimeout(ctx, 60*time.Second)
+					cmdInst := exec.CommandContext(instCtx, buildCmdName, "install")
+					cmdInst.Dir = workDir
+					_ = cmdInst.Run()
+					instCancel()
+
+					buildRunCtx, buildCancel := context.WithTimeout(ctx, 45*time.Second)
+					cmdRun := exec.CommandContext(buildRunCtx, buildCmdName, "run", "build")
+					cmdRun.Dir = workDir
+					if out, err := cmdRun.CombinedOutput(); err == nil {
+						_ = s.repo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
+							Timestamp: time.Now().UTC(),
+							Step:      domain.LogStepEsbuild,
+							Message:   fmt.Sprintf("[%s] Build script succeeded", buildCmdName),
+							Level:     domain.LogLevelInfo,
+						})
+					} else {
+						_ = s.repo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
+							Timestamp: time.Now().UTC(),
+							Step:      domain.LogStepEsbuild,
+							Message:   fmt.Sprintf("[%s] Build warning: %s", buildCmdName, strings.TrimSpace(string(out))),
+							Level:     domain.LogLevelWarn,
+						})
+					}
+					buildCancel()
+				}
+			}
+		}
+	}
+
+	// 4. Upload static assets to storage if present
+	if assetsDir != "" && s.storage != nil {
+		targetAssetsDir := filepath.Join(workDir, assetsDir)
+		if stat, err := os.Stat(targetAssetsDir); err == nil && stat.IsDir() {
+			assetCount := 0
+			var totalAssetBytes int64
+			_ = filepath.Walk(targetAssetsDir, func(path string, info os.FileInfo, err error) error {
+				if err != nil || info.IsDir() {
+					return nil
+				}
+				rel, err := filepath.Rel(targetAssetsDir, path)
+				if err != nil {
+					return nil
+				}
+				relSlash := filepath.ToSlash(rel)
+				data, err := os.ReadFile(path)
+				if err != nil {
+					return nil
+				}
+				objectKey := fmt.Sprintf("deployments/%s/%s/assets/%s", app.Name, dep.ID, strings.TrimPrefix(relSlash, "/"))
+				if err := s.storage.UploadBundle(ctx, s.fleetBucket, objectKey, data); err == nil {
+					assetCount++
+					totalAssetBytes += int64(len(data))
+				}
+				return nil
+			})
+			if assetCount > 0 {
+				_ = s.repo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
+					Timestamp: time.Now().UTC(),
+					Step:      domain.LogStepS3Upload,
+					Message:   fmt.Sprintf("Uploaded %d static assets (%d bytes) to storage", assetCount, totalAssetBytes),
+					Level:     domain.LogLevelInfo,
+				})
+			}
+		}
+	}
+
+	// 5. Detect and bundle worker entrypoint file
 	if entrypoint == "" {
 		entryCandidates := []string{
 			"src/index.ts",
@@ -523,9 +633,20 @@ func (s *DeploymentService) buildGitWorker(ctx context.Context, app *domain.Appl
 		}
 	}
 
+	// Check if already bundled into dist-worker.js
+	outPath := filepath.Join(workDir, "dist-worker.js")
+	if bundled, err := os.ReadFile(outPath); err == nil && len(bundled) > 0 {
+		_ = s.repo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
+			Timestamp: time.Now().UTC(),
+			Step:      domain.LogStepEsbuild,
+			Message:   fmt.Sprintf("[build] Using compiled worker bundle (%d bytes)", len(bundled)),
+			Level:     domain.LogLevelInfo,
+		})
+		return bundled
+	}
+
 	if entrypoint != "" {
 		entryPath := filepath.Join(workDir, entrypoint)
-		outPath := filepath.Join(workDir, "dist-worker.js")
 
 		buildCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()

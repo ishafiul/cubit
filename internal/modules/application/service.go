@@ -7,7 +7,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"mime"
+	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -46,6 +50,7 @@ type Service interface {
 	RecordExecutionEvent(appID string, event domain.RequestLogEvent)
 	SubscribeLiveLogs(appID string) (<-chan domain.RequestLogEvent, func())
 	ImportWrangler(ctx context.Context, appID string, rawConfig string, format string, envName string) (*domain.Application, *wrangler.ImportSummary, error)
+	GetAsset(ctx context.Context, appID, assetPath string) ([]byte, string, error)
 }
 
 type appMetricsTracker struct {
@@ -545,7 +550,7 @@ func (s *ApplicationService) Invoke(ctx context.Context, appID string, method, p
 		baseURL = "http://localhost:8000"
 	}
 
-	res, err := RunWorkerBundleWithEnvAndBindings(ctx, bundleData, method, path, headers, body, envMap, app.Bindings, baseURL, eventType)
+	res, err := RunWorkerBundleWithEnvAndBindings(ctx, bundleData, method, path, headers, body, envMap, app.Bindings, baseURL, eventType, app.ID)
 	durationMs := float64(time.Since(start).Microseconds()) / 1000.0
 
 	msg := "Worker isolate request executed"
@@ -631,6 +636,99 @@ func (s *ApplicationService) InvokeApplication(ctx context.Context, appID string
 	return s.Invoke(ctx, appID, method, path, headers, body)
 }
 
+// GetAsset retrieves a static asset for the given application.
+func (s *ApplicationService) GetAsset(ctx context.Context, appID, assetPath string) ([]byte, string, error) {
+	app, err := s.repo.GetByID(ctx, appID)
+	if err != nil || app == nil {
+		return nil, "", domain.NewNotFoundError("application not found")
+	}
+
+	cleanPath := strings.TrimPrefix(filepath.Clean("/"+assetPath), "/")
+	if cleanPath == "" || cleanPath == "." {
+		cleanPath = "index.html"
+	}
+
+	// 1. Try downloading from storage if active deployment exists
+	if app.ActiveDeploymentID != "" && s.storage != nil {
+		objectKey := fmt.Sprintf("deployments/%s/%s/assets/%s", app.Name, app.ActiveDeploymentID, cleanPath)
+		data, err := s.storage.DownloadBundle(ctx, s.fleetBucket, objectKey)
+		if err == nil && len(data) > 0 {
+			contentType := mime.TypeByExtension(filepath.Ext(cleanPath))
+			if contentType == "" {
+				contentType = detectContentType(cleanPath, data)
+			}
+			return data, contentType, nil
+		}
+	}
+
+	// 2. Check local disk fallback if app has a rootDir / assets binding
+	for _, b := range app.Bindings {
+		if b.Type == domain.BindingTypeAssets && b.ResourceID != "" {
+			candidates := []string{
+				filepath.Join(b.ResourceID, cleanPath),
+			}
+			if app.RootDir != "" {
+				cleanRoot := domain.CleanRootDir(app.RootDir)
+				candidates = append(candidates, filepath.Join(cleanRoot, b.ResourceID, cleanPath))
+				candidates = append(candidates, filepath.Join(cleanRoot, cleanPath))
+			}
+			for _, candidate := range candidates {
+				if stat, err := os.Stat(candidate); err == nil && !stat.IsDir() {
+					if data, err := os.ReadFile(candidate); err == nil {
+						contentType := mime.TypeByExtension(filepath.Ext(candidate))
+						if contentType == "" {
+							contentType = detectContentType(candidate, data)
+						}
+						return data, contentType, nil
+					}
+				}
+			}
+		}
+	}
+
+	return nil, "", domain.NewNotFoundError(fmt.Sprintf("asset %q not found", cleanPath))
+}
+
+func detectContentType(filePath string, data []byte) string {
+	ext := strings.ToLower(filepath.Ext(filePath))
+	switch ext {
+	case ".js", ".mjs":
+		return "application/javascript; charset=utf-8"
+	case ".css":
+		return "text/css; charset=utf-8"
+	case ".html", ".htm":
+		return "text/html; charset=utf-8"
+	case ".json":
+		return "application/json; charset=utf-8"
+	case ".svg":
+		return "image/svg+xml"
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".gif":
+		return "image/gif"
+	case ".ico":
+		return "image/x-icon"
+	case ".webp":
+		return "image/webp"
+	case ".woff2":
+		return "font/woff2"
+	case ".woff":
+		return "font/woff"
+	case ".ttf":
+		return "font/ttf"
+	case ".txt":
+		return "text/plain; charset=utf-8"
+	default:
+		ct := http.DetectContentType(data)
+		if ct != "" {
+			return ct
+		}
+		return "application/octet-stream"
+	}
+}
+
 // WorkerExecutionResult contains the full isolate output including headers, payloads, console logs, and exceptions.
 type WorkerExecutionResult struct {
 	Status     int                      `json:"status"`
@@ -680,6 +778,7 @@ func RunWorkerBundleWithEnvAndBindings(
 	bindings []domain.ResourceBinding,
 	baseURL string,
 	eventType string,
+	appID ...string,
 ) (WorkerExecutionResult, error) {
 	if method == "" {
 		method = "GET"
@@ -698,6 +797,11 @@ func RunWorkerBundleWithEnvAndBindings(
 	}
 	if eventType == "" {
 		eventType = "fetch"
+	}
+
+	targetAppID := ""
+	if len(appID) > 0 {
+		targetAppID = appID[0]
 	}
 
 	b64Bundle := base64.StdEncoding.EncodeToString(bundle)
@@ -738,6 +842,7 @@ const baseUrl = %q;
 const eventType = %q;
 const clientIP = %q;
 const rayID = %q;
+const appID = %q;
 
 const logs = [];
 const formatArg = (a) => {
@@ -1045,12 +1150,23 @@ function createQueueBinding(queueId, apiBase) {
     };
 }
 
-function createAssetsBinding(apiBase) {
+function createAssetsBinding(appId, apiBase) {
     return {
         async fetch(input, init = {}) {
             let url = typeof input === "string" ? input : (input ? input.url : "/");
-            const pathname = new URL(url, "http://localhost").pathname;
-            return fetch(` + "`" + `${apiBase}${pathname}` + "`" + `, init);
+            let parsed;
+            try {
+                parsed = new URL(url, "http://localhost");
+            } catch (_) {
+                parsed = new URL("/" + url, "http://localhost");
+            }
+            let pathname = parsed.pathname;
+            if (!pathname.startsWith("/")) pathname = "/" + pathname;
+            if (!appId) {
+                return new Response("Asset not found", { status: 404 });
+            }
+            const targetUrl = ` + "`" + `${apiBase}/api/v1/applications/${encodeURIComponent(appId)}/assets${pathname}${parsed.search}` + "`" + `;
+            return fetch(targetUrl, init);
         }
     };
 }
@@ -1076,7 +1192,7 @@ for (const b of (bindings || [])) {
             env[b.name] = createQueueBinding(b.resourceId, baseUrl);
             break;
         case "assets":
-            env[b.name] = createAssetsBinding(baseUrl);
+            env[b.name] = createAssetsBinding(appID, baseUrl);
             break;
     }
 }
@@ -1209,7 +1325,7 @@ try {
         cf: request.cf
     }));
 }
-`, b64Bundle, method, path, string(headersJSON), bodyStr, string(envJSON), string(bindingsJSON), baseURL, eventType, clientIP, rayID)
+`, b64Bundle, method, path, string(headersJSON), bodyStr, string(envJSON), string(bindingsJSON), baseURL, eventType, clientIP, rayID, targetAppID)
 
 	cmd := exec.CommandContext(ctx, "node", "--input-type=module", "-e", runnerScript)
 	out, err := cmd.Output()

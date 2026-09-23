@@ -181,5 +181,17 @@ func TestApplicationHandler(t *testing.T) {
 				}
 			})
 		})
+
+		t.Run("When requesting non-existent asset via GET /api/v1/applications/:id/assets/missing.js", func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(http.MethodGet, "/api/v1/applications/some-app/assets/missing.js", nil)
+			router.ServeHTTP(w, req)
+
+			t.Run("Then it returns 404 Not Found", func(t *testing.T) {
+				if w.Code != http.StatusNotFound {
+					t.Fatalf("expected 404, got %d", w.Code)
+				}
+			})
+		})
 	})
 }

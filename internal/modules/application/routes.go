@@ -14,6 +14,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		apps.POST("/:id/test", h.Test)
 		apps.POST("/:id/wrangler/import", h.ImportWranglerConfig)
 		apps.GET("/:id/bundle", h.GetBundle)
+		apps.GET("/:id/assets/*filepath", h.GetAsset)
 		apps.GET("/:id/metrics", h.GetMetrics)
 		apps.GET("/:id/logs/stream", h.StreamLiveLogs)
 	}

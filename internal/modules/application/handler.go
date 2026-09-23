@@ -457,6 +457,18 @@ func (h *Handler) GetBundle(c *gin.Context) {
 	c.Data(http.StatusOK, "application/javascript; charset=utf-8", data)
 }
 
+// GetAsset returns a static asset for the application.
+func (h *Handler) GetAsset(c *gin.Context) {
+	id := c.Param("id")
+	filepathParam := c.Param("filepath")
+	data, contentType, err := h.service.GetAsset(c.Request.Context(), id, filepathParam)
+	if err != nil {
+		c.String(http.StatusNotFound, "Asset not found")
+		return
+	}
+	c.Data(http.StatusOK, contentType, data)
+}
+
 // ImportWranglerConfig parses and imports a Cloudflare wrangler configuration.
 func (h *Handler) ImportWranglerConfig(c *gin.Context) {
 	id := c.Param("id")
