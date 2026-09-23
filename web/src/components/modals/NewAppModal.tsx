@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Zap, GitBranch, Globe, RefreshCw, AlertCircle, ExternalLink, Folder } from 'lucide-react';
+import { X, Zap, GitBranch, Globe, RefreshCw, AlertCircle, ExternalLink, Folder, Search } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
 import { useDashboard } from '../../context/DashboardContext';
 
@@ -43,6 +43,7 @@ export function NewAppModal() {
   // GitHub App integration states
   const [isGitHubConfigured, setIsGitHubConfigured] = useState(false);
   const [gitHubRepos, setGitHubRepos] = useState<GitHubRepoItem[]>([]);
+  const [repoSearch, setRepoSearch] = useState('');
   const [isLoadingRepos, setIsLoadingRepos] = useState(false);
   const [availableBranches, setAvailableBranches] = useState<string[]>(['main']);
   const [isLoadingBranches, setIsLoadingBranches] = useState(false);
@@ -53,6 +54,7 @@ export function NewAppModal() {
 
   useEffect(() => {
     if (showNewAppModal) {
+      setRepoSearch('');
       // Check GitHub App configuration status
       fetch('/api/v1/github/settings')
         .then(r => r.json())
@@ -306,19 +308,83 @@ export function NewAppModal() {
                     {isLoadingRepos ? (
                       <div className="p-3 text-center text-xs text-zinc-500">Loading repositories...</div>
                     ) : (
-                      <select
-                        required
-                        value={gitHubRepos.find(r => r.cloneUrl === gitRepo || `https://github.com/${r.fullName}.git` === gitRepo)?.fullName || ''}
-                        onChange={e => handleSelectGitHubRepo(e.target.value)}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-purple-500 font-mono"
-                      >
-                        <option value="">-- Choose a repository --</option>
-                        {gitHubRepos.map(r => (
-                          <option key={r.id} value={r.fullName}>
-                            {r.fullName} ({r.private ? 'Private' : 'Public'})
-                          </option>
-                        ))}
-                      </select>
+                      <div className="space-y-2">
+                        {/* Search / Filter Input */}
+                        <div className="relative">
+                          <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                          <input
+                            type="text"
+                            placeholder="Search repositories (e.g. org/repo)..."
+                            value={repoSearch}
+                            onChange={e => setRepoSearch(e.target.value)}
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-8 pr-16 py-1.5 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-purple-500 font-mono"
+                          />
+                          <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+                            {repoSearch && (
+                              <button
+                                type="button"
+                                onClick={() => setRepoSearch('')}
+                                className="text-zinc-500 hover:text-zinc-300 p-0.5 rounded transition"
+                                title="Clear filter"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            )}
+                            <span className="text-[10px] text-zinc-500 font-mono">
+                              {gitHubRepos.filter(r =>
+                                r.fullName.toLowerCase().includes(repoSearch.toLowerCase()) ||
+                                r.name.toLowerCase().includes(repoSearch.toLowerCase())
+                              ).length}/{gitHubRepos.length}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Dropdown */}
+                        {(() => {
+                          const filtered = gitHubRepos.filter(r =>
+                            r.fullName.toLowerCase().includes(repoSearch.toLowerCase()) ||
+                            r.name.toLowerCase().includes(repoSearch.toLowerCase())
+                          );
+                          const selected = gitHubRepos.find(r => r.cloneUrl === gitRepo || `https://github.com/${r.fullName}.git` === gitRepo);
+
+                          return (
+                            <>
+                              <select
+                                required
+                                value={selected?.fullName || ''}
+                                onChange={e => handleSelectGitHubRepo(e.target.value)}
+                                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-purple-500 font-mono"
+                              >
+                                <option value="">
+                                  {filtered.length === 0 ? '-- No matching repositories --' : '-- Choose a repository --'}
+                                </option>
+                                {selected && !filtered.some(r => r.id === selected.id) && (
+                                  <option key={selected.id} value={selected.fullName}>
+                                    {selected.fullName} ({selected.private ? 'Private' : 'Public'}) [Selected]
+                                  </option>
+                                )}
+                                {filtered.map(r => (
+                                  <option key={r.id} value={r.fullName}>
+                                    {r.fullName} ({r.private ? 'Private' : 'Public'})
+                                  </option>
+                                ))}
+                              </select>
+
+                              {selected && (
+                                <div className="flex items-center justify-between text-[11px] px-2.5 py-1.5 rounded-md bg-purple-950/30 border border-purple-900/40 text-purple-200">
+                                  <span className="truncate font-mono">
+                                    <span className="text-zinc-400 font-sans">Selected: </span>
+                                    {selected.fullName}
+                                  </span>
+                                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${selected.private ? 'bg-amber-950/80 text-amber-300 border border-amber-800/60' : 'bg-emerald-950/80 text-emerald-300 border border-emerald-800/60'}`}>
+                                    {selected.private ? 'Private' : 'Public'}
+                                  </span>
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()}
+                      </div>
                     )}
                   </div>
 
