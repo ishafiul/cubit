@@ -9,6 +9,7 @@ export function WorkersView() {
   const {
     apps,
     handleDeployApp,
+    handleDeleteApp,
     isDeploying,
     setViewingCodeApp,
     setTestingApp,
@@ -60,6 +61,7 @@ export function WorkersView() {
                 onViewCode={setViewingCodeApp}
                 onTestApp={setTestingApp}
                 onViewHistory={setHistoryApp}
+                onDelete={handleDeleteApp}
               />
             ))}
           </div>

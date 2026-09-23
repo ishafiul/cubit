@@ -81,6 +81,7 @@ export interface ApplicationDetailPageProps {
   isDeploying: boolean;
   onTestApp: (app: Application) => void;
   onRefreshApps: () => void;
+  onDeleteApp?: (appId: string) => Promise<void>;
   onNavigateToService?: (targetTab: ActiveTab, resourceId?: string) => void;
   initialTab?: DetailTab;
   onTabChange?: (tab: DetailTab) => void;
@@ -170,6 +171,7 @@ export function ApplicationDetailPage({
   isDeploying,
   onTestApp,
   onRefreshApps,
+  onDeleteApp,
   onNavigateToService,
   initialTab,
   onTabChange,
@@ -443,8 +445,12 @@ export function ApplicationDetailPage({
   const handleDeleteApp = async () => {
     setIsDeletingApp(true);
     try {
-      await deleteAppMutation.mutateAsync({ id: app.id });
-      onRefreshApps();
+      if (onDeleteApp) {
+        await onDeleteApp(app.id);
+      } else {
+        await deleteAppMutation.mutateAsync({ id: app.id });
+        onRefreshApps();
+      }
       onBack();
     } catch (err) {
       console.error('Failed deleting application:', err);
@@ -968,6 +974,16 @@ export function ApplicationDetailPage({
                 <Play className="w-3.5 h-3.5 fill-current" />
               )}
               {isDeploying ? 'Deploying...' : `Deploy v${nextDeployVersion}`}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowDeleteConfirm(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-rose-900/60 bg-rose-950/20 hover:bg-rose-950/50 text-rose-400 text-xs font-semibold transition"
+              title="Delete Worker Application"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Delete</span>
             </button>
           </div>
         </div>

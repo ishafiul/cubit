@@ -11,6 +11,7 @@ export function AppDetailRouteView() {
   const {
     apps,
     handleDeployApp,
+    handleDeleteApp,
     isDeploying,
     setTestingApp,
     refetchApps,
@@ -60,6 +61,7 @@ export function AppDetailRouteView() {
         isDeploying={isDeploying === app.id}
         onTestApp={(targetApp) => setTestingApp(targetApp)}
         onRefreshApps={refetchApps}
+        onDeleteApp={handleDeleteApp}
         onNavigateToService={(targetTab, resourceId) => {
           if (targetTab === 'apps' && resourceId) {
             navigate({

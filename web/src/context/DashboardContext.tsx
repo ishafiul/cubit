@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import type { Application, Node, Domain } from '../api/model';
 import {
   useListNodes,
@@ -10,6 +11,8 @@ import {
 import {
   useListApplications,
   useCreateApplication,
+  useDeleteApplication,
+  getListApplicationsQueryKey,
 } from '../api/generated/applications/applications';
 import { useDeployApplication } from '../api/generated/deployments/deployments';
 import { useListDomains, useCreateDomain } from '../api/generated/domains/domains';
@@ -65,6 +68,7 @@ export interface DashboardContextType {
   handleDrainNode: (nodeId: string) => Promise<void>;
   handleActivateNode: (nodeId: string) => Promise<void>;
   handleDeleteNode: (nodeId: string) => Promise<void>;
+  handleDeleteApp: (appId: string) => Promise<void>;
 }
 
 const DashboardContext = createContext<DashboardContextType | null>(null);
@@ -78,6 +82,8 @@ export function useDashboard() {
 }
 
 export function DashboardProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
+
   // Orval TanStack Query hooks
   const { data: nodesData, refetch: refetchNodes } = useListNodes();
   const { data: appsData, refetch: refetchApps } = useListApplications();
@@ -90,6 +96,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const runtimeStatus = runtimeData;
 
   const createApplicationMutation = useCreateApplication();
+  const deleteApplicationMutation = useDeleteApplication();
   const deployApplicationMutation = useDeployApplication();
   const upgradeCelldMutation = useUpgradeCelldDaemon();
   const createDomainMutation = useCreateDomain();
@@ -283,6 +290,15 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     refetchNodes();
   };
 
+  const handleDeleteApp = async (appId: string) => {
+    await deleteApplicationMutation.mutateAsync({ id: appId });
+    queryClient.setQueryData(getListApplicationsQueryKey(), (old: Application[] | undefined) =>
+      old ? old.filter(a => a.id !== appId) : []
+    );
+    await queryClient.invalidateQueries({ queryKey: getListApplicationsQueryKey() });
+    refetchApps();
+  };
+
   const value: DashboardContextType = {
     nodes,
     apps,
@@ -320,6 +336,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     handleDrainNode,
     handleActivateNode,
     handleDeleteNode,
+    handleDeleteApp,
   };
 
   return <DashboardContext.Provider value={value}>{children}</DashboardContext.Provider>;
