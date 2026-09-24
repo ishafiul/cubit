@@ -85,10 +85,13 @@ gh issue comment <decision> --body "$(cat <<'EOF'
 <Chosen answer, constraints, and rejected alternatives that matter>
 EOF
 )"
+gh issue edit <decision> --body-file /tmp/decision-body.md
 gh issue edit <decision> --add-label "status:approved" --remove-label "status:grilling"
 gh issue close <decision>
 gh issue comment <map> --body "- [<Decision title>](<issue-url>): <One-line gist>"
 ```
+
+The updated description keeps the original question and current resolution easy to find; comments remain the full Q&A history. Link the source requirement, relevant files, and related issues where useful.
 
 When an answer reveals another user decision, create its issue before interviewing on it. Add a parent link or map checklist entry for every new issue.
 
@@ -117,11 +120,20 @@ EOF
 )"
 ```
 
-On approval, record it on the issue. If the user explicitly approves in chat, that authorizes applying the label:
+Keep user review on the PRD issue. For requested changes, update the checked-in PRD and issue description, comment with a concise change summary and file/section links, then return the issue to review:
+
+```bash
+gh issue edit <prd> --add-label "status:changes-requested" --remove-label "status:needs-review"
+gh issue edit <prd> --body-file /tmp/updated-prd-issue.md
+gh issue comment <prd> --body "Updated `docs/prd/<feature-slug>.md`: <change summary and relevant section links>. Ready for review."
+gh issue edit <prd> --add-label "status:needs-review" --remove-label "status:changes-requested"
+```
+
+Create tasks only after the PRD issue shows `status:approved` from explicit user/maintainer approval. An explicit approval comment is sufficient; apply the label and record it if missing. Chat-only approval does not pass this gate.
 
 ```bash
 gh issue edit <prd> --add-label "status:approved" --remove-label "status:needs-review" --remove-label "status:changes-requested"
-gh issue comment <prd> --body "PRD approved. Creating capability and feature issues."
+gh issue comment <prd> --body "PRD approval recorded on this issue. Creating capability and feature issues."
 ```
 
 ## Tasks and subtasks
@@ -176,4 +188,59 @@ If native dependencies are unavailable, keep `Blocked by: #<issue>` in the body.
 ```bash
 gh issue edit <issue> --add-label "status:ready-for-agent" --remove-label "status:blocked"
 gh issue edit <issue> --add-label "status:blocked" --remove-label "status:ready-for-agent"
+```
+
+## Implementation branches and PRs
+
+When the user gives a task/subtask issue number or URL, read it and its comments, confirm PRD approval and closed blockers, then claim it:
+
+```bash
+gh issue view <issue> --comments
+gh issue edit <issue> --add-assignee "@me" --add-label "status:in-progress" \
+  --remove-label "status:ready-for-agent" --remove-label "status:blocked"
+gh issue comment <issue> --body "Started implementation. Source PRD: #<prd>. Related: #<parent>."
+```
+
+Resume an existing issue branch or PR. Inspect `git status` first; isolate work or stop if unrelated changes would be carried into the PR. Otherwise branch from the repository default branch:
+
+```bash
+git switch <default-branch>
+git pull --ff-only
+git switch -c "issue/<issue-number>-<slug>"
+git push -u origin HEAD
+```
+
+Write the PR body from the work actually completed. Include a summary, relevant behavior, verification results, and related issue/file links. Use `Closes #<subtask>` for a subtask, `Closes #<task>` for a task with no subtasks, and `Part of #<task>` for a parent task with children. Also link the PRD and map with `Part of` references.
+
+```bash
+gh pr create --base <default-branch> --title "[#<issue-number>] <Summary>" --body-file /tmp/pr-body.md
+gh pr edit <pr> --body-file /tmp/pr-body.md
+gh issue edit <issue> --add-label "status:in-review" --remove-label "status:in-progress"
+gh issue comment <issue> --body "PR: <pr-url>. Verification: <commands/results>."
+```
+
+On every resume with an issue or PR link, refresh merge state:
+
+```bash
+gh pr view <pr> --json state,mergedAt,url
+```
+
+Only a merged PR completes its leaf issue. GitHub may already have closed an issue referenced by `Closes`; still apply the completed label and record the merge link. Run `gh issue close` only when the issue is still open:
+
+```bash
+gh issue edit <issue> --add-label "status:completed" --remove-label "status:in-review" \
+  --remove-label "status:in-progress" --remove-label "status:ready-for-agent" \
+  --remove-label "status:blocked"
+gh issue close <issue> --comment "Completed by merged PR <pr-url>."
+```
+
+If GitHub already closed the leaf through `Closes`, apply the label and add a comment with `gh issue comment <issue> --body "Completed by merged PR <pr-url>."` instead of running `gh issue close` again.
+
+If the issue is a parent task with open subtasks, leave it open as `status:in-progress` after its own PR merges. Close it after every child subtask is closed and its own PR, if any, is merged. If children finish while its PR is still open, keep it `status:in-review` until merge. Once all tasks and subtasks for a PRD are closed, mark and close the PRD; when the map has no remaining in-scope work, mark and close the map too. Add a rollup comment with links to the closed children and merged PRs at each closure.
+
+```bash
+gh issue edit <prd> --add-label "status:completed" --remove-label "status:approved"
+gh issue close <prd> --comment "All tasks and subtasks are complete: <issue/PR links>."
+gh issue edit <map> --add-label "status:completed" --remove-label "status:in-progress"
+gh issue close <map> --comment "Initiative complete. PRD: #<prd>."
 ```

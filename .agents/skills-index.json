@@ -122,7 +122,7 @@
     "name": "rpg-wayfinder",
     "tier": 2,
     "path": ".agents/skills/rpg-wayfinder/SKILL.md",
-    "description": "Guide a large initiative from a user requirements intake through GitHub grilling issues, an approved RPG PRD, and dependent task and subtask issues.",
+    "description": "Guide large initiatives from requirements and GitHub grilling issues through an approved RPG PRD, implementation branches and PRs, and issue closure.",
     "disable_model_invocation": true
   },
   {

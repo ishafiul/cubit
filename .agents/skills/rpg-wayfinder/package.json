@@ -1,7 +1,7 @@
 {
   "name": "rpg-wayfinder",
   "version": "1.0.0",
-  "description": "Requirements-to-PRD issue workflow with GitHub grilling decisions and dependent capability tasks and feature subtasks.",
+  "description": "GitHub issue workflow from requirements and grilling through an approved PRD, implementation PRs, and hierarchical issue closure.",
   "main": "SKILL.md",
   "scripts": {
     "provision-labels": "bash scripts/provision-labels.sh"

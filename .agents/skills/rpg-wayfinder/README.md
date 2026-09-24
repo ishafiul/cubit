@@ -11,9 +11,11 @@ Requirements intake
   → RPG PRD file + review issue
   → explicit PRD approval
   → capability tasks + feature subtasks
+  → issue branches + linked PRs
+  → merged PRs close subtasks, parent tasks, PRD, and map in order
 ```
 
-GitHub issues hold the planning record. The map stores the requirements and links to decisions; grilling comments preserve user answers; the PRD issue gates task creation. The agent creates grilling issues before interviewing and creates tasks only after PRD approval.
+GitHub issues hold the planning and execution record. The map stores requirements and decision links; grilling comments preserve user answers; PRD issue comments carry review feedback and approval. The PRD file and issue are updated together, and task creation waits for issue-level approval. Task/subtask issues track implementation through branch, PR review, and merge. Parent tasks close after all subtasks; the PRD and map close after all work under them closes.
 
 ## Use
 

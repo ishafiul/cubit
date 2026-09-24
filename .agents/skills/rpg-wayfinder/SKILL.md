@@ -1,6 +1,6 @@
 ---
 name: rpg-wayfinder
-description: Guide a large initiative from a user requirements intake through GitHub grilling issues, an approved RPG PRD, and dependent task and subtask issues.
+description: Guide large initiatives from requirements and GitHub grilling issues through an approved RPG PRD, implementation branches and PRs, and issue closure.
 disable-model-invocation: true
 ---
 
@@ -12,7 +12,7 @@ For a small, already clear change, use the repo's simpler spec or ticket workflo
 
 ## Lifecycle
 
-`Requirements form → map + grilling issues → resolved grilling → PRD review → approved PRD → tasks + subtasks`
+`Requirements → map + grilling issues → approved PRD → tasks + subtasks → branches + PRs → merged and closed issue tree`
 
 Every phase ends with a visible GitHub artifact. Continue across phases only when the stated gate is met.
 
@@ -88,21 +88,46 @@ After the grilling completion gate, read the intake, map, and final resolution c
 
 Create a `type:prd,status:needs-review` issue linking to the file. Include a concise summary and review checklist, then link the PRD issue from the map. The issue is the review and approval record.
 
-If the user requests changes, update the file and issue and keep the PRD in review. Treat explicit user approval in chat as authorization to add `status:approved` to the PRD issue and record the approval comment.
+Read the PRD issue comments for review feedback. If the user requests a change, add `status:changes-requested` and remove `status:needs-review`; update the PRD file and issue description, then comment with what changed and links to the updated file and relevant sections. Return the issue to `status:needs-review` and wait for another review.
 
-Completion: the PRD file and issue agree, and the PRD issue has `status:approved`. No task or subtask is created before this gate.
+Accept approval only when the PRD issue records it: a user/maintainer sets `status:approved` or leaves an explicit approval comment. If the comment approves but the label is missing, add the label and record the approval. Chat-only approval does not release task creation. Recheck the latest issue comments and ensure the file and issue description match before proceeding.
+
+Completion: the PRD file and issue agree, there are no outstanding change requests, and the PRD issue has `status:approved` based on issue-level approval. No task or subtask is created before this gate.
 
 ## 5. Create tasks and subtasks from the approved PRD
 
-Create one `type:task` parent issue per PRD capability and one `type:subtask` issue per feature. Each subtask includes its source PRD section, description, inputs, outputs, behavior, acceptance criteria, and verification approach. Link every issue to its PRD and map; link subtasks to their parent task.
+Create one `type:task` issue per PRD capability and one `type:subtask` issue per feature. Each issue links its source PRD section, map, relevant files or decisions, and parent/child issues. Each subtask includes description, inputs, outputs, behavior, acceptance criteria, and verification approach.
 
 Create all issue records first, then wire dependencies from the PRD graph using GitHub's native issue dependencies when available. Otherwise record `Blocked by: #<issue>` in the issue body. Apply exactly one readiness status to each actionable issue: `status:ready-for-agent` when it has no open blockers, or `status:blocked` while any blocker remains. Keep parent issues as capability rollups with child checklists.
 
 Completion: every PRD capability and feature is represented, links and blockers are recorded, and actionable issues have correct readiness labels. Report the created issue links and the ready frontier.
 
-## Implementation
+## 6. Start or resume from an issue or PR link
 
-When the user asks to implement a ready issue, use the repo's `/tdd` and `/code-review` workflows. Keep implementation scope tied to that issue and its approved PRD.
+An issue number or URL is enough to start or resume its type-specific workflow. Read the issue body, comments, labels, parent links, blockers, and source PRD before changing state. If the user gives a PR link, inspect its current state and related issues.
+
+- **Grilling / decision**: continue the interview in the issue. Comment each Q&A round and final decision; update the issue description with the current question and settled outcome while preserving the comment history. Link relevant requirements, source files, and related issues.
+- **PRD**: read new issue comments, update the PRD file and issue description for requested changes, comment with a summary and file links, and create tasks only after issue-level approval is recorded.
+- **Map**: resume its frontier and keep its issue links and progress index current.
+- **Task / subtask**: an open, ready issue ID or URL means start or resume implementation. First confirm the PRD is approved and all blockers are closed. If blocked, keep `status:blocked`, comment with blocker links, and stop. Otherwise assign the issue to `@me`, add `status:in-progress`, remove `status:ready-for-agent`, and comment with the PRD and relevant child/parent links.
+
+For a task or subtask, inspect existing branches and PRs for the issue. Resume its existing branch/PR when present. Otherwise create a branch from the repository's default branch using its naming convention; when none exists, use `issue/<number>-<slug>`. Preserve unrelated work in the working tree.
+
+Keep the issue description aligned with approved scope and acceptance criteria. If implementation reveals an accepted clarification or a new blocker, update the description and add a comment linking its source issue, PRD section, or repository file.
+
+Implement against the approved issue and PRD using the repo's `/tdd` and `/code-review` workflows. Commit and push the issue branch, then create a PR. The PR description must describe what was actually implemented and include verification results plus links to the issue, parent task, PRD, map, and relevant files or decisions. Use `Closes #<issue>` for a leaf subtask or task with no children. For a parent task with open subtasks, use `Part of #<task>` so its PR cannot close the rollup early.
+
+After opening a PR, change the implementation issue to `status:in-review` (remove `status:in-progress`) and comment with the PR link. Update the PR description and issue comment when implementation scope or verification changes. Use comments for meaningful progress, decisions, blockers, and handoffs; keep each comment useful to the next person.
+
+## 7. Reconcile merged PRs and close the issue tree
+
+Whenever resuming from an issue or PR link, refresh GitHub state. If a leaf issue's PR is merged, add `status:completed`, remove stale readiness/progress/review labels, and close the issue if GitHub has not already closed it. Comment with the merged PR link. Never mark work completed while its PR is open or unmerged. If a parent task's PR is merged while subtasks remain open, remove `status:in-review`, keep the task open as `status:in-progress`, and comment that child work remains. If all subtasks are already closed, complete and close the parent after its PR merges.
+
+After closing a subtask, inspect all subtasks linked to its parent task. When every subtask is closed and the parent has no unmerged PR, mark the parent `status:completed`, comment with the child links, and close it. If the parent has an open PR, keep it `status:in-review` until that PR merges. If any child remains open, keep the parent open and report the remaining children.
+
+After all tasks and subtasks linked to a PRD are closed, mark the PRD `status:completed`, comment with the completed task/PR links, and close it. Then, if the map has no other in-scope open work, mark the map `status:completed`, comment with the PRD link, and close it.
+
+The skill reconciles merge events when invoked or resumed with an issue/PR link; it does not run a background GitHub watcher.
 
 ## References
 
