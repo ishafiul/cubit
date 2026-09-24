@@ -464,6 +464,53 @@ export default {
 					}
 				})
 			})
+
+			t.Run("When importing wrangler config with workflows and containers", func(t *testing.T) {
+				wranglerWithWfCt := `{
+					"name": "worker-with-wf-ct",
+					"workflows": [
+						{ "name": "order-pipeline", "binding": "ORDER_WF", "class_name": "OrderWorkflow" }
+					],
+					"containers": [
+						{ "name": "cache-sidecar", "image": "redis:7-alpine", "port": 6379 }
+					]
+				}`
+
+				_, summary, err := svc.ImportWrangler(context.Background(), app.ID, wranglerWithWfCt, "json", "")
+
+				t.Run("Then workflows and containers are persisted to SQLite repository", func(t *testing.T) {
+					if err != nil {
+						t.Fatalf("expected no error importing wrangler config, got: %v", err)
+					}
+					if summary.ImportedWorkflowsCount != 1 {
+						t.Errorf("expected 1 imported workflow, got %d", summary.ImportedWorkflowsCount)
+					}
+					if summary.ImportedContainersCount != 1 {
+						t.Errorf("expected 1 imported container, got %d", summary.ImportedContainersCount)
+					}
+
+					refetched, err := svc.GetByID(context.Background(), app.ID)
+					if err != nil {
+						t.Fatalf("expected no error getting app by id: %v", err)
+					}
+
+					var foundWF, foundCT bool
+					for _, b := range refetched.Bindings {
+						if b.Type == domain.BindingTypeWorkflow && b.Name == "ORDER_WF" && b.ClassName == "OrderWorkflow" && b.WorkflowName == "order-pipeline" {
+							foundWF = true
+						}
+						if b.Type == domain.BindingTypeContainer && b.Name == "cache-sidecar" && b.Image == "redis:7-alpine" && b.Port == 6379 {
+							foundCT = true
+						}
+					}
+					if !foundWF {
+						t.Errorf("expected ORDER_WF in app bindings, got: %+v", refetched.Bindings)
+					}
+					if !foundCT {
+						t.Errorf("expected cache-sidecar in app bindings, got: %+v", refetched.Bindings)
+					}
+				})
+			})
 		})
 
 		t.Run("When accessing Cloudflare edge context request.cf", func(t *testing.T) {

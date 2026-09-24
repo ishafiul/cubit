@@ -153,17 +153,34 @@ type MigrationConfig struct {
 
 // WorkflowBinding represents a Cloudflare Workflow binding in wrangler configuration.
 type WorkflowBinding struct {
-	Name      string `json:"name" toml:"name"`
-	Binding   string `json:"binding" toml:"binding"`
+	Name      string `json:"name,omitempty" toml:"name,omitempty"`
+	Binding   string `json:"binding,omitempty" toml:"binding,omitempty"`
 	ClassName string `json:"class_name" toml:"class_name"`
+}
+
+// GetBindingName returns the binding identifier, prioritizing Binding over Name.
+func (w WorkflowBinding) GetBindingName() string {
+	if w.Binding != "" {
+		return w.Binding
+	}
+	return w.Name
 }
 
 // ContainerBinding represents an experimental container sidecar binding in wrangler configuration.
 type ContainerBinding struct {
-	Name    string            `json:"name" toml:"name"`
+	Name    string            `json:"name,omitempty" toml:"name,omitempty"`
+	Binding string            `json:"binding,omitempty" toml:"binding,omitempty"`
 	Image   string            `json:"image" toml:"image"`
 	Port    int               `json:"port,omitempty" toml:"port,omitempty"`
 	EnvVars map[string]string `json:"env_vars,omitempty" toml:"env_vars,omitempty"`
+}
+
+// GetBindingName returns the binding identifier, prioritizing Binding over Name.
+func (c ContainerBinding) GetBindingName() string {
+	if c.Binding != "" {
+		return c.Binding
+	}
+	return c.Name
 }
 
 // RuleConfig represents a custom module bundling rule in wrangler configuration.
@@ -198,20 +215,22 @@ type WranglerConfig struct {
 
 // ImportSummary provides statistics about what was updated from the wrangler configuration.
 type ImportSummary struct {
-	Name                  string   `json:"name,omitempty"`
-	Main                  string   `json:"main,omitempty"`
-	AssetsDirectory       string   `json:"assetsDirectory,omitempty"`
-	CompatibilityDate     string   `json:"compatibilityDate,omitempty"`
-	CompatibilityFlags    []string `json:"compatibilityFlags,omitempty"`
+	Name                        string   `json:"name,omitempty"`
+	Main                        string   `json:"main,omitempty"`
+	AssetsDirectory             string   `json:"assetsDirectory,omitempty"`
+	CompatibilityDate           string   `json:"compatibilityDate,omitempty"`
+	CompatibilityFlags          []string `json:"compatibilityFlags,omitempty"`
 	ImportedVarsCount           int      `json:"importedVarsCount"`
 	PreservedSecretsCount       int      `json:"preservedSecretsCount"`
 	ImportedBindingsCount       int      `json:"importedBindingsCount"`
 	ImportedDurableObjectsCount int      `json:"importedDurableObjectsCount,omitempty"`
 	ImportedMigrationsCount     int      `json:"importedMigrationsCount,omitempty"`
+	ImportedWorkflowsCount      int      `json:"importedWorkflowsCount,omitempty"`
+	ImportedContainersCount     int      `json:"importedContainersCount,omitempty"`
 	CronsCount                  int      `json:"cronsCount"`
 	ImportedRoutesCount         int      `json:"importedRoutesCount,omitempty"`
-	ExtractedRoutes       []string `json:"extractedRoutes,omitempty"`
-	DetectedFormat        string   `json:"detectedFormat"`
+	ExtractedRoutes             []string `json:"extractedRoutes,omitempty"`
+	DetectedFormat              string   `json:"detectedFormat"`
 }
 
 // StripComments removes single-line (//) and multi-line (/* */) comments from JSON/JSONC text,
@@ -704,6 +723,55 @@ func ApplyToApplication(app *domain.Application, cfg *WranglerConfig, envName st
 			importedBindings++
 			summary.ImportedDurableObjectsCount++
 		}
+	}
+
+	// Workflows
+	for _, wf := range effective.Workflows {
+		bName := wf.GetBindingName()
+		if bName == "" {
+			continue
+		}
+		resID := wf.Name
+		if resID == "" {
+			resID = wf.ClassName
+		}
+		if resID == "" {
+			resID = bName
+		}
+		bKey := string(domain.BindingTypeWorkflow) + ":" + bName
+		bindingMap[bKey] = domain.ResourceBinding{
+			Type:         domain.BindingTypeWorkflow,
+			Name:         bName,
+			ResourceID:   resID,
+			ClassName:    wf.ClassName,
+			WorkflowName: wf.Name,
+		}
+		importedBindings++
+		summary.ImportedWorkflowsCount++
+	}
+
+	// Containers
+	for _, c := range effective.Containers {
+		bName := c.GetBindingName()
+		if bName == "" {
+			continue
+		}
+		resID := c.Image
+		if resID == "" {
+			resID = bName
+		}
+		bKey := string(domain.BindingTypeContainer) + ":" + bName
+		bindingMap[bKey] = domain.ResourceBinding{
+			Type:             domain.BindingTypeContainer,
+			Name:             bName,
+			ResourceID:       resID,
+			ContainerName:    c.Name,
+			Image:            c.Image,
+			Port:             c.Port,
+			ContainerEnvVars: c.EnvVars,
+		}
+		importedBindings++
+		summary.ImportedContainersCount++
 	}
 
 	var finalBindings []domain.ResourceBinding

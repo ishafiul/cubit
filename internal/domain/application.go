@@ -45,14 +45,15 @@ const DefaultHelloWorldWorker = `export default {
 type BindingType string
 
 const (
-	BindingTypeKV       BindingType = "kv_namespace"
-	BindingTypeD1       BindingType = "d1_database"
-	BindingTypeR2       BindingType = "r2_bucket"
-	BindingTypeQueue    BindingType = "queue"
-	BindingTypeWorkflow BindingType = "workflow"
+	BindingTypeKV            BindingType = "kv_namespace"
+	BindingTypeD1            BindingType = "d1_database"
+	BindingTypeR2            BindingType = "r2_bucket"
+	BindingTypeQueue         BindingType = "queue"
+	BindingTypeWorkflow      BindingType = "workflow"
 	BindingTypeService       BindingType = "service"
 	BindingTypeAssets        BindingType = "assets"
 	BindingTypeDurableObject BindingType = "durable_object"
+	BindingTypeContainer     BindingType = "container"
 )
 
 // EnvironmentVariable represents a key-value pair injected into a Worker isolate.
@@ -62,14 +63,19 @@ type EnvironmentVariable struct {
 	IsSecret bool   `json:"isSecret"`
 }
 
-// ResourceBinding represents a cloud binding to a Worker (e.g. KV, R2, D1, Service RPC, Durable Object).
+// ResourceBinding represents a cloud binding to a Worker (e.g. KV, R2, D1, Service RPC, Durable Object, Workflow, Container).
 type ResourceBinding struct {
-	Type        BindingType `json:"type"`
-	Name        string      `json:"name"`
-	ResourceID  string      `json:"resourceId"`
-	ClassName   string      `json:"className,omitempty"`
-	ScriptName  string      `json:"scriptName,omitempty"`
-	Environment string      `json:"environment,omitempty"`
+	Type             BindingType       `json:"type"`
+	Name             string            `json:"name"`
+	ResourceID       string            `json:"resourceId"`
+	ClassName        string            `json:"className,omitempty"`
+	ScriptName       string            `json:"scriptName,omitempty"`
+	Environment      string            `json:"environment,omitempty"`
+	WorkflowName     string            `json:"workflowName,omitempty"`
+	ContainerName    string            `json:"containerName,omitempty"`
+	Image            string            `json:"image,omitempty"`
+	Port             int               `json:"port,omitempty"`
+	ContainerEnvVars map[string]string `json:"containerEnvVars,omitempty"`
 }
 
 // MigrationRenamedClass represents a renamed class in a Durable Object migration step.
