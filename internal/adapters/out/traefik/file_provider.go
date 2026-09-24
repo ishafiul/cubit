@@ -92,6 +92,9 @@ func (p *FileProvider) SyncRoutes(ctx context.Context, routes []RouteRule) error
 	for _, r := range routes {
 		serviceName := "svc-" + sanitize(r.AppName)
 		routerName := fmt.Sprintf("rt-%s-%s", sanitize(r.AppName), sanitize(r.Hostname))
+		if r.PathPrefix != "" && r.PathPrefix != "/" {
+			routerName = fmt.Sprintf("%s-%s", routerName, sanitize(strings.Trim(r.PathPrefix, "/")))
+		}
 
 		// Build Traefik routing rule
 		var ruleParts []string
@@ -160,6 +163,7 @@ func (p *FileProvider) SyncRoutes(ctx context.Context, routes []RouteRule) error
 }
 
 func sanitize(s string) string {
+	s = strings.ReplaceAll(s, "*", "wildcard")
 	s = strings.ReplaceAll(s, ".", "-")
 	s = strings.ReplaceAll(s, "_", "-")
 	s = strings.ReplaceAll(s, "/", "-")

@@ -3,6 +3,7 @@ package application_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -387,6 +388,33 @@ export default {
 				if len(updatedApp.Bindings) != 1 || updatedApp.Bindings[0].Name != "DB" {
 					t.Errorf("expected DB binding, got: %v", updatedApp.Bindings)
 				}
+			})
+
+			t.Run("When importing wrangler config with routes and domain registrar configured", func(t *testing.T) {
+				reg := &mockAppDomainRegistrar{}
+				svc.SetDomainRegistrar(reg)
+
+				wranglerWithRoutes := `{
+					"name": "worker-with-routes",
+					"routes": [
+						"api.example.com/*",
+						"*sub.domain.com/path*"
+					]
+				}`
+
+				_, summary, err := svc.ImportWrangler(context.Background(), app.ID, wranglerWithRoutes, "json", "")
+
+				t.Run("Then extracted routes are registered and summarized", func(t *testing.T) {
+					if err != nil {
+						t.Fatalf("expected no error importing wrangler config, got: %v", err)
+					}
+					if summary.ImportedRoutesCount != 3 {
+						t.Errorf("expected 3 registered domains, got %d", summary.ImportedRoutesCount)
+					}
+					if len(reg.registeredRoutes) != 2 {
+						t.Errorf("expected 2 extracted route patterns passed to registrar, got %d", len(reg.registeredRoutes))
+					}
+				})
 			})
 		})
 
@@ -835,6 +863,22 @@ export default {
 			})
 		})
 	})
+}
+
+type mockAppDomainRegistrar struct {
+	registeredRoutes []string
+}
+
+func (m *mockAppDomainRegistrar) RegisterRoutes(ctx context.Context, appID string, routes []string) ([]*domain.Domain, error) {
+	m.registeredRoutes = append(m.registeredRoutes, routes...)
+	var res []*domain.Domain
+	for i := range routes {
+		d, _ := domain.NewDomain(fmt.Sprintf("dom-%d", i), appID, "example.com", "/")
+		res = append(res, d)
+	}
+	dExtra, _ := domain.NewDomain("dom-extra", appID, "*.example.com", "/")
+	res = append(res, dExtra)
+	return res, nil
 }
 
 

@@ -6,7 +6,12 @@ import (
 	"time"
 )
 
-var hostnameRegex = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$`)
+var hostnameRegex = regexp.MustCompile(`^(\*\.)?([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$`)
+
+// IsValidHostname reports whether the given hostname adheres to standard domain or wildcard domain format.
+func IsValidHostname(hostname string) bool {
+	return hostnameRegex.MatchString(strings.ToLower(strings.TrimSpace(hostname)))
+}
 
 // Domain represents a custom domain routing rule bound to an application.
 type Domain struct {
@@ -29,7 +34,7 @@ func NewDomain(id, applicationID, hostname, pathPrefix string) (*Domain, error) 
 	}
 
 	hostname = strings.ToLower(strings.TrimSpace(hostname))
-	if !hostnameRegex.MatchString(hostname) {
+	if !IsValidHostname(hostname) {
 		return nil, NewValidationError("invalid hostname format: " + hostname)
 	}
 

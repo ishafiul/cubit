@@ -31,6 +31,11 @@ type RouteSyncer interface {
 	SyncRoutes(ctx context.Context) error
 }
 
+// DomainRouteRegistrar extracts and registers custom domain routes for an application.
+type DomainRouteRegistrar interface {
+	RegisterRoutes(ctx context.Context, appID string, routes []string) ([]*domain.Domain, error)
+}
+
 // Service defines application business operations.
 type Service interface {
 	Create(ctx context.Context, name string, sourceType domain.SourceType, gitRepo, branch, rootDir, inlineCode string, autoDeploy bool, envVars []domain.EnvironmentVariable, bindings []domain.ResourceBinding) (*domain.Application, error)
@@ -211,6 +216,8 @@ type ApplicationService struct {
 	routeSyncer     RouteSyncer
 	fleetBucket     string
 	controlPlaneURL string
+	registrarMu     sync.RWMutex
+	domainRegistrar DomainRouteRegistrar
 
 	metricsMu sync.RWMutex
 	metrics   map[string]*appMetricsTracker
@@ -230,6 +237,19 @@ func NewService(repo Repository, storage StorageDownloader, routeSyncer RouteSyn
 		metrics:         make(map[string]*appMetricsTracker),
 		subscribers:     make(map[string]map[chan domain.RequestLogEvent]struct{}),
 	}
+}
+
+// SetDomainRegistrar sets the domain registrar for automatic ingress route registration.
+func (s *ApplicationService) SetDomainRegistrar(registrar DomainRouteRegistrar) {
+	s.registrarMu.Lock()
+	defer s.registrarMu.Unlock()
+	s.domainRegistrar = registrar
+}
+
+func (s *ApplicationService) getDomainRegistrar() DomainRouteRegistrar {
+	s.registrarMu.RLock()
+	defer s.registrarMu.RUnlock()
+	return s.domainRegistrar
 }
 
 // SetControlPlaneURL sets the loopback base URL for in-isolate resource binding calls.
@@ -1442,6 +1462,19 @@ func (s *ApplicationService) ImportWrangler(ctx context.Context, appID string, r
 	summary, err := wrangler.ApplyToApplication(app, cfg, envName, detectedFormat)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	// Extract and register routes if domain registrar is provided
+	registrar := s.getDomainRegistrar()
+	if registrar != nil {
+		_, extractedRoutes, sanitizeErr := wrangler.SanitizeForCelldWithEnv([]byte(rawConfig), envName)
+		if sanitizeErr == nil && len(extractedRoutes) > 0 {
+			registered, regErr := registrar.RegisterRoutes(ctx, app.ID, extractedRoutes)
+			if regErr == nil {
+				summary.ImportedRoutesCount = len(registered)
+				summary.ExtractedRoutes = extractedRoutes
+			}
+		}
 	}
 
 	if err := s.repo.Update(ctx, app); err != nil {

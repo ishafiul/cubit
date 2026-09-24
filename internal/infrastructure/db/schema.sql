@@ -63,11 +63,12 @@ CREATE TABLE IF NOT EXISTS deployment_logs (
 CREATE TABLE IF NOT EXISTS domains (
     id TEXT PRIMARY KEY,
     application_id TEXT NOT NULL,
-    hostname TEXT UNIQUE NOT NULL,
+    hostname TEXT NOT NULL,
     path_prefix TEXT NOT NULL DEFAULT '/',
     ssl_active INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL,
+    UNIQUE(hostname, path_prefix),
     FOREIGN KEY(application_id) REFERENCES applications(id) ON DELETE CASCADE
 );
 
