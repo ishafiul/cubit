@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS applications (
     status TEXT NOT NULL,
     env_vars TEXT,
     bindings TEXT,
+    migrations TEXT NOT NULL DEFAULT '[]',
     active_deployment_id TEXT,
     auto_deploy INTEGER NOT NULL DEFAULT 1,
     compatibility_date TEXT NOT NULL DEFAULT '2024-09-23',

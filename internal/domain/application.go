@@ -50,8 +50,9 @@ const (
 	BindingTypeR2       BindingType = "r2_bucket"
 	BindingTypeQueue    BindingType = "queue"
 	BindingTypeWorkflow BindingType = "workflow"
-	BindingTypeService  BindingType = "service"
-	BindingTypeAssets   BindingType = "assets"
+	BindingTypeService       BindingType = "service"
+	BindingTypeAssets        BindingType = "assets"
+	BindingTypeDurableObject BindingType = "durable_object"
 )
 
 // EnvironmentVariable represents a key-value pair injected into a Worker isolate.
@@ -61,11 +62,28 @@ type EnvironmentVariable struct {
 	IsSecret bool   `json:"isSecret"`
 }
 
-// ResourceBinding represents a cloud binding to a Worker (e.g. KV, R2, D1, Service RPC).
+// ResourceBinding represents a cloud binding to a Worker (e.g. KV, R2, D1, Service RPC, Durable Object).
 type ResourceBinding struct {
-	Type       BindingType `json:"type"`
-	Name       string      `json:"name"`
-	ResourceID string      `json:"resourceId"`
+	Type        BindingType `json:"type"`
+	Name        string      `json:"name"`
+	ResourceID  string      `json:"resourceId"`
+	ClassName   string      `json:"className,omitempty"`
+	ScriptName  string      `json:"scriptName,omitempty"`
+	Environment string      `json:"environment,omitempty"`
+}
+
+// MigrationRenamedClass represents a renamed class in a Durable Object migration step.
+type MigrationRenamedClass struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+// MigrationStep represents a Durable Object class migration history entry.
+type MigrationStep struct {
+	Tag            string                  `json:"tag"`
+	NewClasses     []string                `json:"newClasses,omitempty"`
+	RenamedClasses []MigrationRenamedClass `json:"renamedClasses,omitempty"`
+	DeletedClasses []string                `json:"deletedClasses,omitempty"`
 }
 
 // ApplicationMetrics encapsulates real-time worker execution telemetry.
@@ -126,6 +144,7 @@ type Application struct {
 	Status             ApplicationStatus
 	EnvVars            []EnvironmentVariable
 	Bindings           []ResourceBinding
+	Migrations         []MigrationStep
 	ActiveDeploymentID string
 	CompatibilityDate  string
 	CompatibilityFlags []string
@@ -240,6 +259,7 @@ func NewApplicationWithSourceAndDir(
 		Status:             AppStatusCreated,
 		EnvVars:            envVars,
 		Bindings:           bindings,
+		Migrations:         []MigrationStep{},
 		CompatibilityDate:  "2024-09-23",
 		CompatibilityFlags: []string{},
 		MemoryLimitMB:      128,
@@ -252,6 +272,19 @@ func NewApplicationWithSourceAndDir(
 // SetRootDir updates the application root directory.
 func (a *Application) SetRootDir(dir string) {
 	a.RootDir = CleanRootDir(dir)
+	a.UpdatedAt = time.Now().UTC()
+}
+
+// RecordMigration idempotently appends or updates a migration step by tag.
+func (a *Application) RecordMigration(step MigrationStep) {
+	for i, existing := range a.Migrations {
+		if existing.Tag == step.Tag {
+			a.Migrations[i] = step
+			a.UpdatedAt = time.Now().UTC()
+			return
+		}
+	}
+	a.Migrations = append(a.Migrations, step)
 	a.UpdatedAt = time.Now().UTC()
 }
 

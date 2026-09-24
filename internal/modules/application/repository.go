@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -32,11 +33,111 @@ func NewRepository(db *sql.DB) *SQLiteRepository {
 	return &SQLiteRepository{db: db}
 }
 
+const selectApplicationColumns = `
+	id, name, source_type, subdomain, git_repo, branch, COALESCE(root_dir, ''), inline_code, COALESCE(auto_deploy, 1), status, env_vars, bindings, COALESCE(migrations, '[]'), active_deployment_id,
+	COALESCE(compatibility_date, '2024-09-23'), COALESCE(compatibility_flags, '[]'), COALESCE(memory_limit_mb, 128), COALESCE(max_duration_ms, 50),
+	created_at, updated_at
+`
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanApplicationRow(s rowScanner) (*domain.Application, error) {
+	var (
+		app                                                                           domain.Application
+		sourceTypeStr, subdomainStr, statusStr, envJSON, bindingsJSON, migrationsJSON string
+		createdAtStr, updatedAtStr                                                    string
+		compatDateStr, compatFlagsJSON                                                string
+		gitRepoNull, inlineCodeNull, activeDepID                                      sql.NullString
+		autoDeployInt, memLimitInt, maxDurationInt                                    int
+	)
+
+	err := s.Scan(
+		&app.ID, &app.Name, &sourceTypeStr, &subdomainStr, &gitRepoNull, &app.Branch, &app.RootDir, &inlineCodeNull, &autoDeployInt, &statusStr,
+		&envJSON, &bindingsJSON, &migrationsJSON, &activeDepID,
+		&compatDateStr, &compatFlagsJSON, &memLimitInt, &maxDurationInt,
+		&createdAtStr, &updatedAtStr,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	app.SourceType = domain.SourceType(sourceTypeStr)
+	app.Subdomain = subdomainStr
+	if gitRepoNull.Valid {
+		app.GitRepo = gitRepoNull.String
+	}
+	if inlineCodeNull.Valid {
+		app.InlineCode = inlineCodeNull.String
+	}
+	app.AutoDeploy = autoDeployInt == 1
+	app.Status = domain.ApplicationStatus(statusStr)
+	if activeDepID.Valid {
+		app.ActiveDeploymentID = activeDepID.String
+	}
+
+	if envJSON != "" {
+		if err := json.Unmarshal([]byte(envJSON), &app.EnvVars); err != nil {
+			return nil, fmt.Errorf("unmarshal env_vars: %w", err)
+		}
+	}
+	if bindingsJSON != "" {
+		if err := json.Unmarshal([]byte(bindingsJSON), &app.Bindings); err != nil {
+			return nil, fmt.Errorf("unmarshal bindings: %w", err)
+		}
+	}
+	if migrationsJSON != "" {
+		if err := json.Unmarshal([]byte(migrationsJSON), &app.Migrations); err != nil {
+			return nil, fmt.Errorf("unmarshal migrations: %w", err)
+		}
+	}
+	if app.Migrations == nil {
+		app.Migrations = []domain.MigrationStep{}
+	}
+	app.CompatibilityDate = compatDateStr
+	if compatFlagsJSON != "" {
+		if err := json.Unmarshal([]byte(compatFlagsJSON), &app.CompatibilityFlags); err != nil {
+			return nil, fmt.Errorf("unmarshal compatibility_flags: %w", err)
+		}
+	}
+	app.MemoryLimitMB = memLimitInt
+	app.MaxDurationMs = maxDurationInt
+
+	if createdAtStr != "" {
+		t, err := time.Parse(time.RFC3339, createdAtStr)
+		if err == nil {
+			app.CreatedAt = t
+		}
+	}
+	if updatedAtStr != "" {
+		t, err := time.Parse(time.RFC3339, updatedAtStr)
+		if err == nil {
+			app.UpdatedAt = t
+		}
+	}
+
+	return &app, nil
+}
+
 // Save persists an application entity to SQLite.
 func (r *SQLiteRepository) Save(ctx context.Context, app *domain.Application) error {
-	envVarsJSON, _ := json.Marshal(app.EnvVars)
-	bindingsJSON, _ := json.Marshal(app.Bindings)
-	compatFlagsJSON, _ := json.Marshal(app.CompatibilityFlags)
+	envVarsJSON, err := json.Marshal(app.EnvVars)
+	if err != nil {
+		return fmt.Errorf("marshal env_vars: %w", err)
+	}
+	bindingsJSON, err := json.Marshal(app.Bindings)
+	if err != nil {
+		return fmt.Errorf("marshal bindings: %w", err)
+	}
+	migrationsJSON, err := json.Marshal(app.Migrations)
+	if err != nil {
+		return fmt.Errorf("marshal migrations: %w", err)
+	}
+	compatFlagsJSON, err := json.Marshal(app.CompatibilityFlags)
+	if err != nil {
+		return fmt.Errorf("marshal compatibility_flags: %w", err)
+	}
 
 	sourceType := string(app.SourceType)
 	if sourceType == "" {
@@ -66,187 +167,72 @@ func (r *SQLiteRepository) Save(ctx context.Context, app *domain.Application) er
 	}
 
 	query := `
-		INSERT INTO applications (id, name, source_type, subdomain, git_repo, branch, root_dir, inline_code, auto_deploy, status, env_vars, bindings, active_deployment_id, compatibility_date, compatibility_flags, memory_limit_mb, max_duration_ms, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO applications (id, name, source_type, subdomain, git_repo, branch, root_dir, inline_code, auto_deploy, status, env_vars, bindings, migrations, active_deployment_id, compatibility_date, compatibility_flags, memory_limit_mb, max_duration_ms, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
-	_, err := r.db.ExecContext(ctx, query,
+	_, err = r.db.ExecContext(ctx, query,
 		app.ID, app.Name, sourceType, subdomain, app.GitRepo, app.Branch, app.RootDir, app.InlineCode, autoDeployInt, string(app.Status),
-		string(envVarsJSON), string(bindingsJSON), app.ActiveDeploymentID,
+		string(envVarsJSON), string(bindingsJSON), string(migrationsJSON), app.ActiveDeploymentID,
 		compatDate, string(compatFlagsJSON), memLimit, maxDuration,
 		app.CreatedAt.Format(time.RFC3339), app.UpdatedAt.Format(time.RFC3339),
 	)
-	return err
+	if err != nil {
+		return fmt.Errorf("insert application: %w", err)
+	}
+	return nil
 }
 
 // GetByID retrieves an application by its ID.
 func (r *SQLiteRepository) GetByID(ctx context.Context, id string) (*domain.Application, error) {
-	query := `
-		SELECT id, name, source_type, subdomain, git_repo, branch, COALESCE(root_dir, ''), inline_code, COALESCE(auto_deploy, 1), status, env_vars, bindings, active_deployment_id,
-		       COALESCE(compatibility_date, '2024-09-23'), COALESCE(compatibility_flags, '[]'), COALESCE(memory_limit_mb, 128), COALESCE(max_duration_ms, 50),
-		       created_at, updated_at
-		FROM applications WHERE id = ?
-	`
+	query := fmt.Sprintf("SELECT %s FROM applications WHERE id = ?", selectApplicationColumns)
 	row := r.db.QueryRowContext(ctx, query, id)
 
-	var (
-		app                                                                domain.Application
-		sourceTypeStr, subdomainStr, statusStr, envJSON, bindingsJSON, createdAtStr, updatedAtStr string
-		compatDateStr, compatFlagsJSON                                     string
-		gitRepoNull, inlineCodeNull, activeDepID                           sql.NullString
-		autoDeployInt, memLimitInt, maxDurationInt                         int
-	)
-
-	err := row.Scan(
-		&app.ID, &app.Name, &sourceTypeStr, &subdomainStr, &gitRepoNull, &app.Branch, &app.RootDir, &inlineCodeNull, &autoDeployInt, &statusStr,
-		&envJSON, &bindingsJSON, &activeDepID,
-		&compatDateStr, &compatFlagsJSON, &memLimitInt, &maxDurationInt,
-		&createdAtStr, &updatedAtStr,
-	)
+	app, err := scanApplicationRow(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, domain.NewNotFoundError("application not found: " + id)
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get application by id %q: %w", id, err)
 	}
 
-	app.SourceType = domain.SourceType(sourceTypeStr)
-	app.Subdomain = subdomainStr
-	if gitRepoNull.Valid {
-		app.GitRepo = gitRepoNull.String
-	}
-	if inlineCodeNull.Valid {
-		app.InlineCode = inlineCodeNull.String
-	}
-	app.AutoDeploy = autoDeployInt == 1
-	app.Status = domain.ApplicationStatus(statusStr)
-	if activeDepID.Valid {
-		app.ActiveDeploymentID = activeDepID.String
-	}
-	_ = json.Unmarshal([]byte(envJSON), &app.EnvVars)
-	_ = json.Unmarshal([]byte(bindingsJSON), &app.Bindings)
-	app.CompatibilityDate = compatDateStr
-	_ = json.Unmarshal([]byte(compatFlagsJSON), &app.CompatibilityFlags)
-	app.MemoryLimitMB = memLimitInt
-	app.MaxDurationMs = maxDurationInt
-	app.CreatedAt, _ = time.Parse(time.RFC3339, createdAtStr)
-	app.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAtStr)
-
-	return &app, nil
+	return app, nil
 }
 
 // GetBySubdomain retrieves an application by its subdomain or name.
 func (r *SQLiteRepository) GetBySubdomain(ctx context.Context, subdomain string) (*domain.Application, error) {
-	query := `
-		SELECT id, name, source_type, subdomain, git_repo, branch, COALESCE(root_dir, ''), inline_code, COALESCE(auto_deploy, 1), status, env_vars, bindings, active_deployment_id,
-		       COALESCE(compatibility_date, '2024-09-23'), COALESCE(compatibility_flags, '[]'), COALESCE(memory_limit_mb, 128), COALESCE(max_duration_ms, 50),
-		       created_at, updated_at
-		FROM applications WHERE subdomain = ? OR name = ?
-	`
+	query := fmt.Sprintf("SELECT %s FROM applications WHERE subdomain = ? OR name = ?", selectApplicationColumns)
 	row := r.db.QueryRowContext(ctx, query, subdomain, subdomain)
 
-	var (
-		app                                                                domain.Application
-		sourceTypeStr, subdomainStr, statusStr, envJSON, bindingsJSON, createdAtStr, updatedAtStr string
-		compatDateStr, compatFlagsJSON                                     string
-		gitRepoNull, inlineCodeNull, activeDepID                           sql.NullString
-		autoDeployInt, memLimitInt, maxDurationInt                         int
-	)
-
-	err := row.Scan(
-		&app.ID, &app.Name, &sourceTypeStr, &subdomainStr, &gitRepoNull, &app.Branch, &app.RootDir, &inlineCodeNull, &autoDeployInt, &statusStr,
-		&envJSON, &bindingsJSON, &activeDepID,
-		&compatDateStr, &compatFlagsJSON, &memLimitInt, &maxDurationInt,
-		&createdAtStr, &updatedAtStr,
-	)
+	app, err := scanApplicationRow(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, domain.NewNotFoundError("application not found: " + subdomain)
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get application by subdomain %q: %w", subdomain, err)
 	}
 
-	app.SourceType = domain.SourceType(sourceTypeStr)
-	app.Subdomain = subdomainStr
-	if gitRepoNull.Valid {
-		app.GitRepo = gitRepoNull.String
-	}
-	if inlineCodeNull.Valid {
-		app.InlineCode = inlineCodeNull.String
-	}
-	app.AutoDeploy = autoDeployInt == 1
-	app.Status = domain.ApplicationStatus(statusStr)
-	if activeDepID.Valid {
-		app.ActiveDeploymentID = activeDepID.String
-	}
-	_ = json.Unmarshal([]byte(envJSON), &app.EnvVars)
-	_ = json.Unmarshal([]byte(bindingsJSON), &app.Bindings)
-	app.CompatibilityDate = compatDateStr
-	_ = json.Unmarshal([]byte(compatFlagsJSON), &app.CompatibilityFlags)
-	app.MemoryLimitMB = memLimitInt
-	app.MaxDurationMs = maxDurationInt
-	app.CreatedAt, _ = time.Parse(time.RFC3339, createdAtStr)
-	app.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAtStr)
-
-	return &app, nil
+	return app, nil
 }
 
 // List retrieves all registered applications.
 func (r *SQLiteRepository) List(ctx context.Context) ([]*domain.Application, error) {
-	query := `
-		SELECT id, name, source_type, subdomain, git_repo, branch, COALESCE(root_dir, ''), inline_code, COALESCE(auto_deploy, 1), status, env_vars, bindings, active_deployment_id,
-		       COALESCE(compatibility_date, '2024-09-23'), COALESCE(compatibility_flags, '[]'), COALESCE(memory_limit_mb, 128), COALESCE(max_duration_ms, 50),
-		       created_at, updated_at
-		FROM applications ORDER BY created_at DESC
-	`
+	query := fmt.Sprintf("SELECT %s FROM applications ORDER BY created_at DESC", selectApplicationColumns)
 	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list applications: %w", err)
 	}
 	defer rows.Close()
 
 	var apps []*domain.Application
 	for rows.Next() {
-		var (
-			app                                                                domain.Application
-			sourceTypeStr, subdomainStr, statusStr, envJSON, bindingsJSON, createdAtStr, updatedAtStr string
-			compatDateStr, compatFlagsJSON                                     string
-			gitRepoNull, inlineCodeNull, activeDepID                           sql.NullString
-			autoDeployInt, memLimitInt, maxDurationInt                         int
-		)
-
-		err := rows.Scan(
-			&app.ID, &app.Name, &sourceTypeStr, &subdomainStr, &gitRepoNull, &app.Branch, &app.RootDir, &inlineCodeNull, &autoDeployInt, &statusStr,
-			&envJSON, &bindingsJSON, &activeDepID,
-			&compatDateStr, &compatFlagsJSON, &memLimitInt, &maxDurationInt,
-			&createdAtStr, &updatedAtStr,
-		)
+		app, err := scanApplicationRow(rows)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("scan application row: %w", err)
 		}
-
-		app.SourceType = domain.SourceType(sourceTypeStr)
-		app.Subdomain = subdomainStr
-		if gitRepoNull.Valid {
-			app.GitRepo = gitRepoNull.String
-		}
-		if inlineCodeNull.Valid {
-			app.InlineCode = inlineCodeNull.String
-		}
-		app.AutoDeploy = autoDeployInt == 1
-		app.Status = domain.ApplicationStatus(statusStr)
-		if activeDepID.Valid {
-			app.ActiveDeploymentID = activeDepID.String
-		}
-		_ = json.Unmarshal([]byte(envJSON), &app.EnvVars)
-		_ = json.Unmarshal([]byte(bindingsJSON), &app.Bindings)
-		app.CompatibilityDate = compatDateStr
-		_ = json.Unmarshal([]byte(compatFlagsJSON), &app.CompatibilityFlags)
-		app.MemoryLimitMB = memLimitInt
-		app.MaxDurationMs = maxDurationInt
-		app.CreatedAt, _ = time.Parse(time.RFC3339, createdAtStr)
-		app.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAtStr)
-
-		apps = append(apps, &app)
+		apps = append(apps, app)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate application rows: %w", err)
 	}
 
 	return apps, nil
@@ -282,9 +268,22 @@ func normalizeGitRepo(url string) string {
 
 // Update persists changes to an application.
 func (r *SQLiteRepository) Update(ctx context.Context, app *domain.Application) error {
-	envVarsJSON, _ := json.Marshal(app.EnvVars)
-	bindingsJSON, _ := json.Marshal(app.Bindings)
-	compatFlagsJSON, _ := json.Marshal(app.CompatibilityFlags)
+	envVarsJSON, err := json.Marshal(app.EnvVars)
+	if err != nil {
+		return fmt.Errorf("marshal env_vars: %w", err)
+	}
+	bindingsJSON, err := json.Marshal(app.Bindings)
+	if err != nil {
+		return fmt.Errorf("marshal bindings: %w", err)
+	}
+	migrationsJSON, err := json.Marshal(app.Migrations)
+	if err != nil {
+		return fmt.Errorf("marshal migrations: %w", err)
+	}
+	compatFlagsJSON, err := json.Marshal(app.CompatibilityFlags)
+	if err != nil {
+		return fmt.Errorf("marshal compatibility_flags: %w", err)
+	}
 
 	sourceType := string(app.SourceType)
 	if sourceType == "" {
@@ -316,22 +315,22 @@ func (r *SQLiteRepository) Update(ctx context.Context, app *domain.Application) 
 	query := `
 		UPDATE applications
 		SET name = ?, source_type = ?, subdomain = ?, git_repo = ?, branch = ?, root_dir = ?, inline_code = ?, auto_deploy = ?, status = ?,
-		    env_vars = ?, bindings = ?, active_deployment_id = ?, compatibility_date = ?, compatibility_flags = ?, memory_limit_mb = ?, max_duration_ms = ?, updated_at = ?
+		    env_vars = ?, bindings = ?, migrations = ?, active_deployment_id = ?, compatibility_date = ?, compatibility_flags = ?, memory_limit_mb = ?, max_duration_ms = ?, updated_at = ?
 		WHERE id = ?
 	`
 	res, err := r.db.ExecContext(ctx, query,
 		app.Name, sourceType, subdomain, app.GitRepo, app.Branch, app.RootDir, app.InlineCode, autoDeployInt, string(app.Status),
-		string(envVarsJSON), string(bindingsJSON), app.ActiveDeploymentID,
+		string(envVarsJSON), string(bindingsJSON), string(migrationsJSON), app.ActiveDeploymentID,
 		compatDate, string(compatFlagsJSON), memLimit, maxDuration,
 		app.UpdatedAt.Format(time.RFC3339), app.ID,
 	)
 	if err != nil {
-		return err
+		return fmt.Errorf("update application %q: %w", app.ID, err)
 	}
 
 	rows, err := res.RowsAffected()
 	if err != nil {
-		return err
+		return fmt.Errorf("get rows affected for update %q: %w", app.ID, err)
 	}
 	if rows == 0 {
 		return domain.NewNotFoundError("application not found: " + app.ID)
@@ -345,11 +344,11 @@ func (r *SQLiteRepository) Delete(ctx context.Context, id string) error {
 	query := `DELETE FROM applications WHERE id = ?`
 	res, err := r.db.ExecContext(ctx, query, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("delete application %q: %w", id, err)
 	}
 	rows, err := res.RowsAffected()
 	if err != nil {
-		return err
+		return fmt.Errorf("get rows affected for delete %q: %w", id, err)
 	}
 	if rows == 0 {
 		return domain.NewNotFoundError("application not found: " + id)
