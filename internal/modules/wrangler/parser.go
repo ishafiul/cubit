@@ -70,15 +70,47 @@ type AssetsConfig struct {
 
 // DurableObjectBinding represents a Durable Object binding in wrangler configuration.
 type DurableObjectBinding struct {
-	Name        string `json:"name" toml:"name"`
+	Name        string `json:"name,omitempty" toml:"name,omitempty"`
+	Binding     string `json:"binding,omitempty" toml:"binding,omitempty"`
 	ClassName   string `json:"class_name" toml:"class_name"`
 	ScriptName  string `json:"script_name,omitempty" toml:"script_name,omitempty"`
 	Environment string `json:"environment,omitempty" toml:"environment,omitempty"`
 }
 
+// GetBindingName returns the binding identifier, prioritizing Name over Binding.
+func (b DurableObjectBinding) GetBindingName() string {
+	if b.Name != "" {
+		return b.Name
+	}
+	return b.Binding
+}
+
 // DurableObjectsConfig represents the durable_objects block in wrangler configuration.
 type DurableObjectsConfig struct {
 	Bindings []DurableObjectBinding `json:"bindings" toml:"bindings"`
+}
+
+// UnmarshalJSON unmarshals DurableObjectsConfig supporting both object {"bindings": [...]} and array [...] formats.
+func (d *DurableObjectsConfig) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		return nil
+	}
+	if trimmed[0] == '[' {
+		var list []DurableObjectBinding
+		if err := json.Unmarshal(trimmed, &list); err != nil {
+			return err
+		}
+		d.Bindings = list
+		return nil
+	}
+	type alias DurableObjectsConfig
+	var a alias
+	if err := json.Unmarshal(trimmed, &a); err != nil {
+		return err
+	}
+	*d = DurableObjectsConfig(a)
+	return nil
 }
 
 // MigrationRenamedClass represents a renamed class in a Durable Object migration.
@@ -87,12 +119,36 @@ type MigrationRenamedClass struct {
 	To   string `json:"to" toml:"to"`
 }
 
+func mapRenamedClasses(classes []MigrationRenamedClass) []domain.MigrationRenamedClass {
+	if len(classes) == 0 {
+		return nil
+	}
+	res := make([]domain.MigrationRenamedClass, len(classes))
+	for i, rc := range classes {
+		res[i] = domain.MigrationRenamedClass{
+			From: rc.From,
+			To:   rc.To,
+		}
+	}
+	return res
+}
+
+// MigrationStepConfig represents a nested step in a Durable Object migration.
+type MigrationStepConfig struct {
+	NewClasses       []string                `json:"new_classes,omitempty" toml:"new_classes,omitempty"`
+	NewSqliteClasses []string                `json:"new_sqlite_classes,omitempty" toml:"new_sqlite_classes,omitempty"`
+	RenamedClasses   []MigrationRenamedClass `json:"renamed_classes,omitempty" toml:"renamed_classes,omitempty"`
+	DeletedClasses   []string                `json:"deleted_classes,omitempty" toml:"deleted_classes,omitempty"`
+}
+
 // MigrationConfig represents a Durable Object migration step in wrangler configuration.
 type MigrationConfig struct {
-	Tag            string                  `json:"tag" toml:"tag"`
-	NewClasses     []string                `json:"new_classes,omitempty" toml:"new_classes,omitempty"`
-	RenamedClasses []MigrationRenamedClass `json:"renamed_classes,omitempty" toml:"renamed_classes,omitempty"`
-	DeletedClasses []string                `json:"deleted_classes,omitempty" toml:"deleted_classes,omitempty"`
+	Tag              string                  `json:"tag" toml:"tag"`
+	NewClasses       []string                `json:"new_classes,omitempty" toml:"new_classes,omitempty"`
+	NewSqliteClasses []string                `json:"new_sqlite_classes,omitempty" toml:"new_sqlite_classes,omitempty"`
+	RenamedClasses   []MigrationRenamedClass `json:"renamed_classes,omitempty" toml:"renamed_classes,omitempty"`
+	DeletedClasses   []string                `json:"deleted_classes,omitempty" toml:"deleted_classes,omitempty"`
+	Steps            []MigrationStepConfig   `json:"steps,omitempty" toml:"steps,omitempty"`
 }
 
 // WorkflowBinding represents a Cloudflare Workflow binding in wrangler configuration.
@@ -147,11 +203,13 @@ type ImportSummary struct {
 	AssetsDirectory       string   `json:"assetsDirectory,omitempty"`
 	CompatibilityDate     string   `json:"compatibilityDate,omitempty"`
 	CompatibilityFlags    []string `json:"compatibilityFlags,omitempty"`
-	ImportedVarsCount     int      `json:"importedVarsCount"`
-	PreservedSecretsCount int      `json:"preservedSecretsCount"`
-	ImportedBindingsCount int      `json:"importedBindingsCount"`
-	CronsCount            int      `json:"cronsCount"`
-	ImportedRoutesCount   int      `json:"importedRoutesCount,omitempty"`
+	ImportedVarsCount           int      `json:"importedVarsCount"`
+	PreservedSecretsCount       int      `json:"preservedSecretsCount"`
+	ImportedBindingsCount       int      `json:"importedBindingsCount"`
+	ImportedDurableObjectsCount int      `json:"importedDurableObjectsCount,omitempty"`
+	ImportedMigrationsCount     int      `json:"importedMigrationsCount,omitempty"`
+	CronsCount                  int      `json:"cronsCount"`
+	ImportedRoutesCount         int      `json:"importedRoutesCount,omitempty"`
 	ExtractedRoutes       []string `json:"extractedRoutes,omitempty"`
 	DetectedFormat        string   `json:"detectedFormat"`
 }
@@ -623,6 +681,31 @@ func ApplyToApplication(app *domain.Application, cfg *WranglerConfig, envName st
 		importedBindings++
 	}
 
+	// Durable Objects
+	if effective.DurableObjects != nil {
+		for _, do := range effective.DurableObjects.Bindings {
+			bName := do.GetBindingName()
+			if bName == "" {
+				continue
+			}
+			resID := do.ClassName
+			if resID == "" {
+				resID = bName
+			}
+			bKey := string(domain.BindingTypeDurableObject) + ":" + bName
+			bindingMap[bKey] = domain.ResourceBinding{
+				Type:        domain.BindingTypeDurableObject,
+				Name:        bName,
+				ResourceID:  resID,
+				ClassName:   do.ClassName,
+				ScriptName:  do.ScriptName,
+				Environment: do.Environment,
+			}
+			importedBindings++
+			summary.ImportedDurableObjectsCount++
+		}
+	}
+
 	var finalBindings []domain.ResourceBinding
 	for _, b := range bindingMap {
 		finalBindings = append(finalBindings, b)
@@ -639,6 +722,27 @@ func ApplyToApplication(app *domain.Application, cfg *WranglerConfig, envName st
 	// 4. Scheduled Triggers
 	if effective.Triggers != nil && len(effective.Triggers.Crons) > 0 {
 		summary.CronsCount = len(effective.Triggers.Crons)
+	}
+
+	// 5. Migrations
+	if len(effective.Migrations) > 0 {
+		for _, m := range effective.Migrations {
+			step := domain.MigrationStep{
+				Tag:            m.Tag,
+				NewClasses:     append([]string{}, m.NewClasses...),
+				DeletedClasses: append([]string{}, m.DeletedClasses...),
+				RenamedClasses: mapRenamedClasses(m.RenamedClasses),
+			}
+			step.NewClasses = append(step.NewClasses, m.NewSqliteClasses...)
+			for _, s := range m.Steps {
+				step.NewClasses = append(step.NewClasses, s.NewClasses...)
+				step.NewClasses = append(step.NewClasses, s.NewSqliteClasses...)
+				step.DeletedClasses = append(step.DeletedClasses, s.DeletedClasses...)
+				step.RenamedClasses = append(step.RenamedClasses, mapRenamedClasses(s.RenamedClasses)...)
+			}
+			app.RecordMigration(step)
+		}
+		summary.ImportedMigrationsCount = len(effective.Migrations)
 	}
 
 	return summary, nil

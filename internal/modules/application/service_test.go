@@ -416,6 +416,54 @@ export default {
 					}
 				})
 			})
+
+			t.Run("When importing wrangler config with Durable Objects and migrations", func(t *testing.T) {
+				wranglerWithDO := `{
+					"name": "worker-with-do",
+					"durable_objects": {
+						"bindings": [
+							{ "name": "STATE_DO", "class_name": "AppStateDO" }
+						]
+					},
+					"migrations": [
+						{ "tag": "v1", "new_classes": ["AppStateDO"] }
+					]
+				}`
+
+				_, summary, err := svc.ImportWrangler(context.Background(), app.ID, wranglerWithDO, "json", "")
+
+				t.Run("Then Durable Objects and migrations are persisted to SQLite repository", func(t *testing.T) {
+					if err != nil {
+						t.Fatalf("expected no error importing wrangler config, got: %v", err)
+					}
+					if summary.ImportedDurableObjectsCount != 1 {
+						t.Errorf("expected 1 imported DO, got %d", summary.ImportedDurableObjectsCount)
+					}
+					if summary.ImportedMigrationsCount != 1 {
+						t.Errorf("expected 1 imported migration, got %d", summary.ImportedMigrationsCount)
+					}
+
+					refetched, err := svc.GetByID(context.Background(), app.ID)
+					if err != nil {
+						t.Fatalf("expected no error getting app by id: %v", err)
+					}
+
+					var foundDO bool
+					for _, b := range refetched.Bindings {
+						if b.Type == domain.BindingTypeDurableObject && b.Name == "STATE_DO" && b.ClassName == "AppStateDO" {
+							foundDO = true
+							break
+						}
+					}
+					if !foundDO {
+						t.Errorf("expected STATE_DO in app bindings, got: %+v", refetched.Bindings)
+					}
+
+					if len(refetched.Migrations) != 1 || refetched.Migrations[0].Tag != "v1" || len(refetched.Migrations[0].NewClasses) != 1 || refetched.Migrations[0].NewClasses[0] != "AppStateDO" {
+						t.Errorf("expected v1 migration persisted in repo, got: %+v", refetched.Migrations)
+					}
+				})
+			})
 		})
 
 		t.Run("When accessing Cloudflare edge context request.cf", func(t *testing.T) {

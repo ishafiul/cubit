@@ -365,3 +365,258 @@ func TestParseWranglerJSON_WithAssets(t *testing.T) {
 	}
 }
 
+func TestParseWrangler_DurableObjectsAndMigrations_JSON(t *testing.T) {
+	t.Run("Given wrangler.json with durable_objects and migrations", func(t *testing.T) {
+		rawJSON := []byte(`{
+			"name": "do-worker",
+			"main": "src/index.ts",
+			"durable_objects": {
+				"bindings": [
+					{
+						"name": "MY_COUNTER",
+						"class_name": "CounterDO"
+					},
+					{
+						"binding": "REMOTE_DO",
+						"class_name": "SharedStateDO",
+						"script_name": "auth-service",
+						"environment": "production"
+					}
+				]
+			},
+			"migrations": [
+				{
+					"tag": "v1",
+					"new_classes": ["CounterDO"]
+				},
+				{
+					"tag": "v2",
+					"renamed_classes": [
+						{ "from": "CounterDO", "to": "AdvancedCounterDO" }
+					],
+					"deleted_classes": ["DeprecatedDO"],
+					"steps": [
+						{
+							"new_classes": ["SharedStateDO"]
+						}
+					]
+				}
+			]
+		}`)
+
+		t.Run("When parsed and applied to application", func(t *testing.T) {
+			cfg, format, err := wrangler.Parse(rawJSON, "auto")
+			if err != nil {
+				t.Fatalf("unexpected parse error: %v", err)
+			}
+			if format != "json" {
+				t.Errorf("expected format 'json', got '%s'", format)
+			}
+
+			app, _ := domain.NewApplicationWithSource("app-do", "do-worker", domain.SourceTypeInline, "", "", "", nil, nil)
+			summary, err := wrangler.ApplyToApplication(app, cfg, "", "json")
+
+			t.Run("Then Durable Object bindings are populated on the application", func(t *testing.T) {
+				if err != nil {
+					t.Fatalf("unexpected apply error: %v", err)
+				}
+				if summary.ImportedDurableObjectsCount != 2 {
+					t.Errorf("expected 2 imported DOs, got %d", summary.ImportedDurableObjectsCount)
+				}
+				if summary.ImportedBindingsCount != 2 {
+					t.Errorf("expected 2 total imported bindings, got %d", summary.ImportedBindingsCount)
+				}
+
+				doMap := make(map[string]domain.ResourceBinding)
+				for _, b := range app.Bindings {
+					if b.Type == domain.BindingTypeDurableObject {
+						doMap[b.Name] = b
+					}
+				}
+
+				if len(doMap) != 2 {
+					t.Fatalf("expected 2 DO bindings in app.Bindings, got %d", len(doMap))
+				}
+
+				counter, ok := doMap["MY_COUNTER"]
+				if !ok {
+					t.Fatalf("missing MY_COUNTER binding: %+v", app.Bindings)
+				}
+				if counter.ClassName != "CounterDO" || counter.ResourceID != "CounterDO" {
+					t.Errorf("unexpected counter DO: %+v", counter)
+				}
+
+				remote, ok := doMap["REMOTE_DO"]
+				if !ok {
+					t.Fatalf("missing REMOTE_DO binding: %+v", app.Bindings)
+				}
+				if remote.ClassName != "SharedStateDO" || remote.ScriptName != "auth-service" || remote.Environment != "production" {
+					t.Errorf("unexpected remote DO: %+v", remote)
+				}
+			})
+
+			t.Run("Then migration history is recorded on the application", func(t *testing.T) {
+				if summary.ImportedMigrationsCount != 2 {
+					t.Errorf("expected 2 imported migrations, got %d", summary.ImportedMigrationsCount)
+				}
+				if len(app.Migrations) != 2 {
+					t.Fatalf("expected 2 migrations in app.Migrations, got %d", len(app.Migrations))
+				}
+
+				v1 := app.Migrations[0]
+				if v1.Tag != "v1" || len(v1.NewClasses) != 1 || v1.NewClasses[0] != "CounterDO" {
+					t.Errorf("unexpected migration v1: %+v", v1)
+				}
+
+				v2 := app.Migrations[1]
+				if v2.Tag != "v2" {
+					t.Errorf("expected tag v2, got %s", v2.Tag)
+				}
+				if len(v2.RenamedClasses) != 1 || v2.RenamedClasses[0].From != "CounterDO" || v2.RenamedClasses[0].To != "AdvancedCounterDO" {
+					t.Errorf("unexpected renamed classes in v2: %+v", v2.RenamedClasses)
+				}
+				if len(v2.DeletedClasses) != 1 || v2.DeletedClasses[0] != "DeprecatedDO" {
+					t.Errorf("unexpected deleted classes in v2: %+v", v2.DeletedClasses)
+				}
+				if len(v2.NewClasses) != 1 || v2.NewClasses[0] != "SharedStateDO" {
+					t.Errorf("unexpected multi-step new classes in v2: %+v", v2.NewClasses)
+				}
+			})
+		})
+	})
+}
+
+func TestParseWrangler_DurableObjectsAndMigrations_TOML(t *testing.T) {
+	t.Run("Given wrangler.toml with durable_objects and migrations", func(t *testing.T) {
+		rawTOML := []byte(`
+name = "toml-do-worker"
+main = "src/index.js"
+
+[[durable_objects.bindings]]
+name = "SESSION_DO"
+class_name = "SessionDO"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["SessionDO"]
+`)
+
+		t.Run("When parsed and applied to application", func(t *testing.T) {
+			cfg, format, err := wrangler.Parse(rawTOML, "auto")
+			if err != nil {
+				t.Fatalf("unexpected error parsing TOML: %v", err)
+			}
+			if format != "toml" {
+				t.Errorf("expected format 'toml', got '%s'", format)
+			}
+
+			app, _ := domain.NewApplicationWithSource("app-toml-do", "toml-do-worker", domain.SourceTypeInline, "", "", "", nil, nil)
+			summary, err := wrangler.ApplyToApplication(app, cfg, "", "toml")
+
+			t.Run("Then Durable Object binding and migration step are created", func(t *testing.T) {
+				if err != nil {
+					t.Fatalf("unexpected apply error: %v", err)
+				}
+				if summary.ImportedDurableObjectsCount != 1 {
+					t.Errorf("expected 1 imported DO, got %d", summary.ImportedDurableObjectsCount)
+				}
+				if len(app.Bindings) != 1 || app.Bindings[0].Type != domain.BindingTypeDurableObject || app.Bindings[0].Name != "SESSION_DO" {
+					t.Errorf("unexpected DO binding: %+v", app.Bindings)
+				}
+				if len(app.Migrations) != 1 || app.Migrations[0].Tag != "v1" || app.Migrations[0].NewClasses[0] != "SessionDO" {
+					t.Errorf("unexpected migration: %+v", app.Migrations)
+				}
+			})
+		})
+	})
+}
+
+func TestApplyToApplication_MigrationsIdempotence(t *testing.T) {
+	t.Run("Given an application with existing migration history", func(t *testing.T) {
+		app, _ := domain.NewApplicationWithSource("app-mig-idemp", "mig-app", domain.SourceTypeInline, "", "", "", nil, nil)
+		app.Migrations = []domain.MigrationStep{
+			{
+				Tag:        "v1",
+				NewClasses: []string{"OldCounterDO"},
+			},
+		}
+
+		cfg := &wrangler.WranglerConfig{
+			Migrations: []wrangler.MigrationConfig{
+				{
+					Tag:        "v1",
+					NewClasses: []string{"UpdatedCounterDO"},
+				},
+				{
+					Tag:        "v2",
+					NewClasses: []string{"NewClassDO"},
+				},
+			},
+		}
+
+		t.Run("When applying configuration", func(t *testing.T) {
+			summary, err := wrangler.ApplyToApplication(app, cfg, "", "json")
+
+			t.Run("Then existing migration tag is updated without duplicating and new tag is appended", func(t *testing.T) {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if summary.ImportedMigrationsCount != 2 {
+					t.Errorf("expected 2 imported migrations, got %d", summary.ImportedMigrationsCount)
+				}
+				if len(app.Migrations) != 2 {
+					t.Fatalf("expected total 2 migrations, got %d: %+v", len(app.Migrations), app.Migrations)
+				}
+				if app.Migrations[0].Tag != "v1" || app.Migrations[0].NewClasses[0] != "UpdatedCounterDO" {
+					t.Errorf("expected v1 to be updated: %+v", app.Migrations[0])
+				}
+				if app.Migrations[1].Tag != "v2" || app.Migrations[1].NewClasses[0] != "NewClassDO" {
+					t.Errorf("expected v2 to be appended: %+v", app.Migrations[1])
+				}
+			})
+		})
+	})
+}
+
+func TestApplyToApplication_DurableObjectsEnvironmentOverride(t *testing.T) {
+	t.Run("Given wrangler config with environment override for durable_objects", func(t *testing.T) {
+		app, _ := domain.NewApplicationWithSource("app-env-do", "env-do-app", domain.SourceTypeInline, "", "", "", nil, nil)
+
+		cfg := &wrangler.WranglerConfig{
+			DurableObjects: &wrangler.DurableObjectsConfig{
+				Bindings: []wrangler.DurableObjectBinding{
+					{Name: "DO_STORE", ClassName: "LocalStore"},
+				},
+			},
+			Env: map[string]wrangler.WranglerConfig{
+				"production": {
+					DurableObjects: &wrangler.DurableObjectsConfig{
+						Bindings: []wrangler.DurableObjectBinding{
+							{Name: "DO_STORE", ClassName: "ProductionStore"},
+						},
+					},
+				},
+			},
+		}
+
+		t.Run("When applying with production environment override", func(t *testing.T) {
+			summary, err := wrangler.ApplyToApplication(app, cfg, "production", "json")
+
+			t.Run("Then production Durable Object binding overrides base", func(t *testing.T) {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if summary.ImportedDurableObjectsCount != 1 {
+					t.Errorf("expected 1 imported DO, got %d", summary.ImportedDurableObjectsCount)
+				}
+				if len(app.Bindings) != 1 {
+					t.Fatalf("expected 1 binding, got %d", len(app.Bindings))
+				}
+				if app.Bindings[0].ClassName != "ProductionStore" {
+					t.Errorf("expected ProductionStore, got %s", app.Bindings[0].ClassName)
+				}
+			})
+		})
+	})
+}
+
