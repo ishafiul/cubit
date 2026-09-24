@@ -33,7 +33,7 @@ func OpenSQLite(dsn string) (*sql.DB, error) {
 	}
 
 	// Dynamic column migrations for existing SQLite databases
-	var hasSourceType, hasInlineCode, hasSubdomain, hasRootDir, hasAutoDeploy, hasCompatDate, hasCompatFlags, hasMemLimit, hasMaxDuration, hasMigrations bool
+	var hasSourceType, hasInlineCode, hasSubdomain, hasRootDir, hasAutoDeploy, hasCompatDate, hasCompatFlags, hasMemLimit, hasMaxDuration, hasMigrations, hasWorkerPort bool
 	rows, err := db.QueryContext(context.Background(), "PRAGMA table_info(applications)")
 	if err == nil {
 		for rows.Next() {
@@ -72,6 +72,9 @@ func OpenSQLite(dsn string) (*sql.DB, error) {
 				if colName == "migrations" {
 					hasMigrations = true
 				}
+				if colName == "worker_port" {
+					hasWorkerPort = true
+				}
 			}
 		}
 		rows.Close()
@@ -105,6 +108,9 @@ func OpenSQLite(dsn string) (*sql.DB, error) {
 		}
 		if !hasMigrations {
 			_, _ = db.ExecContext(context.Background(), "ALTER TABLE applications ADD COLUMN migrations TEXT NOT NULL DEFAULT '[]'")
+		}
+		if !hasWorkerPort {
+			_, _ = db.ExecContext(context.Background(), "ALTER TABLE applications ADD COLUMN worker_port INTEGER NOT NULL DEFAULT 0")
 		}
 	}
 

@@ -156,6 +156,7 @@ type Application struct {
 	CompatibilityFlags []string
 	MemoryLimitMB      int
 	MaxDurationMs      int
+	WorkerPort         int
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 }

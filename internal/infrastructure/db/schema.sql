@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS applications (
     compatibility_flags TEXT NOT NULL DEFAULT '[]',
     memory_limit_mb INTEGER NOT NULL DEFAULT 128,
     max_duration_ms INTEGER NOT NULL DEFAULT 50,
+    worker_port INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL
 );

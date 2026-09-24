@@ -47,14 +47,15 @@ func (s *RouteSyncer) SyncRoutes(ctx context.Context) error {
 		return err
 	}
 
-	var targetURLs []string
+	// Collect active node IPs and the shared fallback port
+	var activeNodes []*domain.Node
 	for _, n := range nodes {
 		if n.Status == domain.NodeStatusActive {
-			targetURLs = append(targetURLs, fmt.Sprintf("http://%s:%d", n.IPAddress, n.WorkerPort))
+			activeNodes = append(activeNodes, n)
 		}
 	}
 
-	if len(targetURLs) == 0 {
+	if len(activeNodes) == 0 {
 		return s.provider.SyncRoutes(ctx, nil)
 	}
 
@@ -67,6 +68,17 @@ func (s *RouteSyncer) SyncRoutes(ctx context.Context) error {
 	for _, app := range apps {
 		if app.Status != domain.AppStatusRunning {
 			continue
+		}
+
+		// Build per-app target URLs using the app's assigned worker port.
+		// Falls back to the node's shared worker port if no port is allocated.
+		var targetURLs []string
+		for _, n := range activeNodes {
+			port := app.WorkerPort
+			if port <= 0 {
+				port = n.WorkerPort
+			}
+			targetURLs = append(targetURLs, fmt.Sprintf("http://%s:%d", n.IPAddress, port))
 		}
 
 		subdomain := app.Subdomain
