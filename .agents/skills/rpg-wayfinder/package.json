@@ -1,0 +1,22 @@
+{
+  "name": "rpg-wayfinder",
+  "version": "1.0.0",
+  "description": "Requirements-to-PRD issue workflow with GitHub grilling decisions and dependent capability tasks and feature subtasks.",
+  "main": "SKILL.md",
+  "scripts": {
+    "provision-labels": "bash scripts/provision-labels.sh"
+  },
+  "keywords": [
+    "antigravity",
+    "agent-skill",
+    "skills",
+    "wayfinder",
+    "github-issues",
+    "prd",
+    "rpg",
+    "tdd",
+    "planning"
+  ],
+  "author": "ishafiul",
+  "license": "MIT"
+}
