@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -33,6 +34,62 @@ type RouteSyncer interface {
 	SyncRoutes(ctx context.Context) error
 }
 
+// FleetReloader triggers zero-downtime hot reload across celld fleet nodes.
+type FleetReloader interface {
+	ReloadFleet(ctx context.Context) error
+}
+
+// NodeLister defines node listing capability for fleet reloaders.
+type NodeLister interface {
+	List(ctx context.Context) ([]*domain.Node, error)
+}
+
+// CelldFleetReloader triggers reload across all active nodes in the fleet.
+type CelldFleetReloader struct {
+	nodes      NodeLister
+	httpClient HTTPClient
+}
+
+// NewCelldFleetReloader creates a new CelldFleetReloader.
+func NewCelldFleetReloader(nodes NodeLister, client HTTPClient) *CelldFleetReloader {
+	return &CelldFleetReloader{
+		nodes:      nodes,
+		httpClient: client,
+	}
+}
+
+// ReloadFleet reloads all active celld fleet nodes.
+func (r *CelldFleetReloader) ReloadFleet(ctx context.Context) error {
+	if r.nodes == nil {
+		return nil
+	}
+	nodes, err := r.nodes.List(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list nodes for reload: %w", err)
+	}
+
+	var urls []string
+	for _, n := range nodes {
+		if n.Status == domain.NodeStatusActive {
+			port := n.InternalPort
+			if port == 0 {
+				port = 8081
+			}
+			urls = append(urls, fmt.Sprintf("http://%s:%d/reload", n.IPAddress, port))
+		}
+	}
+
+	if len(urls) == 0 {
+		return nil
+	}
+
+	errs := TriggerFleetReload(ctx, r.httpClient, urls)
+	if len(errs) > 0 {
+		return fmt.Errorf("failed to reload %d/%d nodes: %w", len(errs), len(urls), errors.Join(errs...))
+	}
+	return nil
+}
+
 // Service defines deployment business operations.
 type Service interface {
 	Deploy(ctx context.Context, appID string, commitHash string) (*domain.Deployment, error)
@@ -52,6 +109,7 @@ type DeploymentService struct {
 	storage     StorageUploader
 	routeSyncer RouteSyncer
 	fleetBucket string
+	reloader    FleetReloader
 }
 
 // NewService creates a new DeploymentService.
@@ -63,6 +121,12 @@ func NewService(repo Repository, appMgr ApplicationManager, storage StorageUploa
 		routeSyncer: routeSyncer,
 		fleetBucket: fleetBucket,
 	}
+}
+
+// WithFleetReloader sets the fleet reloader for hot reloading celld nodes.
+func (s *DeploymentService) WithFleetReloader(reloader FleetReloader) *DeploymentService {
+	s.reloader = reloader
+	return s
 }
 
 // Deploy triggers a new build and release for an application.
@@ -105,10 +169,11 @@ func (s *DeploymentService) DeployWithDetails(ctx context.Context, appID, commit
 
 	// Build bundle
 	var bundleData []byte
+	var wranglerCfg *wrangler.WranglerConfig
 	if app.SourceType == domain.SourceTypeInline && app.InlineCode != "" {
 		bundleData = []byte(app.InlineCode)
 	} else if app.SourceType == domain.SourceTypeGit && app.GitRepo != "" {
-		bundleData = s.buildGitWorker(ctx, app, dep)
+		bundleData, wranglerCfg = s.buildGitWorker(ctx, app, dep)
 	} else {
 		bundleData = []byte(domain.DefaultHelloWorldWorker)
 	}
@@ -137,6 +202,19 @@ func (s *DeploymentService) DeployWithDetails(ctx context.Context, appID, commit
 		Message:   fmt.Sprintf("Distributed bundle (%d bytes) to storage", dep.BundleSize),
 		Level:     domain.LogLevelInfo,
 	})
+
+	// Publish celld deployment manifest, update deploy/current.json, and trigger fleet reload
+	if err := s.publishCelldDeployment(ctx, app, dep, bundleData, wranglerCfg); err != nil {
+		dep.MarkFailed(err.Error())
+		_ = s.repo.Update(ctx, dep)
+		_ = s.repo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
+			Timestamp: time.Now().UTC(),
+			Step:      domain.LogStepCelldDeploy,
+			Message:   fmt.Sprintf("Celld deployment publication failed: %v", err),
+			Level:     domain.LogLevelError,
+		})
+		return dep, err
+	}
 
 	// Supersede any existing active deployments
 	allDeps, _ := s.repo.ListByAppID(ctx, app.ID)
@@ -217,6 +295,11 @@ func (s *DeploymentService) Rollback(ctx context.Context, appID, deploymentID st
 		return nil, err
 	}
 
+	// Update celld active pointer for target deployment and trigger fleet reload
+	if err := s.updatePointerAndReload(ctx, app, targetDep, nil); err != nil {
+		return nil, fmt.Errorf("failed to sync celld deployment pointer during rollback: %w", err)
+	}
+
 	_ = s.repo.AppendLog(ctx, targetDep.ID, domain.DeploymentLog{
 		Timestamp: now,
 		Step:      domain.LogStepCelldDeploy,
@@ -295,8 +378,12 @@ func (s *DeploymentService) DeployDirect(ctx context.Context, appID string, bund
 		Level:     domain.LogLevelInfo,
 	})
 
+	var wranglerCfg *wrangler.WranglerConfig
 	// If wrangler configuration is supplied, sync variables, bindings, and compat settings
 	if rawWranglerConfig != "" {
+		if parsed, _, err := wrangler.Parse([]byte(rawWranglerConfig), "auto"); err == nil {
+			wranglerCfg = parsed
+		}
 		_, summary, err := s.appMgr.ImportWrangler(ctx, app.ID, rawWranglerConfig, "auto", "")
 		if err == nil && summary != nil {
 			_ = s.repo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
@@ -332,6 +419,19 @@ func (s *DeploymentService) DeployDirect(ctx context.Context, appID string, bund
 		Message:   fmt.Sprintf("Worker bundle (%d bytes) stored successfully", len(bundle)),
 		Level:     domain.LogLevelInfo,
 	})
+
+	// Publish celld deployment manifest, update deploy/current.json, and trigger fleet reload
+	if err := s.publishCelldDeployment(ctx, app, dep, bundle, wranglerCfg); err != nil {
+		dep.MarkFailed(err.Error())
+		_ = s.repo.Update(ctx, dep)
+		_ = s.repo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
+			Timestamp: time.Now().UTC(),
+			Step:      domain.LogStepCelldDeploy,
+			Message:   fmt.Sprintf("Celld direct deployment publication failed: %v", err),
+			Level:     domain.LogLevelError,
+		})
+		return nil, err
+	}
 
 	// Supersede any existing active deployments
 	allDeps, _ := s.repo.ListByAppID(ctx, app.ID)
@@ -387,7 +487,7 @@ func generateShortHash() string {
 	return hex.EncodeToString(b)
 }
 
-func (s *DeploymentService) buildGitWorker(ctx context.Context, app *domain.Application, dep *domain.Deployment) []byte {
+func (s *DeploymentService) buildGitWorker(ctx context.Context, app *domain.Application, dep *domain.Deployment) ([]byte, *wrangler.WranglerConfig) {
 	repoPath := ""
 	isTempDir := false
 
@@ -439,7 +539,7 @@ func (s *DeploymentService) buildGitWorker(ctx context.Context, app *domain.Appl
 	}
 
 	if repoPath == "" {
-		return []byte(domain.DefaultHelloWorldWorker)
+		return []byte(domain.DefaultHelloWorldWorker), nil
 	}
 
 	workDir := repoPath
@@ -657,7 +757,7 @@ func (s *DeploymentService) buildGitWorker(ctx context.Context, app *domain.Appl
 			Message:   fmt.Sprintf("[build] Using compiled worker bundle (%d bytes)", len(bundled)),
 			Level:     domain.LogLevelInfo,
 		})
-		return bundled
+		return bundled, parsedWrangler
 	}
 
 	if entrypoint != "" {
@@ -687,7 +787,7 @@ func (s *DeploymentService) buildGitWorker(ctx context.Context, app *domain.Appl
 					Message:   fmt.Sprintf("[esbuild] Successfully bundled entrypoint '%s' (%d bytes)", entrypoint, len(bundled)),
 					Level:     domain.LogLevelInfo,
 				})
-				return bundled
+				return bundled, parsedWrangler
 			}
 		} else {
 			_ = s.repo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
@@ -699,6 +799,90 @@ func (s *DeploymentService) buildGitWorker(ctx context.Context, app *domain.Appl
 		}
 	}
 
-	return []byte(domain.DefaultHelloWorldWorker)
+	return []byte(domain.DefaultHelloWorldWorker), parsedWrangler
+}
+
+// updatePointerAndReload synchronizes the active deployment pointer in storage and triggers a zero-downtime hot reload.
+func (s *DeploymentService) updatePointerAndReload(ctx context.Context, app *domain.Application, dep *domain.Deployment, manifest *CelldManifest) error {
+	if s.storage != nil {
+		manifestKey := fmt.Sprintf("deployments/%s/%s/manifest.json", app.Name, dep.ID)
+		bundleKey := fmt.Sprintf("deployments/%s/%s/bundle.js", app.Name, dep.ID)
+
+		if manifest != nil {
+			manifestJSON, err := json.MarshalIndent(manifest, "", "  ")
+			if err != nil {
+				return fmt.Errorf("failed to marshal celld manifest: %w", err)
+			}
+			if err := s.storage.UploadBundle(ctx, s.fleetBucket, manifestKey, manifestJSON); err != nil {
+				return fmt.Errorf("failed to upload celld manifest to %s: %w", manifestKey, err)
+			}
+		}
+
+		pointer := BuildCurrentPointer(manifest, manifestKey, bundleKey)
+		if pointer.Version == "" {
+			pointer.Version = dep.ID
+		}
+		if pointer.ScriptName == "" {
+			pointer.ScriptName = app.Name
+		}
+		pointerJSON, err := json.MarshalIndent(pointer, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to format current pointer: %w", err)
+		}
+
+		if err := s.storage.UploadBundle(ctx, s.fleetBucket, "deploy/current.json", pointerJSON); err != nil {
+			return fmt.Errorf("failed to upload deploy/current.json: %w", err)
+		}
+		if err := s.storage.UploadBundle(ctx, s.fleetBucket, fmt.Sprintf("deployments/%s/current.json", app.Name), pointerJSON); err != nil {
+			return fmt.Errorf("failed to upload app current.json: %w", err)
+		}
+
+		digest := ""
+		if manifest != nil && len(manifest.Modules) > 0 {
+			digest = manifest.Modules[0].Digest
+		}
+		_ = s.repo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
+			Timestamp: time.Now().UTC(),
+			Step:      domain.LogStepS3Upload,
+			Message:   fmt.Sprintf("Published celld manifest and updated deploy/current.json (%s)", digest),
+			Level:     domain.LogLevelInfo,
+		})
+	}
+
+	if s.reloader != nil {
+		if err := s.reloader.ReloadFleet(ctx); err != nil {
+			_ = s.repo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
+				Timestamp: time.Now().UTC(),
+				Step:      domain.LogStepCelldDeploy,
+				Message:   fmt.Sprintf("Celld fleet reload warning: %v", err),
+				Level:     domain.LogLevelWarn,
+			})
+			return fmt.Errorf("celld fleet reload failed: %w", err)
+		}
+		_ = s.repo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
+			Timestamp: time.Now().UTC(),
+			Step:      domain.LogStepCelldDeploy,
+			Message:   "Issued zero-downtime hot reload across celld fleet (POST /reload)",
+			Level:     domain.LogLevelInfo,
+		})
+	}
+
+	return nil
+}
+
+// publishCelldDeployment builds and uploads the celld manifest, updates deploy/current.json, and triggers hot reload.
+func (s *DeploymentService) publishCelldDeployment(ctx context.Context, app *domain.Application, dep *domain.Deployment, bundle []byte, cfg *wrangler.WranglerConfig) error {
+	manifest, err := BuildCelldManifest(app, dep, bundle, cfg)
+	if err != nil {
+		_ = s.repo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
+			Timestamp: time.Now().UTC(),
+			Step:      domain.LogStepS3Upload,
+			Message:   fmt.Sprintf("Failed to generate celld manifest: %v", err),
+			Level:     domain.LogLevelWarn,
+		})
+		return fmt.Errorf("failed to generate celld manifest: %w", err)
+	}
+
+	return s.updatePointerAndReload(ctx, app, dep, manifest)
 }
 
