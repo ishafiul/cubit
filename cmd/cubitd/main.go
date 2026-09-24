@@ -69,6 +69,7 @@ func main() {
 	nodeService := nodeModule.NewService(nodeRepo, dockerSupervisor, routeSyncer, fmt.Sprintf("s3://%s", *bucketName))
 	appService := appModule.NewService(appRepo, storageAdapter, routeSyncer, *bucketName)
 	depService := depModule.NewService(depRepo, appService, storageAdapter, routeSyncer, *bucketName)
+	depService.WithFleetReloader(depModule.NewCelldFleetReloader(nodeRepo, nil))
 	domainService := domModule.NewService(domRepo, appRepo, routeSyncer)
 	appService.SetDomainRegistrar(domainService)
 	runtimeService := runtimeModule.NewService(nodeRepo, dockerSupervisor, storageAdapter, fmt.Sprintf("s3://%s", *bucketName), domain.DefaultCelldVersion)
