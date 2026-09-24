@@ -68,6 +68,55 @@ type AssetsConfig struct {
 	HTMLHandling string `json:"html_handling,omitempty" toml:"html_handling,omitempty"`
 }
 
+// DurableObjectBinding represents a Durable Object binding in wrangler configuration.
+type DurableObjectBinding struct {
+	Name        string `json:"name" toml:"name"`
+	ClassName   string `json:"class_name" toml:"class_name"`
+	ScriptName  string `json:"script_name,omitempty" toml:"script_name,omitempty"`
+	Environment string `json:"environment,omitempty" toml:"environment,omitempty"`
+}
+
+// DurableObjectsConfig represents the durable_objects block in wrangler configuration.
+type DurableObjectsConfig struct {
+	Bindings []DurableObjectBinding `json:"bindings" toml:"bindings"`
+}
+
+// MigrationRenamedClass represents a renamed class in a Durable Object migration.
+type MigrationRenamedClass struct {
+	From string `json:"from" toml:"from"`
+	To   string `json:"to" toml:"to"`
+}
+
+// MigrationConfig represents a Durable Object migration step in wrangler configuration.
+type MigrationConfig struct {
+	Tag            string                  `json:"tag" toml:"tag"`
+	NewClasses     []string                `json:"new_classes,omitempty" toml:"new_classes,omitempty"`
+	RenamedClasses []MigrationRenamedClass `json:"renamed_classes,omitempty" toml:"renamed_classes,omitempty"`
+	DeletedClasses []string                `json:"deleted_classes,omitempty" toml:"deleted_classes,omitempty"`
+}
+
+// WorkflowBinding represents a Cloudflare Workflow binding in wrangler configuration.
+type WorkflowBinding struct {
+	Name      string `json:"name" toml:"name"`
+	Binding   string `json:"binding" toml:"binding"`
+	ClassName string `json:"class_name" toml:"class_name"`
+}
+
+// ContainerBinding represents an experimental container sidecar binding in wrangler configuration.
+type ContainerBinding struct {
+	Name    string            `json:"name" toml:"name"`
+	Image   string            `json:"image" toml:"image"`
+	Port    int               `json:"port,omitempty" toml:"port,omitempty"`
+	EnvVars map[string]string `json:"env_vars,omitempty" toml:"env_vars,omitempty"`
+}
+
+// RuleConfig represents a custom module bundling rule in wrangler configuration.
+type RuleConfig struct {
+	Type        string   `json:"type" toml:"type"`
+	Globs       []string `json:"globs" toml:"globs"`
+	Fallthrough bool     `json:"fallthrough,omitempty" toml:"fallthrough,omitempty"`
+}
+
 // WranglerConfig represents the schema of wrangler.json, wrangler.jsonc, and wrangler.toml.
 type WranglerConfig struct {
 	Name               string                    `json:"name,omitempty" toml:"name,omitempty"`
@@ -82,6 +131,12 @@ type WranglerConfig struct {
 	Queues             *QueueConfig              `json:"queues,omitempty" toml:"queues,omitempty"`
 	Triggers           *TriggerConfig            `json:"triggers,omitempty" toml:"triggers,omitempty"`
 	Assets             *AssetsConfig             `json:"assets,omitempty" toml:"assets,omitempty"`
+	DurableObjects     *DurableObjectsConfig     `json:"durable_objects,omitempty" toml:"durable_objects,omitempty"`
+	Migrations         []MigrationConfig         `json:"migrations,omitempty" toml:"migrations,omitempty"`
+	Workflows          []WorkflowBinding         `json:"workflows,omitempty" toml:"workflows,omitempty"`
+	Containers         []ContainerBinding        `json:"containers,omitempty" toml:"containers,omitempty"`
+	Rules              []RuleConfig              `json:"rules,omitempty" toml:"rules,omitempty"`
+	Define             map[string]any            `json:"define,omitempty" toml:"define,omitempty"`
 	Env                map[string]WranglerConfig `json:"env,omitempty" toml:"env,omitempty"`
 }
 
@@ -344,6 +399,29 @@ func MergeEnvironment(base *WranglerConfig, envName string) *WranglerConfig {
 	}
 	if envCfg.Assets != nil {
 		merged.Assets = envCfg.Assets
+	}
+	if envCfg.DurableObjects != nil {
+		merged.DurableObjects = envCfg.DurableObjects
+	}
+	if len(envCfg.Migrations) > 0 {
+		merged.Migrations = envCfg.Migrations
+	}
+	if len(envCfg.Workflows) > 0 {
+		merged.Workflows = envCfg.Workflows
+	}
+	if len(envCfg.Containers) > 0 {
+		merged.Containers = envCfg.Containers
+	}
+	if len(envCfg.Rules) > 0 {
+		merged.Rules = envCfg.Rules
+	}
+	if len(envCfg.Define) > 0 {
+		if merged.Define == nil {
+			merged.Define = make(map[string]any)
+		}
+		for k, v := range envCfg.Define {
+			merged.Define[k] = v
+		}
 	}
 
 	return &merged
