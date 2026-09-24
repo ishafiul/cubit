@@ -210,10 +210,10 @@ git switch -c "issue/<issue-number>-<slug>"
 git push -u origin HEAD
 ```
 
-Write the PR body from the work actually completed. Include a summary, relevant behavior, verification results, and related issue/file links. Use `Closes #<subtask>` for a subtask, `Closes #<task>` for a task with no subtasks, and `Part of #<task>` for a parent task with children. Also link the PRD and map with `Part of` references.
+Write the PR body from the work actually completed. Include a summary, relevant behavior, verification results, and related issue/file links. Format the PR title using Conventional Commits referencing the issue: `<type>(<scope>): <Summary> (#<issue-number>)` (e.g. `feat(wrangler): Add TranspileTOMLToJSONC for converting wrangler.toml to celld JSONC (#4)`). Use `Closes #<subtask>` for a subtask, `Closes #<task>` for a task with no subtasks, and `Part of #<task>` for a parent task with children. Also link the PRD and map with `Part of` references.
 
 ```bash
-gh pr create --base <default-branch> --title "[#<issue-number>] <Summary>" --body-file /tmp/pr-body.md
+gh pr create --base <default-branch> --title "<type>(<scope>): <Summary> (#<issue-number>)" --body-file /tmp/pr-body.md
 gh pr edit <pr> --body-file /tmp/pr-body.md
 gh issue edit <issue> --add-label "status:in-review" --remove-label "status:in-progress"
 gh issue comment <issue> --body "PR: <pr-url>. Verification: <commands/results>."
