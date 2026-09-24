@@ -620,3 +620,299 @@ func TestApplyToApplication_DurableObjectsEnvironmentOverride(t *testing.T) {
 	})
 }
 
+func TestParseWrangler_WorkflowsAndContainers_JSON(t *testing.T) {
+	t.Run("Given wrangler.json with workflows and containers", func(t *testing.T) {
+		rawJSON := []byte(`{
+			"name": "workflow-app",
+			"workflows": [
+				{
+					"name": "signup-workflow",
+					"binding": "SIGNUP_WF",
+					"class_name": "SignupWorkflow"
+				}
+			],
+			"containers": [
+				{
+					"name": "redis-sidecar",
+					"image": "redis:7-alpine",
+					"port": 6379,
+					"env_vars": {
+						"CACHE_SIZE": "512mb"
+					}
+				}
+			]
+		}`)
+
+		t.Run("When parsed and applied to application", func(t *testing.T) {
+			cfg, format, err := wrangler.Parse(rawJSON, "json")
+			if err != nil {
+				t.Fatalf("unexpected parse error: %v", err)
+			}
+			if format != "json" {
+				t.Errorf("expected format 'json', got '%s'", format)
+			}
+
+			app, _ := domain.NewApplicationWithSource("app-wf-ct", "wf-ct-app", domain.SourceTypeInline, "", "", "", nil, nil)
+			summary, err := wrangler.ApplyToApplication(app, cfg, "", "json")
+
+			t.Run("Then workflow and container bindings are properly created on application", func(t *testing.T) {
+				if err != nil {
+					t.Fatalf("unexpected apply error: %v", err)
+				}
+				if summary.ImportedWorkflowsCount != 1 {
+					t.Errorf("expected 1 imported workflow, got %d", summary.ImportedWorkflowsCount)
+				}
+				if summary.ImportedContainersCount != 1 {
+					t.Errorf("expected 1 imported container, got %d", summary.ImportedContainersCount)
+				}
+				if len(app.Bindings) != 2 {
+					t.Fatalf("expected 2 bindings, got %d: %+v", len(app.Bindings), app.Bindings)
+				}
+
+				var wfBinding, ctBinding *domain.ResourceBinding
+				for i := range app.Bindings {
+					if app.Bindings[i].Type == domain.BindingTypeWorkflow {
+						wfBinding = &app.Bindings[i]
+					}
+					if app.Bindings[i].Type == domain.BindingTypeContainer {
+						ctBinding = &app.Bindings[i]
+					}
+				}
+
+				if wfBinding == nil {
+					t.Fatal("expected workflow binding to exist")
+				}
+				if wfBinding.Name != "SIGNUP_WF" {
+					t.Errorf("expected workflow name 'SIGNUP_WF', got '%s'", wfBinding.Name)
+				}
+				if wfBinding.ClassName != "SignupWorkflow" {
+					t.Errorf("expected workflow ClassName 'SignupWorkflow', got '%s'", wfBinding.ClassName)
+				}
+				if wfBinding.WorkflowName != "signup-workflow" {
+					t.Errorf("expected workflow WorkflowName 'signup-workflow', got '%s'", wfBinding.WorkflowName)
+				}
+				if wfBinding.ResourceID != "signup-workflow" {
+					t.Errorf("expected workflow ResourceID 'signup-workflow', got '%s'", wfBinding.ResourceID)
+				}
+
+				if ctBinding == nil {
+					t.Fatal("expected container binding to exist")
+				}
+				if ctBinding.Name != "redis-sidecar" {
+					t.Errorf("expected container name 'redis-sidecar', got '%s'", ctBinding.Name)
+				}
+				if ctBinding.ContainerName != "redis-sidecar" {
+					t.Errorf("expected container ContainerName 'redis-sidecar', got '%s'", ctBinding.ContainerName)
+				}
+				if ctBinding.Image != "redis:7-alpine" {
+					t.Errorf("expected container Image 'redis:7-alpine', got '%s'", ctBinding.Image)
+				}
+				if ctBinding.Port != 6379 {
+					t.Errorf("expected container Port 6379, got %d", ctBinding.Port)
+				}
+				if ctBinding.ResourceID != "redis:7-alpine" {
+					t.Errorf("expected container ResourceID 'redis:7-alpine', got '%s'", ctBinding.ResourceID)
+				}
+				if ctBinding.ContainerEnvVars == nil || ctBinding.ContainerEnvVars["CACHE_SIZE"] != "512mb" {
+					t.Errorf("expected container env var CACHE_SIZE=512mb, got %+v", ctBinding.ContainerEnvVars)
+				}
+			})
+		})
+	})
+}
+
+func TestParseWrangler_WorkflowsAndContainers_TOML(t *testing.T) {
+	t.Run("Given wrangler.toml with [[workflows]] and [[containers]]", func(t *testing.T) {
+		rawTOML := []byte(`
+name = "toml-wf-ct"
+main = "src/index.js"
+
+[[workflows]]
+name = "order-processing"
+binding = "ORDER_WORKFLOW"
+class_name = "OrderWorkflow"
+
+[[containers]]
+name = "db-sidecar"
+image = "postgres:16-alpine"
+port = 5432
+`)
+
+		t.Run("When parsed and applied to application", func(t *testing.T) {
+			cfg, format, err := wrangler.Parse(rawTOML, "auto")
+			if err != nil {
+				t.Fatalf("unexpected parse error: %v", err)
+			}
+			if format != "toml" {
+				t.Errorf("expected format 'toml', got '%s'", format)
+			}
+
+			app, _ := domain.NewApplicationWithSource("app-toml-wf", "toml-wf-app", domain.SourceTypeInline, "", "", "", nil, nil)
+			summary, err := wrangler.ApplyToApplication(app, cfg, "", "toml")
+
+			t.Run("Then workflow and container bindings are populated from TOML", func(t *testing.T) {
+				if err != nil {
+					t.Fatalf("unexpected apply error: %v", err)
+				}
+				if summary.ImportedWorkflowsCount != 1 {
+					t.Errorf("expected 1 imported workflow, got %d", summary.ImportedWorkflowsCount)
+				}
+				if summary.ImportedContainersCount != 1 {
+					t.Errorf("expected 1 imported container, got %d", summary.ImportedContainersCount)
+				}
+
+				var wfFound, ctFound bool
+				for _, b := range app.Bindings {
+					if b.Type == domain.BindingTypeWorkflow && b.Name == "ORDER_WORKFLOW" && b.ClassName == "OrderWorkflow" && b.WorkflowName == "order-processing" {
+						wfFound = true
+					}
+					if b.Type == domain.BindingTypeContainer && b.Name == "db-sidecar" && b.Image == "postgres:16-alpine" && b.Port == 5432 {
+						ctFound = true
+					}
+				}
+				if !wfFound {
+					t.Errorf("expected workflow binding not found in: %+v", app.Bindings)
+				}
+				if !ctFound {
+					t.Errorf("expected container binding not found in: %+v", app.Bindings)
+				}
+			})
+		})
+	})
+}
+
+func TestApplyToApplication_WorkflowsAndContainers_EnvironmentOverride(t *testing.T) {
+	t.Run("Given wrangler config with environment overrides for workflows and containers", func(t *testing.T) {
+		app, _ := domain.NewApplicationWithSource("app-env-wf", "env-wf-app", domain.SourceTypeInline, "", "", "", nil, nil)
+
+		cfg := &wrangler.WranglerConfig{
+			Workflows: []wrangler.WorkflowBinding{
+				{Name: "base-wf", Binding: "WORKFLOW", ClassName: "BaseWF"},
+			},
+			Containers: []wrangler.ContainerBinding{
+				{Name: "cache", Image: "redis:6-alpine", Port: 6379},
+			},
+			Env: map[string]wrangler.WranglerConfig{
+				"production": {
+					Workflows: []wrangler.WorkflowBinding{
+						{Name: "prod-wf", Binding: "WORKFLOW", ClassName: "ProdWF"},
+					},
+					Containers: []wrangler.ContainerBinding{
+						{Name: "cache", Image: "redis:7-alpine", Port: 6380},
+					},
+				},
+			},
+		}
+
+		t.Run("When applied with production environment override", func(t *testing.T) {
+			summary, err := wrangler.ApplyToApplication(app, cfg, "production", "json")
+
+			t.Run("Then production workflow and container override base configuration", func(t *testing.T) {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if summary.ImportedWorkflowsCount != 1 {
+					t.Errorf("expected 1 imported workflow, got %d", summary.ImportedWorkflowsCount)
+				}
+				if summary.ImportedContainersCount != 1 {
+					t.Errorf("expected 1 imported container, got %d", summary.ImportedContainersCount)
+				}
+
+				for _, b := range app.Bindings {
+					if b.Type == domain.BindingTypeWorkflow {
+						if b.ClassName != "ProdWF" || b.WorkflowName != "prod-wf" {
+							t.Errorf("expected production workflow, got: %+v", b)
+						}
+					}
+					if b.Type == domain.BindingTypeContainer {
+						if b.Image != "redis:7-alpine" || b.Port != 6380 {
+							t.Errorf("expected production container, got: %+v", b)
+						}
+					}
+				}
+			})
+		})
+	})
+}
+
+func TestApplyToApplication_Workflow_FallbackNameToBinding(t *testing.T) {
+	t.Run("Given a workflow binding with only name and class_name", func(t *testing.T) {
+		app, _ := domain.NewApplicationWithSource("app-wf-fb", "wf-fb-app", domain.SourceTypeInline, "", "", "", nil, nil)
+		cfg := &wrangler.WranglerConfig{
+			Workflows: []wrangler.WorkflowBinding{
+				{Name: "auth-pipeline", ClassName: "AuthPipeline"},
+			},
+		}
+
+		t.Run("When applied to application", func(t *testing.T) {
+			_, err := wrangler.ApplyToApplication(app, cfg, "", "json")
+
+			t.Run("Then binding Name falls back to Name and ResourceID is preserved", func(t *testing.T) {
+				if err != nil {
+					t.Fatalf("unexpected apply error: %v", err)
+				}
+				if len(app.Bindings) != 1 {
+					t.Fatalf("expected 1 binding, got %d", len(app.Bindings))
+				}
+				b := app.Bindings[0]
+				if b.Type != domain.BindingTypeWorkflow || b.Name != "auth-pipeline" || b.ClassName != "AuthPipeline" || b.WorkflowName != "auth-pipeline" {
+					t.Errorf("unexpected binding: %+v", b)
+				}
+			})
+		})
+	})
+
+	t.Run("Given a container binding with only binding and image", func(t *testing.T) {
+		app, _ := domain.NewApplicationWithSource("app-ct-fb", "ct-fb-app", domain.SourceTypeInline, "", "", "", nil, nil)
+		cfg := &wrangler.WranglerConfig{
+			Containers: []wrangler.ContainerBinding{
+				{Binding: "CACHE_SERVICE", Image: "memcached:alpine"},
+			},
+		}
+
+		t.Run("When applied to application", func(t *testing.T) {
+			_, err := wrangler.ApplyToApplication(app, cfg, "", "json")
+
+			t.Run("Then container Name falls back to Binding and Image is mapped", func(t *testing.T) {
+				if err != nil {
+					t.Fatalf("unexpected apply error: %v", err)
+				}
+				if len(app.Bindings) != 1 {
+					t.Fatalf("expected 1 binding, got %d", len(app.Bindings))
+				}
+				b := app.Bindings[0]
+				if b.Type != domain.BindingTypeContainer || b.Name != "CACHE_SERVICE" || b.Image != "memcached:alpine" {
+					t.Errorf("unexpected binding: %+v", b)
+				}
+			})
+		})
+	})
+
+	t.Run("Given a container binding with both name and binding", func(t *testing.T) {
+		app, _ := domain.NewApplicationWithSource("app-ct-both", "ct-both-app", domain.SourceTypeInline, "", "", "", nil, nil)
+		cfg := &wrangler.WranglerConfig{
+			Containers: []wrangler.ContainerBinding{
+				{Name: "redis-workload", Binding: "REDIS_CLIENT", Image: "redis:alpine"},
+			},
+		}
+
+		t.Run("When applied to application", func(t *testing.T) {
+			_, err := wrangler.ApplyToApplication(app, cfg, "", "json")
+
+			t.Run("Then Name is the JS binding and ContainerName is the workload name", func(t *testing.T) {
+				if err != nil {
+					t.Fatalf("unexpected apply error: %v", err)
+				}
+				if len(app.Bindings) != 1 {
+					t.Fatalf("expected 1 binding, got %d", len(app.Bindings))
+				}
+				b := app.Bindings[0]
+				if b.Type != domain.BindingTypeContainer || b.Name != "REDIS_CLIENT" || b.ContainerName != "redis-workload" || b.Image != "redis:alpine" {
+					t.Errorf("unexpected binding: %+v", b)
+				}
+			})
+		})
+	})
+}
+
+
