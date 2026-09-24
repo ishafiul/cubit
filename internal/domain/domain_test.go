@@ -29,6 +29,20 @@ func TestDomain(t *testing.T) {
 				t.Error("expected SSLActive to be false initially")
 			}
 		})
+
+		t.Run("When creating a domain with a wildcard hostname then it initializes successfully", func(t *testing.T) {
+			dom, err := domain.NewDomain("dom-wildcard", "app-1", "*.example.com", "/api")
+
+			if err != nil {
+				t.Fatalf("expected no error for wildcard hostname, got %v", err)
+			}
+			if dom.Hostname != "*.example.com" {
+				t.Errorf("expected hostname *.example.com, got %s", dom.Hostname)
+			}
+			if dom.PathPrefix != "/api" {
+				t.Errorf("expected pathPrefix /api, got %s", dom.PathPrefix)
+			}
+		})
 	})
 
 	t.Run("Given an invalid hostname", func(t *testing.T) {

@@ -70,6 +70,7 @@ func main() {
 	appService := appModule.NewService(appRepo, storageAdapter, routeSyncer, *bucketName)
 	depService := depModule.NewService(depRepo, appService, storageAdapter, routeSyncer, *bucketName)
 	domainService := domModule.NewService(domRepo, appRepo, routeSyncer)
+	appService.SetDomainRegistrar(domainService)
 	runtimeService := runtimeModule.NewService(nodeRepo, dockerSupervisor, storageAdapter, fmt.Sprintf("s3://%s", *bucketName), domain.DefaultCelldVersion)
 	servicesService := srvModule.NewService(servicesRepo, appRepo, appService, storageAdapter, *bucketName)
 	githubService := ghModule.NewService(githubRepo, appRepo, depService)

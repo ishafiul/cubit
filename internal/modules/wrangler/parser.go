@@ -151,6 +151,8 @@ type ImportSummary struct {
 	PreservedSecretsCount int      `json:"preservedSecretsCount"`
 	ImportedBindingsCount int      `json:"importedBindingsCount"`
 	CronsCount            int      `json:"cronsCount"`
+	ImportedRoutesCount   int      `json:"importedRoutesCount,omitempty"`
+	ExtractedRoutes       []string `json:"extractedRoutes,omitempty"`
 	DetectedFormat        string   `json:"detectedFormat"`
 }
 

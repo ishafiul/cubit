@@ -65,4 +65,60 @@ func TestFileProvider(t *testing.T) {
 			})
 		})
 	})
+
+	t.Run("Given wildcard and multi-path routing rules", func(t *testing.T) {
+		rules := []traefik.RouteRule{
+			{
+				AppName:    "my-worker",
+				Hostname:   "*.example.com",
+				PathPrefix: "/",
+				TargetURLs: []string{"http://10.0.0.1:8080"},
+				EnableTLS:  false,
+			},
+			{
+				AppName:    "my-worker",
+				Hostname:   "api.example.com",
+				PathPrefix: "/v1",
+				TargetURLs: []string{"http://10.0.0.1:8080"},
+				EnableTLS:  false,
+			},
+			{
+				AppName:    "my-worker",
+				Hostname:   "api.example.com",
+				PathPrefix: "/v2",
+				TargetURLs: []string{"http://10.0.0.1:8080"},
+				EnableTLS:  false,
+			},
+		}
+
+		t.Run("When routes are synchronized", func(t *testing.T) {
+			if err := provider.SyncRoutes(ctx, rules); err != nil {
+				t.Fatalf("expected no error syncing routes, got: %v", err)
+			}
+
+			content, err := os.ReadFile(outFile)
+			if err != nil {
+				t.Fatalf("expected config file to exist: %v", err)
+			}
+			yamlStr := string(content)
+
+			t.Run("Then wildcard host rule is generated", func(t *testing.T) {
+				if !strings.Contains(yamlStr, "Host(`*.example.com`)") {
+					t.Errorf("expected wildcard Host rule, got:\n%s", yamlStr)
+				}
+			})
+
+			t.Run("Then router names do not contain raw asterisks", func(t *testing.T) {
+				if strings.Contains(yamlStr, "rt-my-worker-*-") {
+					t.Errorf("router name must not contain raw asterisks, got:\n%s", yamlStr)
+				}
+			})
+
+			t.Run("Then both path prefixes exist without collision", func(t *testing.T) {
+				if !strings.Contains(yamlStr, "PathPrefix(`/v1`)") || !strings.Contains(yamlStr, "PathPrefix(`/v2`)") {
+					t.Errorf("expected both /v1 and /v2 path prefixes preserved without collision, got:\n%s", yamlStr)
+				}
+			})
+		})
+	})
 }
