@@ -287,5 +287,80 @@ func TestDeploymentService(t *testing.T) {
 				}
 			})
 		})
+
+		t.Run("Given a Git application with custom bundler rules and defines", func(t *testing.T) {
+			tempRepo, err := os.MkdirTemp("", "test-repo-rules-*")
+			if err != nil {
+				t.Fatalf("failed to create temp repo dir: %v", err)
+			}
+			defer os.RemoveAll(tempRepo)
+
+			wranglerContent := `{
+				"name": "bundler-rules-worker",
+				"rules": [
+					{ "type": "Text", "globs": ["**/*.txt"] },
+					{ "type": "CompiledWasm", "globs": ["**/*.wasm"] }
+				],
+				"define": {
+					"APP_ENV": "\"staging\""
+				}
+			}`
+			_ = os.WriteFile(filepath.Join(tempRepo, "wrangler.json"), []byte(wranglerContent), 0644)
+			_ = os.WriteFile(filepath.Join(tempRepo, "index.js"), []byte("export default { fetch() { return new Response('rules worker'); } };"), 0644)
+
+			gitApp, err := domain.NewApplicationWithSource(
+				"git-app-rules",
+				"git-rules-worker",
+				domain.SourceTypeGit,
+				"github.com/example/rules-worker",
+				"main",
+				"",
+				nil,
+				nil,
+			)
+			if err != nil {
+				t.Fatalf("failed to create git app: %v", err)
+			}
+			gitApp.GitRepo = tempRepo
+
+			gitAppMgr := &mockAppManager{app: gitApp}
+			gitDepRepo := newMockDeploymentRepo()
+			gitSvc := deployment.NewService(gitDepRepo, gitAppMgr, nil, nil, "cubit-fleet")
+
+			t.Run("When deploying the application", func(t *testing.T) {
+				dep, err := gitSvc.Deploy(context.Background(), gitApp.ID, "commit456")
+				if err != nil {
+					t.Fatalf("unexpected deployment error: %v", err)
+				}
+
+				t.Run("Then custom bundler rules and defines are applied and recorded in deployment logs", func(t *testing.T) {
+					if dep.Status != domain.DeploymentStatusActive {
+						t.Fatalf("expected active deployment, got: %s", dep.Status)
+					}
+
+					logs, _ := gitSvc.GetLogs(context.Background(), dep.ID)
+					foundBundlerLog := false
+					for _, l := range logs {
+						if strings.Contains(l.Message, "[esbuild] Applied custom bundler rules & defines:") {
+							foundBundlerLog = true
+							if !strings.Contains(l.Message, "--loader:.txt=text") {
+								t.Errorf("expected --loader:.txt=text in log message, got %s", l.Message)
+							}
+							if !strings.Contains(l.Message, "--loader:.wasm=binary") {
+								t.Errorf("expected --loader:.wasm=binary in log message, got %s", l.Message)
+							}
+							if !strings.Contains(l.Message, `--define:APP_ENV="staging"`) {
+								t.Errorf(`expected --define:APP_ENV="staging" in log message, got %s`, l.Message)
+							}
+							break
+						}
+					}
+					if !foundBundlerLog {
+						t.Errorf("expected custom bundler log in deployment logs, got: %+v", logs)
+					}
+				})
+			})
+		})
 	})
 }
+

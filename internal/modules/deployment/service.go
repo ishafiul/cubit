@@ -485,7 +485,22 @@ func (s *DeploymentService) buildGitWorker(ctx context.Context, app *domain.Appl
 
 	var entrypoint string
 	var assetsDir string
+	var parsedWrangler *wrangler.WranglerConfig
 	if len(wranglerData) > 0 {
+		if cfg, _, err := wrangler.Parse(wranglerData, "auto"); err == nil {
+			if app.Branch != "" {
+				parsedWrangler = wrangler.MergeEnvironment(cfg, app.Branch)
+			} else {
+				parsedWrangler = cfg
+			}
+		} else {
+			_ = s.repo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
+				Timestamp: time.Now().UTC(),
+				Step:      domain.LogStepGitClone,
+				Message:   fmt.Sprintf("[wrangler] Warning: failed to parse config for bundler: %v", err),
+				Level:     domain.LogLevelWarn,
+			})
+		}
 		_, summary, err := s.appMgr.ImportWrangler(ctx, app.ID, string(wranglerData), "auto", app.Branch)
 		if err == nil && summary != nil {
 			_ = s.repo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
@@ -650,8 +665,19 @@ func (s *DeploymentService) buildGitWorker(ctx context.Context, app *domain.Appl
 
 		buildCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
+		buildArgs := wrangler.BuildEsbuildArgs(parsedWrangler, entryPath, outPath)
+		if len(buildArgs) > 5 {
+			customFlags := buildArgs[5:]
+			_ = s.repo.AppendLog(ctx, dep.ID, domain.DeploymentLog{
+				Timestamp: time.Now().UTC(),
+				Step:      domain.LogStepEsbuild,
+				Message:   fmt.Sprintf("[esbuild] Applied custom bundler rules & defines: %s", strings.Join(customFlags, " ")),
+				Level:     domain.LogLevelInfo,
+			})
+		}
 
-		cmd := exec.CommandContext(buildCtx, "npx", "--yes", "esbuild", entryPath, "--bundle", "--format=esm", "--target=es2022", "--outfile="+outPath)
+		cmdArgs := append([]string{"--yes", "esbuild"}, buildArgs...)
+		cmd := exec.CommandContext(buildCtx, "npx", cmdArgs...)
 		cmd.Dir = workDir
 		if out, err := cmd.CombinedOutput(); err == nil {
 			if bundled, err := os.ReadFile(outPath); err == nil && len(bundled) > 0 {
