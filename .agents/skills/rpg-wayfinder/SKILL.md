@@ -121,13 +121,15 @@ After opening a PR, change the implementation issue to `status:in-review` (remov
 
 ## 7. Reconcile merged PRs and close the issue tree
 
-Whenever resuming from an issue or PR link, refresh GitHub state. If a leaf issue's PR is merged, add `status:completed`, remove stale readiness/progress/review labels, and close the issue if GitHub has not already closed it. Comment with the merged PR link. Never mark work completed while its PR is open or unmerged. If a parent task's PR is merged while subtasks remain open, remove `status:in-review`, keep the task open as `status:in-progress`, and comment that child work remains. If all subtasks are already closed, complete and close the parent after its PR merges.
+Whenever resuming from an issue or PR link, refresh GitHub state. If a leaf issue's PR is merged, add `status:completed`, remove stale readiness/progress/review labels, and close the issue if GitHub has not already closed it. Comment with the merged PR link. Never mark work completed while its PR is open or unmerged. If a parent task's PR is merged while subtasks remain open, remove `status:in-review`, keep the task open as `status:in-progress`, and comment that child work remains. If all subtasks are already closed, use the checklist and parent closure gate below before closing the parent.
 
-After closing a subtask, inspect all subtasks linked to its parent task. When every subtask is closed and the parent has no unmerged PR, mark the parent `status:completed`, comment with the child links, and close it. If the parent has an open PR, keep it `status:in-review` until that PR merges. If any child remains open, keep the parent open and report the remaining children.
+After a subtask PR merges, or before closing its parent, inspect the parent task's issue-body checklist. GitHub normally checks task-list items that directly reference closed issues. Verify every closed child's item is checked; for each unchecked item whose issue is closed, update only that marker to `[x]`, preserve the rest of the issue body, and comment with the child and merged PR links. Never check an item before its issue is closed.
+
+Then inspect all subtasks linked to the parent. When every subtask is closed and checked in the parent and the parent has no unmerged PR, mark the parent `status:completed`, comment with the child links, and close it. If the parent has an open PR, keep it `status:in-review` until that PR merges. If any child remains open, keep the parent open and report the remaining children.
 
 After all tasks and subtasks linked to a PRD are closed, mark the PRD `status:completed`, comment with the completed task/PR links, and close it. Then, if the map has no other in-scope open work, mark the map `status:completed`, comment with the PRD link, and close it.
 
-The skill reconciles merge events when invoked or resumed with an issue/PR link; it does not run a background GitHub watcher.
+The skill reconciles GitHub web merges the next time it is invoked or resumed with the issue/PR link; it does not run a background GitHub watcher.
 
 ## References
 

@@ -176,7 +176,29 @@ EOF
 )"
 ```
 
-Link each created subtask from its parent using a Markdown task list. Link native issue dependencies when available; the blocker value must be the blocker's GitHub database ID:
+Format each subtask entry in its parent issue as a Markdown task-list item with a direct issue reference, for example `- [ ] #123`. This lets GitHub link the checklist item to the child issue. If the reconciliation step in `SKILL.md` finds a stale unchecked item, use a unique temporary directory and re-fetch/compare the issue immediately before writing. Rebuild the targeted edit from the latest body if it changed; this narrows the compare/write race because `gh issue edit` replaces the full body. Link native issue dependencies when available; the blocker value must be the blocker's GitHub database ID:
+
+```bash
+set -euo pipefail
+: "${parent:?Set parent to the parent issue number}"
+: "${subtask:?Set subtask to the closed issue number}"
+: "${pr_url:?Set pr_url to the merged PR URL}"
+tmpdir=$(mktemp -d)
+trap 'rm -rf "$tmpdir"' EXIT
+body_file="$tmpdir/body"
+original_file="$tmpdir/original"
+current_file="$tmpdir/current"
+gh issue view "$parent" --json body --jq .body > "$body_file"
+cp "$body_file" "$original_file"
+# Edit only the exact unchecked child entry in body_file; stop unless it occurs once.
+gh issue view "$parent" --json body --jq .body > "$current_file"
+if ! cmp -s "$original_file" "$current_file"; then
+  echo "Parent issue changed; reload and retry."
+  exit 1
+fi
+gh issue edit "$parent" --body-file "$body_file"
+gh issue comment "$parent" --body "Checklist synced for closed subtask #$subtask; merged PR: $pr_url."
+```
 
 ```bash
 gh api repos/<owner>/<repo>/issues/<issue-number>/dependencies/blocked_by \
@@ -236,7 +258,7 @@ gh issue close <issue> --comment "Completed by merged PR <pr-url>."
 
 If GitHub already closed the leaf through `Closes`, apply the label and add a comment with `gh issue comment <issue> --body "Completed by merged PR <pr-url>."` instead of running `gh issue close` again.
 
-If the issue is a parent task with open subtasks, leave it open as `status:in-progress` after its own PR merges. Close it after every child subtask is closed and its own PR, if any, is merged. If children finish while its PR is still open, keep it `status:in-review` until merge. Once all tasks and subtasks for a PRD are closed, mark and close the PRD; when the map has no remaining in-scope work, mark and close the map too. Add a rollup comment with links to the closed children and merged PRs at each closure.
+Follow `SKILL.md` §7 for parent, PRD, and map closure gates and roll-up comments.
 
 ```bash
 gh issue edit <prd> --add-label "status:completed" --remove-label "status:approved"
