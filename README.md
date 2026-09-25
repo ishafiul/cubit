@@ -131,39 +131,38 @@ docker compose -f deploy/docker-compose.yml ps
 
 ---
 
-### Step 2: Start the Cubit Control Plane (`cubitd`)
+### Step 2: Build & Start Cubit (`cubitd`)
 
-Run the backend daemon locally with SQLite in WAL mode:
+`cubitd` serves **both** the backend REST API and the React 19 web dashboard from a single Go process.
 
-```bash
-# From repository root
-go run cmd/cubitd/main.go
-```
-
-The control plane starts on `http://localhost:8000`.
-
-To build a binary instead:
-```bash
-go build -o bin/cubitd cmd/cubitd/main.go
-./bin/cubitd
-```
-
----
-
-### Step 3: Start the Web Dashboard
-
-In a separate terminal, start the React 19 frontend development server:
-
+Build the frontend assets once:
 ```bash
 cd web
 npm install
+npm run build
+cd ..
+```
+
+Now start the `cubitd` daemon:
+```bash
+go run cmd/cubitd/main.go
+```
+
+That's it! Access the full web dashboard and API directly at:
+👉 **`http://localhost:8000`**
+
+---
+
+### (Optional) Frontend Development with Live HMR
+
+If you are actively developing and modifying React UI components, you can run Vite in a separate terminal for instant Hot Module Replacement (HMR):
+
+```bash
+cd web
 npm run dev
 ```
 
-The web dashboard is available at:
-👉 **`http://localhost:5173`**
-
-The Vite dev server automatically proxies API requests (`/api/*`) to `cubitd` on port `8000`.
+The Vite dev server runs at `http://localhost:5173` and automatically proxies all API calls (`/api/*`) to `cubitd` on port `8000`.
 
 ---
 
