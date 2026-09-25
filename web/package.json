@@ -16,13 +16,17 @@
     "lucide-react": "^1.16.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "tailwind-merge": "^3.0.2"
+    "tailwind-merge": "^3.0.2",
+    "zod": "^4.6.5",
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.3",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.21",
+    "jsdom": "^29.1.1",
     "orval": "^7.6.0",
     "postcss": "^8.5.3",
     "tailwindcss": "^3.4.17",
