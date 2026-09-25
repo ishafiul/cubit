@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { HardDrive, RefreshCw, AlertCircle, FileText, Upload, Folder, Plus, Trash2, Lock } from 'lucide-react';
+import { HardDrive, RefreshCw, AlertCircle, FileText, Upload, Folder, Plus, Trash2, Lock, CheckCircle2 } from 'lucide-react';
 
 export interface R2Bucket {
   name: string;
@@ -45,6 +45,13 @@ export function R2View({ initialSelectedId }: { initialSelectedId?: string } = {
   const [creatingBucket, setCreatingBucket] = useState(false);
   const [createBucketError, setCreateBucketError] = useState<string | null>(null);
   const [deletingBucketName, setDeletingBucketName] = useState<string | null>(null);
+
+  // Batch / Migration Import state
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importJson, setImportJson] = useState('');
+  const [importLoading, setImportLoading] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importSuccess, setImportSuccess] = useState<string | null>(null);
 
   const fetchBuckets = async () => {
     setLoading(true);
@@ -196,6 +203,43 @@ export function R2View({ initialSelectedId }: { initialSelectedId?: string } = {
     }
   };
 
+  const handleImportR2Objects = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedBucket || !importJson.trim()) return;
+    setImportLoading(true);
+    setImportError(null);
+    setImportSuccess(null);
+    try {
+      let payload: unknown;
+      try {
+        payload = JSON.parse(importJson.trim());
+      } catch (err: any) {
+        throw new Error('Invalid JSON format: ' + err.message);
+      }
+      const res = await fetch(`/api/v1/r2/buckets/${encodeURIComponent(selectedBucket.name)}/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || data.error || 'Failed to import R2 objects');
+      }
+      setImportSuccess(`Imported ${data.imported || 0} objects into bucket ${selectedBucket.name}`);
+      setImportJson('');
+      await fetchObjects(selectedBucket.name);
+      await fetchBuckets();
+      setTimeout(() => {
+        setShowImportModal(false);
+        setImportSuccess(null);
+      }, 1500);
+    } catch (err: any) {
+      setImportError(err.message);
+    } finally {
+      setImportLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -338,13 +382,28 @@ export function R2View({ initialSelectedId }: { initialSelectedId?: string } = {
                     <span>Uploads Restricted</span>
                   </div>
                 ) : (
-                  <button
-                    onClick={() => setShowUploadModal(true)}
-                    className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-semibold transition"
-                  >
-                    <Upload className="w-3.5 h-3.5" />
-                    Upload Object
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        setImportJson('');
+                        setImportError(null);
+                        setImportSuccess(null);
+                        setShowImportModal(true);
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 text-xs font-medium transition"
+                      title="Bulk import objects or migrate from Cloudflare R2"
+                    >
+                      <Upload className="w-3.5 h-3.5 text-blue-400" />
+                      Migrate / Import
+                    </button>
+                    <button
+                      onClick={() => setShowUploadModal(true)}
+                      className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-semibold transition"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      Upload Object
+                    </button>
+                  </div>
                 )}
               </div>
 
@@ -529,6 +588,104 @@ export function R2View({ initialSelectedId }: { initialSelectedId?: string } = {
                   className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-zinc-950 text-sm font-semibold transition"
                 >
                   {creatingBucket ? 'Creating...' : 'Create Bucket'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Batch / Migrate R2 Objects Modal */}
+      {showImportModal && selectedBucket && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="w-full max-w-xl bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-bold">Import / Migrate R2 Objects</h3>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  Target bucket: <span className="font-mono text-emerald-400">{selectedBucket.name}</span>
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 rounded-xl bg-zinc-950 border border-zinc-800/80 text-xs text-zinc-400 space-y-1">
+              <div className="font-semibold text-zinc-300">Object Batch Manifest Format:</div>
+              <code className="block font-mono text-[11px] text-emerald-400 select-all">
+                {'[{"key": "assets/img.png", "content": "...", "content_type": "image/png"}]'}
+              </code>
+              <div className="text-[11px] text-zinc-500 pt-1">
+                Upload a JSON manifest containing file objects with keys, raw/base64 content, and optional mime types.
+              </div>
+            </div>
+
+            <form onSubmit={handleImportR2Objects} className="space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider block mb-1">
+                  Upload Manifest File (.json)
+                </label>
+                <input
+                  type="file"
+                  accept=".json,application/json"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      const reader = new FileReader();
+                      reader.onload = (ev) => {
+                        if (typeof ev.target?.result === 'string') {
+                          setImportJson(ev.target.result);
+                        }
+                      };
+                      reader.readAsText(file);
+                    }
+                  }}
+                  className="w-full text-xs text-zinc-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-zinc-800 file:text-zinc-200 hover:file:bg-zinc-700 cursor-pointer"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider block mb-1">
+                  Or Paste JSON Manifest
+                </label>
+                <textarea
+                  rows={6}
+                  required
+                  placeholder='[&#10;  { "key": "docs/readme.txt", "content": "Sample file data..." }&#10;]'
+                  value={importJson}
+                  onChange={(e) => setImportJson(e.target.value)}
+                  className="w-full p-3 rounded-xl bg-zinc-950 border border-zinc-800 font-mono text-xs text-zinc-200 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              {importError && (
+                <div className="p-3 rounded-xl border border-red-900/50 bg-red-950/20 text-red-400 text-xs flex items-center gap-2 font-mono">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  <span>{importError}</span>
+                </div>
+              )}
+
+              {importSuccess && (
+                <div className="p-3 rounded-xl border border-emerald-900/50 bg-emerald-950/20 text-emerald-400 text-xs flex items-center gap-2 font-mono">
+                  <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                  <span>{importSuccess}</span>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowImportModal(false)}
+                  disabled={importLoading}
+                  className="px-4 py-2 rounded-lg text-sm text-zinc-400 hover:text-white transition disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={importLoading || !importJson.trim()}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-zinc-950 text-sm font-semibold transition"
+                >
+                  <Upload className={`w-4 h-4 ${importLoading ? 'animate-spin' : ''}`} />
+                  {importLoading ? 'Importing...' : 'Import Objects'}
                 </button>
               </div>
             </form>
