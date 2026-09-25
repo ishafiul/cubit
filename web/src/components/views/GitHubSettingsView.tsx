@@ -260,7 +260,7 @@ export function GitHubSettingsView() {
           )}
         </div>
         <p className="text-xs text-zinc-400">
-          Connect your GitHub account or organization via a Dokploy-style GitHub App to automatically build, version, and deploy Cloudflare Workers on every <code className="text-emerald-400 font-mono">git push</code>.
+          Connect your GitHub account or organization via a custom GitHub App to automatically build, version, and deploy Cloudflare Workers on every <code className="text-emerald-400 font-mono">git push</code>.
         </p>
       </div>
 

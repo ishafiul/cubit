@@ -92,7 +92,7 @@ Ensure the following tools are installed on your machine:
 
 ## ⚡ Quick Start: One-Line Server Installer
 
-Just like **Dokploy** or **Coolify**, you can install and bootstrap the complete Cubit platform on any bare-metal Linux server or cloud VPS (Ubuntu, Debian, Fedora, Arch, etc.) with a single command:
+Install and bootstrap the complete Cubit platform on any bare-metal Linux server or cloud VPS (Ubuntu, Debian, Fedora, Arch, etc.) with a single command:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ishafiul/cubit/main/scripts/install.sh | sudo bash
