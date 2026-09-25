@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { X, Zap, GitBranch, Globe, RefreshCw, AlertCircle, ExternalLink, Folder, Search } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { useModalStore, useModalActions } from '../../shared/stores/useModalStore';
+import { analyzeSourceCode } from '../../features/applications/utils/compatibility-linter';
 import {
   useCreateApplication,
   getListApplicationsQueryKey,
@@ -64,6 +65,11 @@ export function NewAppModal() {
     { path: '', name: 'Root (/)', hasWrangler: false, hasPackageJson: false },
   ]);
   const [isLoadingFolders, setIsLoadingFolders] = useState(false);
+
+  const unsupportedFindings = useMemo(() => {
+    if (sourceType !== 'inline') return [];
+    return analyzeSourceCode(inlineCode).filter((f) => f.status === 'unsupported');
+  }, [inlineCode, sourceType]);
 
   useEffect(() => {
     if (showNewAppModal) {
@@ -303,6 +309,21 @@ export function NewAppModal() {
                   onChange={e => setInlineCode(e.target.value)}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-xs font-mono text-zinc-200 focus:outline-none focus:border-emerald-500 resize-none leading-relaxed"
                 />
+
+                {unsupportedFindings.length > 0 && (
+                  <div className="mt-2 p-3 rounded-lg bg-rose-950/30 border border-rose-900/60 text-xs space-y-1.5 animate-in fade-in duration-150">
+                    <div className="flex items-center gap-1.5 text-rose-400 font-semibold">
+                      <AlertCircle className="w-3.5 h-3.5" />
+                      <span>Celld Incompatibility Detected ({unsupportedFindings.length}):</span>
+                    </div>
+                    {unsupportedFindings.map((f, i) => (
+                      <div key={i} className="text-[11px] text-zinc-300 pl-5">
+                        <span className="font-semibold text-rose-300">• {f.name}: </span>
+                        <span className="text-zinc-400">{f.remediation || f.details}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <label className="flex items-center gap-2.5 text-xs text-zinc-400 cursor-pointer select-none">

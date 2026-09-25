@@ -1,5 +1,17 @@
-import React, { useState } from 'react';
-import { Settings, Plus, Eye, EyeOff, Trash2, AlertTriangle, FileCode, Upload } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import {
+  Settings,
+  Plus,
+  Eye,
+  EyeOff,
+  Trash2,
+  AlertTriangle,
+  AlertCircle,
+  ShieldCheck,
+  FileCode,
+  Upload,
+  Cpu,
+} from 'lucide-react';
 import type { Application, EnvironmentVariable } from '../../../../api/model';
 import {
   useUpdateApplication,
@@ -13,6 +25,11 @@ import {
 import { useToastActions } from '../../../../shared/stores/useToastStore';
 import { environmentVariableSchema, validateSchema } from '../../../../shared/utils/validation';
 import { isOk } from '../../../../shared/utils/result';
+import {
+  analyzeCompatibility,
+  analyzeApplicationCompatibility,
+} from '../../utils/compatibility-linter';
+import { CompatibilityReportModal } from '../modals/CompatibilityReportModal';
 
 export interface SettingsTabProps {
   app: Application;
@@ -36,6 +53,14 @@ export function SettingsTab({ app, onDeleteApp }: SettingsTabProps) {
   const [showImportWranglerModal, setShowImportWranglerModal] = useState(false);
   const [rawWranglerConfig, setRawWranglerConfig] = useState('');
   const [isImportingWrangler, setIsImportingWrangler] = useState(false);
+
+  // Celld Compatibility Report State
+  const [showCompatModal, setShowCompatModal] = useState(false);
+  const appCompatReport = useMemo(() => analyzeApplicationCompatibility(app), [app]);
+  const liveCompatReport = useMemo(() => {
+    if (!rawWranglerConfig.trim()) return null;
+    return analyzeCompatibility(rawWranglerConfig);
+  }, [rawWranglerConfig]);
 
   const envVars: EnvironmentVariable[] = app.envVars || [];
 
@@ -248,18 +273,29 @@ export function SettingsTab({ app, onDeleteApp }: SettingsTabProps) {
               Generated Celld runtime manifest derived from active configuration
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              setRawWranglerConfig('');
-              setShowImportWranglerModal(true);
-            }}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 text-xs font-medium transition"
-            title="Sync configuration from wrangler.jsonc or wrangler.toml"
-          >
-            <Upload className="w-3.5 h-3.5 text-blue-400" />
-            Sync Wrangler Config
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowCompatModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 text-xs font-medium transition"
+              title="Inspect Celld runtime compatibility report"
+            >
+              <Cpu className="w-3.5 h-3.5 text-purple-400" />
+              Celld Compatibility
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setRawWranglerConfig('');
+                setShowImportWranglerModal(true);
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 text-xs font-medium transition"
+              title="Sync configuration from wrangler.jsonc or wrangler.toml"
+            >
+              <Upload className="w-3.5 h-3.5 text-blue-400" />
+              Sync Wrangler Config
+            </button>
+          </div>
         </div>
         <pre className="p-4 rounded-lg bg-zinc-950 border border-zinc-800 font-mono text-xs text-zinc-300 overflow-x-auto">
 {JSON.stringify(
@@ -358,6 +394,56 @@ export function SettingsTab({ app, onDeleteApp }: SettingsTabProps) {
                 />
               </div>
 
+              {/* Pre-Flight Live Compatibility Banner */}
+              {liveCompatReport && (
+                <div
+                  className={`p-3 rounded-xl border text-xs space-y-2 ${
+                    liveCompatReport.level === 'compatible'
+                      ? 'bg-emerald-950/20 border-emerald-800/50 text-emerald-300'
+                      : liveCompatReport.level === 'warning'
+                      ? 'bg-amber-950/20 border-amber-800/50 text-amber-300'
+                      : 'bg-rose-950/20 border-rose-800/50 text-rose-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between font-semibold">
+                    <div className="flex items-center gap-1.5">
+                      {liveCompatReport.level === 'compatible' ? (
+                        <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                      ) : liveCompatReport.level === 'warning' ? (
+                        <AlertTriangle className="w-4 h-4 text-amber-400" />
+                      ) : (
+                        <AlertCircle className="w-4 h-4 text-rose-400" />
+                      )}
+                      <span>
+                        Pre-Flight Check:{' '}
+                        {liveCompatReport.level === 'compatible'
+                          ? 'Fully Compatible with Celld'
+                          : liveCompatReport.level === 'warning'
+                          ? 'Deployable with Warnings'
+                          : 'Incompatible Features Detected'}
+                      </span>
+                    </div>
+                    <span className="font-mono text-[10px] text-zinc-400">
+                      {liveCompatReport.supportedCount} supported • {liveCompatReport.warningCount} warnings •{' '}
+                      {liveCompatReport.unsupportedCount} incompatible
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-zinc-400 leading-normal font-mono">
+                    {liveCompatReport.summary}
+                  </p>
+                  {liveCompatReport.unsupportedFeatures.length > 0 && (
+                    <div className="pt-1 text-[11px] space-y-1">
+                      {liveCompatReport.unsupportedFeatures.map((f, i) => (
+                        <div key={i} className="p-2 rounded bg-zinc-950/60 border border-rose-900/40">
+                          <span className="font-semibold text-rose-300">• {f.name}: </span>
+                          <span className="text-zinc-400">{f.remediation || f.details}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="flex justify-end gap-3 pt-2">
                 <button
                   type="button"
@@ -380,6 +466,14 @@ export function SettingsTab({ app, onDeleteApp }: SettingsTabProps) {
           </div>
         </div>
       )}
+
+      {/* Celld Compatibility Report Modal */}
+      <CompatibilityReportModal
+        isOpen={showCompatModal}
+        onClose={() => setShowCompatModal(false)}
+        report={appCompatReport}
+        title={`Celld Compatibility Report • ${app.name}`}
+      />
     </div>
   );
 }

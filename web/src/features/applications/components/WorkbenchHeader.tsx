@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   ArrowLeft,
   Play,
@@ -9,6 +9,9 @@ import {
   ShieldCheck,
   Zap,
   Layers,
+  Cpu,
+  AlertTriangle,
+  AlertCircle,
 } from 'lucide-react';
 import type { Application } from '../../../api/model';
 import {
@@ -17,6 +20,8 @@ import {
   useIsDirty,
   DetailTab,
 } from '../stores/applicationStore';
+import { analyzeApplicationCompatibility } from '../utils/compatibility-linter';
+import { CompatibilityReportModal } from './modals/CompatibilityReportModal';
 
 export function getDeploymentStatusBadge(status: string) {
   switch (status) {
@@ -55,6 +60,9 @@ export function WorkbenchHeader({
   const activeTab = useActiveTab();
   const isDirty = useIsDirty();
   const { setActiveTab } = useApplicationActions();
+
+  const [showCompatModal, setShowCompatModal] = useState(false);
+  const compatReport = useMemo(() => analyzeApplicationCompatibility(app), [app]);
 
   const handleTabClick = (tab: DetailTab) => {
     setActiveTab(tab);
@@ -110,6 +118,34 @@ export function WorkbenchHeader({
 
         <div className="flex items-center gap-2">
           <button
+            data-testid="header-celld-compat-btn"
+            onClick={() => setShowCompatModal(true)}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition ${
+              compatReport.level === 'compatible'
+                ? 'bg-emerald-950/60 text-emerald-400 border-emerald-800/80 hover:bg-emerald-900/60'
+                : compatReport.level === 'warning'
+                ? 'bg-amber-950/60 text-amber-400 border-amber-800/80 hover:bg-amber-900/60'
+                : 'bg-rose-950/60 text-rose-400 border-rose-800/80 hover:bg-rose-900/60'
+            }`}
+            title="Click to view Celld compatibility report"
+          >
+            {compatReport.level === 'compatible' ? (
+              <Cpu className="w-3.5 h-3.5 text-emerald-400" />
+            ) : compatReport.level === 'warning' ? (
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+            ) : (
+              <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
+            )}
+            <span>
+              Celld:{' '}
+              {compatReport.level === 'compatible'
+                ? 'Compatible'
+                : compatReport.level === 'warning'
+                ? `${compatReport.warningCount} Warning${compatReport.warningCount > 1 ? 's' : ''}`
+                : 'Incompatible'}
+            </span>
+          </button>
+          <button
             data-testid="header-test-btn"
             onClick={() => onTestApp(app)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-xs font-semibold text-zinc-200 transition"
@@ -132,6 +168,13 @@ export function WorkbenchHeader({
           </button>
         </div>
       </div>
+
+      <CompatibilityReportModal
+        isOpen={showCompatModal}
+        onClose={() => setShowCompatModal(false)}
+        report={compatReport}
+        title={`Celld Compatibility • ${app.name}`}
+      />
 
       <div className="px-4 flex gap-1 border-t border-zinc-800/60 overflow-x-auto scrollbar-none">
         {tabs.map((tab) => {
