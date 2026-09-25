@@ -178,6 +178,7 @@ func (s *DeploymentService) DeployWithDetails(ctx context.Context, appID, commit
 		bundleData = []byte(domain.DefaultHelloWorldWorker)
 	}
 
+	bundleData = WrapBundleWithEdgeContext(bundleData)
 	dep.BundleSize = int64(len(bundleData))
 
 	// Upload to storage
@@ -402,6 +403,8 @@ func (s *DeploymentService) DeployDirect(ctx context.Context, appID string, bund
 			bundle = []byte(domain.DefaultHelloWorldWorker)
 		}
 	}
+
+	bundle = WrapBundleWithEdgeContext(bundle)
 
 	// Upload compiled bundle to storage
 	if s.storage != nil {

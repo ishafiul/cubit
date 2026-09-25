@@ -521,6 +521,11 @@ export default {
             country: req.cf?.country,
             city: req.cf?.city,
             asn: req.cf?.asn,
+            clientIp: req.cf?.clientIP,
+            colo: req.cf?.colo,
+            continent: req.cf?.continent,
+            isEu: req.cf?.isEUCountry,
+            rayId: req.cf?.rayID,
             connectingIp: req.headers.get("cf-connecting-ip")
         }), { headers: { "Content-Type": "application/json" } });
     }
@@ -529,6 +534,7 @@ export default {
 			headers := map[string]string{
 				"CF-IPCountry":     "GB",
 				"CF-Connecting-IP": "82.165.197.1",
+				"CF-Ray":           "ray-test-12345",
 			}
 			res, err := application.RunWorkerBundleWithEnvAndBindings(
 				context.Background(),
@@ -551,6 +557,11 @@ export default {
 					Country      string `json:"country"`
 					City         string `json:"city"`
 					ASN          int    `json:"asn"`
+					ClientIP     string `json:"clientIp"`
+					Colo         string `json:"colo"`
+					Continent    string `json:"continent"`
+					IsEU         string `json:"isEu"`
+					RayID        string `json:"rayId"`
 					ConnectingIP string `json:"connectingIp"`
 				}
 				if err := json.Unmarshal(res.Body, &cfData); err != nil {
@@ -561,6 +572,21 @@ export default {
 				}
 				if cfData.ConnectingIP != "82.165.197.1" {
 					t.Errorf("expected connecting IP 82.165.197.1, got %s", cfData.ConnectingIP)
+				}
+				if cfData.ClientIP != "82.165.197.1" {
+					t.Errorf("expected clientIP 82.165.197.1, got %s", cfData.ClientIP)
+				}
+				if cfData.Colo != "LHR" {
+					t.Errorf("expected colo LHR for GB, got %s", cfData.Colo)
+				}
+				if cfData.Continent != "EU" {
+					t.Errorf("expected continent EU, got %s", cfData.Continent)
+				}
+				if cfData.IsEU != "1" {
+					t.Errorf("expected isEu 1 for GB, got %s", cfData.IsEU)
+				}
+				if cfData.RayID != "ray-test-12345" {
+					t.Errorf("expected rayID ray-test-12345, got %s", cfData.RayID)
 				}
 				if cfData.ASN != 13335 {
 					t.Errorf("expected ASN 13335, got %d", cfData.ASN)
