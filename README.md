@@ -90,9 +90,27 @@ Ensure the following tools are installed on your machine:
 
 ---
 
-## 🚀 Running in Development Mode
+## ⚡ Quick Start: One-Line Server Installer
 
-Running Cubit locally in development mode takes 3 simple steps:
+Just like **Dokploy** or **Coolify**, you can install and bootstrap the complete Cubit platform on any bare-metal Linux server or cloud VPS (Ubuntu, Debian, Fedora, Arch, etc.) with a single command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ishafiul/cubit/main/scripts/install.sh | sudo bash
+```
+
+### What the Installer Does Automatically:
+1. **Detects Architecture & OS** (x86_64, arm64).
+2. **Provisions Docker Engine & Compose** automatically if missing.
+3. **Creates System Layout** at `/opt/cubit` (data, Traefik dynamic configs, TLS certs, Garage S3 storage).
+4. **Writes Production Configs** (`traefik.yaml`, `garage.toml`, `docker-compose.yml`).
+5. **Starts the Full Fleet**: Launches `cubitd`, `celld`, `traefik`, and `garage`.
+6. **Detects Public IP**: Outputs your web workbench URL (`http://<SERVER_IP>:8000`), Traefik dashboard (`:8081`), and S3 storage (`:3900`).
+
+---
+
+## 💻 Local PC / Development Setup
+
+Running Cubit locally on your development machine (macOS / Linux / Windows WSL) takes 3 simple steps:
 
 ### Step 1: Start Infrastructure Services (Docker)
 

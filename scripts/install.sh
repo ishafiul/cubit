@@ -12,7 +12,7 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m' # No Color
 
-INSTALL_DIR="/opt/cubit"
+INSTALL_DIR="${INSTALL_DIR:-/opt/cubit}"
 COMPOSE_FILE="${INSTALL_DIR}/docker-compose.yml"
 
 echo -e "${CYAN}${BOLD}"
@@ -204,9 +204,10 @@ EOF
 
 echo -e "${BLUE}[4/5] Starting Cubit PaaS containers...${NC}"
 cd "${INSTALL_DIR}"
-# If running in offline or test mode, check compose syntax
 docker compose config > /dev/null
 echo -e "  ✓ Docker Compose specification validated."
+docker compose up -d
+echo -e "  ✓ Cubit container stack initialized."
 
 echo -e "${BLUE}[5/5] Verifying fleet initialization...${NC}"
 PUBLIC_IP=$(curl -s -4 ifconfig.me || echo "127.0.0.1")
