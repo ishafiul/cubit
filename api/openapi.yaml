@@ -1138,6 +1138,9 @@ components:
         branch:
           type: string
           default: "main"
+        rootDir:
+          type: string
+          example: "worker"
         inlineCode:
           type: string
           nullable: true

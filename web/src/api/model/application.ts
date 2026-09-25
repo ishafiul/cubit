@@ -19,6 +19,7 @@ export interface Application {
   /** @nullable */
   gitRepo?: string | null;
   branch?: string;
+  rootDir?: string;
   /** @nullable */
   inlineCode?: string | null;
   status: ApplicationStatus;
