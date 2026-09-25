@@ -1236,27 +1236,33 @@ function getHeader(name) {
 }
 
 const country = (getHeader("cf-ipcountry") || "US").toUpperCase();
+const euList = ["AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","GR","HU","IE","IT","LV","LT","LU","MT","NL","PL","PT","RO","SK","SI","ES","SE","GB"];
+const isEU = euList.includes(country) ? "1" : "0";
+const euContinent = [...euList, "CH", "NO", "IS"];
+const defaultContinent = euContinent.includes(country) ? "EU" : ["JP","CN","KR","SG","IN","HK","TW"].includes(country) ? "AS" : country === "AU" ? "OC" : "NA";
 const defaultColo = country === "DE" ? "FRA" : country === "GB" ? "LHR" : country === "JP" ? "NRT" : country === "AU" ? "SYD" : country === "SG" ? "SIN" : "SFO";
 const coloVal = (getHeader("cf-colo") || defaultColo).toUpperCase();
 const clientIPVal = clientIP || getHeader("cf-connecting-ip") || "127.0.0.1";
 request.cf = {
-    asn: 13335,
-    asOrganization: "Cloudflare, Inc.",
+    asn: Number(getHeader("cf-asn")) || 13335,
+    asOrganization: getHeader("cf-asorganization") || "Cloudflare, Inc.",
     city: getHeader("cf-ipcity") || (country === "DE" ? "Frankfurt" : country === "GB" ? "London" : country === "JP" ? "Tokyo" : "San Francisco"),
+    clientIP: clientIPVal,
     colo: coloVal,
-    continent: (country === "GB" || country === "DE" || country === "FR") ? "EU" : (country === "JP" || country === "SG") ? "AS" : country === "AU" ? "OC" : "NA",
+    continent: getHeader("cf-ipcontinent") || defaultContinent,
     country: country,
-    isEUCountry: (country === "GB" || country === "DE" || country === "FR") ? "1" : "0",
-    latitude: "37.7749",
-    longitude: "-122.4194",
-    metroCode: "807",
-    postalCode: "94107",
-    region: "California",
-    regionCode: "CA",
-    timezone: "America/Los_Angeles",
-    httpProtocol: "HTTP/2",
-    tlsVersion: "TLSv1.3",
-    tlsCipher: "AEAD-AES128-GCM-SHA256",
+    isEUCountry: isEU,
+    latitude: getHeader("cf-iplatitude") || "37.7749",
+    longitude: getHeader("cf-iplongitude") || "-122.4194",
+    metroCode: getHeader("cf-metrocode") || "807",
+    postalCode: getHeader("cf-postalcode") || "94107",
+    region: getHeader("cf-region") || "California",
+    regionCode: getHeader("cf-regioncode") || "CA",
+    timezone: getHeader("cf-timezone") || "America/Los_Angeles",
+    httpProtocol: getHeader("cf-http-protocol") || "HTTP/2",
+    tlsVersion: getHeader("cf-tls-version") || "TLSv1.3",
+    tlsCipher: getHeader("cf-tls-cipher") || "AEAD-AES128-GCM-SHA256",
+    rayID: rayID || getHeader("cf-ray") || "",
     botManagement: { score: 99, verifiedBot: false, staticResource: false }
 };
 
