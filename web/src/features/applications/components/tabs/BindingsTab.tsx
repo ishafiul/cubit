@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Layers, Plus, Database, HardDrive, Inbox, Box } from 'lucide-react';
+import { Layers, Plus, Database, HardDrive, Inbox, Box, Folder, Server, Cpu, GitBranch } from 'lucide-react';
 import type { Application, ResourceBinding } from '../../../../api/model';
 import { useUpdateApplication } from '../../../../api/generated/applications/applications';
 import { useToastActions } from '../../../../shared/stores/useToastStore';
@@ -87,11 +87,21 @@ export function BindingsTab({ app }: { app: Application }) {
   const getBindingIcon = (type: string) => {
     switch (type) {
       case 'd1':
+      case 'd1_database':
         return Database;
       case 'r2':
+      case 'r2_bucket':
         return HardDrive;
       case 'queue':
         return Inbox;
+      case 'workflow':
+        return GitBranch;
+      case 'durable_object':
+        return Cpu;
+      case 'container':
+        return Server;
+      case 'assets':
+        return Folder;
       default:
         return Box;
     }
@@ -105,7 +115,7 @@ export function BindingsTab({ app }: { app: Application }) {
           Cloudflare Compatible Resource Bindings
         </h3>
         <p className="text-xs text-zinc-400 mb-6">
-          Connect KV namespaces, D1 databases, R2 buckets, Queues, and Services to your worker environment
+          Connect KV namespaces, D1 databases, R2 buckets, Queues, Workflows, Containers, and Services to your worker environment
         </p>
 
         {/* Add Binding Form */}
@@ -129,6 +139,8 @@ export function BindingsTab({ app }: { app: Application }) {
             <option value="queue">Queue</option>
             <option value="durable_object">Durable Object</option>
             <option value="workflow">Workflow</option>
+            <option value="container">Container (Sidecar Workload)</option>
+            <option value="assets">Static Assets Directory</option>
           </select>
           <input
             type="text"

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Database, Plus, Trash2, Play, RefreshCw, AlertCircle, CheckCircle2, Clock } from 'lucide-react';
+import { Database, Plus, Trash2, Play, RefreshCw, AlertCircle, CheckCircle2, Clock, Upload } from 'lucide-react';
 
 interface D1Database {
   id: string;
@@ -42,6 +42,13 @@ SELECT * FROM users;`
   // Modals
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newDbName, setNewDbName] = useState('');
+
+  // SQL Dump Import State
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importSql, setImportSql] = useState('');
+  const [importLoading, setImportLoading] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importSuccess, setImportSuccess] = useState<string | null>(null);
 
   const fetchDatabases = async () => {
     setLoading(true);
@@ -137,6 +144,37 @@ SELECT * FROM users;`
       setQueryResult(null);
     } finally {
       setExecuting(false);
+    }
+  };
+
+  const handleImportD1SQL = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedDb || !importSql.trim()) return;
+    setImportLoading(true);
+    setImportError(null);
+    setImportSuccess(null);
+    try {
+      const res = await fetch(`/api/v1/d1/databases/${selectedDb.id}/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sql: importSql }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || data.error || 'Failed to import D1 SQL dump');
+      }
+      const dur = typeof data.duration_ms === 'number' ? data.duration_ms.toFixed(1) : '0';
+      setImportSuccess(`Executed ${data.executed || 0} SQL statements in ${dur}ms`);
+      setImportSql('');
+      await fetchDatabases();
+      setTimeout(() => {
+        setShowImportModal(false);
+        setImportSuccess(null);
+      }, 1500);
+    } catch (err: any) {
+      setImportError(err.message);
+    } finally {
+      setImportLoading(false);
     }
   };
 
@@ -245,6 +283,19 @@ SELECT * FROM users;`
                   <p className="text-xs text-zinc-400 mt-0.5">Isolated SQLite database file: <span className="font-mono text-zinc-300">.data/d1/{selectedDb.id}.db</span></p>
                 </div>
                 <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      setImportSql('');
+                      setImportError(null);
+                      setImportSuccess(null);
+                      setShowImportModal(true);
+                    }}
+                    className="flex items-center gap-1.5 text-xs text-zinc-300 hover:text-zinc-100 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 px-2.5 py-1 rounded-lg transition"
+                    title="Import Cloudflare D1 SQL dump"
+                  >
+                    <Upload className="w-3.5 h-3.5 text-blue-400" />
+                    Import SQL Dump
+                  </button>
                   <button
                     onClick={() => setSqlQuery('SELECT name, type FROM sqlite_master WHERE type=\'table\';')}
                     className="text-xs text-zinc-400 hover:text-zinc-200 bg-zinc-800 px-2.5 py-1 rounded transition"
@@ -383,6 +434,104 @@ SELECT * FROM users;`
                   className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-zinc-950 text-sm font-semibold transition"
                 >
                   Create
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Import D1 SQL Dump Modal */}
+      {showImportModal && selectedDb && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="w-full max-w-xl bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-bold">Import Cloudflare D1 SQL Dump</h3>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  Target database: <span className="font-mono text-emerald-400">{selectedDb.name}</span>
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 rounded-xl bg-zinc-950 border border-zinc-800/80 text-xs text-zinc-400 space-y-1">
+              <div className="font-semibold text-zinc-300">Wrangler Export Command:</div>
+              <code className="block font-mono text-[11px] text-emerald-400 select-all">
+                npx wrangler d1 export {selectedDb.name} --output=schema.sql
+              </code>
+              <div className="text-[11px] text-zinc-500 pt-1">
+                Accepts raw SQLite/D1 export scripts (.sql) containing DDL, DML, or schema migration statements.
+              </div>
+            </div>
+
+            <form onSubmit={handleImportD1SQL} className="space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider block mb-1">
+                  Upload SQL Script (.sql)
+                </label>
+                <input
+                  type="file"
+                  accept=".sql,.txt"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      const reader = new FileReader();
+                      reader.onload = (ev) => {
+                        if (typeof ev.target?.result === 'string') {
+                          setImportSql(ev.target.result);
+                        }
+                      };
+                      reader.readAsText(file);
+                    }
+                  }}
+                  className="w-full text-xs text-zinc-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-zinc-800 file:text-zinc-200 hover:file:bg-zinc-700 cursor-pointer"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider block mb-1">
+                  Or Paste SQL Statements
+                </label>
+                <textarea
+                  rows={7}
+                  required
+                  placeholder="CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, email TEXT);&#10;INSERT INTO users (email) VALUES ('ada@cubit.local');"
+                  value={importSql}
+                  onChange={(e) => setImportSql(e.target.value)}
+                  className="w-full p-3 rounded-xl bg-zinc-950 border border-zinc-800 font-mono text-xs text-zinc-200 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              {importError && (
+                <div className="p-3 rounded-xl border border-red-900/50 bg-red-950/20 text-red-400 text-xs flex items-center gap-2 font-mono">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  <span>{importError}</span>
+                </div>
+              )}
+
+              {importSuccess && (
+                <div className="p-3 rounded-xl border border-emerald-900/50 bg-emerald-950/20 text-emerald-400 text-xs flex items-center gap-2 font-mono">
+                  <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                  <span>{importSuccess}</span>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowImportModal(false)}
+                  disabled={importLoading}
+                  className="px-4 py-2 rounded-lg text-sm text-zinc-400 hover:text-white transition disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={importLoading || !importSql.trim()}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-zinc-950 text-sm font-semibold transition"
+                >
+                  <Upload className={`w-4 h-4 ${importLoading ? 'animate-spin' : ''}`} />
+                  {importLoading ? 'Executing...' : 'Run SQL Migration'}
                 </button>
               </div>
             </form>

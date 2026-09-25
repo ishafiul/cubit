@@ -28,6 +28,18 @@ describe('Given resource binding type to dashboard service mappings', () => {
       expect(getServiceTabForBindingType('workflow')).toBe('workflows');
     });
 
+    it('Then durable_object maps to durable-objects tab', () => {
+      expect(getServiceTabForBindingType('durable_object')).toBe('durable-objects');
+    });
+
+    it('Then container maps to containers tab', () => {
+      expect(getServiceTabForBindingType('container')).toBe('containers');
+    });
+
+    it('Then assets maps to static-assets tab', () => {
+      expect(getServiceTabForBindingType('assets')).toBe('static-assets');
+    });
+
     it('Then service maps to apps tab', () => {
       expect(getServiceTabForBindingType('service')).toBe('apps');
     });
@@ -40,6 +52,9 @@ describe('Given resource binding type to dashboard service mappings', () => {
       expect(getServiceLabelForBindingType('r2_bucket')).toBe('R2 Bucket');
       expect(getServiceLabelForBindingType('queue')).toBe('Queue Producer');
       expect(getServiceLabelForBindingType('workflow')).toBe('Workflow');
+      expect(getServiceLabelForBindingType('durable_object')).toBe('Durable Object');
+      expect(getServiceLabelForBindingType('container')).toBe('Container');
+      expect(getServiceLabelForBindingType('assets')).toBe('Static Assets');
       expect(getServiceLabelForBindingType('service')).toBe('Worker RPC');
     });
 
@@ -49,6 +64,9 @@ describe('Given resource binding type to dashboard service mappings', () => {
       expect(getServicePageName('r2_bucket')).toBe('R2 Buckets');
       expect(getServicePageName('queue')).toBe('Queues');
       expect(getServicePageName('workflow')).toBe('Workflows');
+      expect(getServicePageName('durable_object')).toBe('Durable Objects');
+      expect(getServicePageName('container')).toBe('Containers');
+      expect(getServicePageName('assets')).toBe('Static Assets');
       expect(getServicePageName('service')).toBe('Workers');
     });
   });

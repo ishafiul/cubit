@@ -779,6 +779,40 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /r2/buckets/{name}/import:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      summary: Bulk import objects into an R2 bucket
+      operationId: importR2Objects
+      tags:
+        - r2
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/R2ImportObject'
+      responses:
+        '200':
+          description: Objects imported successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/R2ImportResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /r2/buckets/{name}/objects/{key}:
     parameters:
       - name: name
@@ -928,6 +962,32 @@ components:
           type: string
           description: Raw or base64 text content of the object
 
+    R2ImportObject:
+      type: object
+      required:
+        - key
+      properties:
+        key:
+          type: string
+          example: "assets/logo.png"
+        content:
+          type: string
+          description: Raw text content if not base64
+        base64:
+          type: boolean
+          description: Whether content is base64 encoded
+        content_type:
+          type: string
+          example: "image/png"
+
+    R2ImportResult:
+      type: object
+      properties:
+        bucket:
+          type: string
+        imported:
+          type: integer
+
     NodeStatus:
       type: string
       enum:
@@ -1034,7 +1094,7 @@ components:
       properties:
         type:
           type: string
-          enum: [kv_namespace, d1_database, r2_bucket, queue, workflow, service]
+          enum: [kv_namespace, d1_database, r2_bucket, queue, workflow, service, durable_object, container, assets]
         name:
           type: string
           example: "MY_KV"
@@ -1078,6 +1138,9 @@ components:
         branch:
           type: string
           default: "main"
+        rootDir:
+          type: string
+          example: "worker"
         inlineCode:
           type: string
           nullable: true

@@ -10,7 +10,6 @@ import type { ResourceBinding } from './resourceBinding';
 
 export interface UpdateApplicationRequest {
   branch?: string;
-  rootDir?: string;
   inlineCode?: string;
   envVars?: EnvironmentVariable[];
   bindings?: ResourceBinding[];

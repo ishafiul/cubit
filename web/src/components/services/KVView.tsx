@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Database, Plus, Trash2, Key, RefreshCw, AlertCircle, Search, Edit3 } from 'lucide-react';
+import { Database, Plus, Trash2, Key, RefreshCw, AlertCircle, Search, Edit3, Upload, CheckCircle2 } from 'lucide-react';
 
 interface KVNamespace {
   id: string;
@@ -35,6 +35,13 @@ export function KVView({ initialSelectedId }: { initialSelectedId?: string } = {
   const [newMetadata, setNewMetadata] = useState('');
 
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Bulk Import state
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importJson, setImportJson] = useState('');
+  const [importLoading, setImportLoading] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importSuccess, setImportSuccess] = useState<string | null>(null);
 
   const fetchNamespaces = async () => {
     setLoading(true);
@@ -167,6 +174,43 @@ export function KVView({ initialSelectedId }: { initialSelectedId?: string } = {
     }
   };
 
+  const handleImportKV = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedNs || !importJson.trim()) return;
+    setImportLoading(true);
+    setImportError(null);
+    setImportSuccess(null);
+    try {
+      let payload: unknown;
+      try {
+        payload = JSON.parse(importJson.trim());
+      } catch (err: any) {
+        throw new Error('Invalid JSON format: ' + err.message);
+      }
+      const res = await fetch(`/api/v1/kv/namespaces/${selectedNs.id}/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || data.error || 'Failed to import KV bulk data');
+      }
+      setImportSuccess(`Successfully imported ${data.imported || 0} keys into ${selectedNs.name}`);
+      setImportJson('');
+      await fetchPairs(selectedNs.id);
+      await fetchNamespaces();
+      setTimeout(() => {
+        setShowImportModal(false);
+        setImportSuccess(null);
+      }, 1500);
+    } catch (err: any) {
+      setImportError(err.message);
+    } finally {
+      setImportLoading(false);
+    }
+  };
+
   const filteredPairs = pairs.filter(p => p.key.toLowerCase().includes(searchQuery.toLowerCase()));
 
   return (
@@ -269,19 +313,34 @@ export function KVView({ initialSelectedId }: { initialSelectedId?: string } = {
                   </div>
                   <p className="text-xs text-zinc-400 mt-0.5">Direct KV store bindings available to all Celld workers.</p>
                 </div>
-                <button
-                  onClick={() => {
-                    setNewKey('');
-                    setNewValue('');
-                    setNewTtl(0);
-                    setNewMetadata('');
-                    setShowPutKeyModal(true);
-                  }}
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-medium transition"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  Add Key / Value
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      setImportJson('');
+                      setImportError(null);
+                      setImportSuccess(null);
+                      setShowImportModal(true);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 text-xs font-medium transition"
+                    title="Import data from Cloudflare KV"
+                  >
+                    <Upload className="w-3.5 h-3.5 text-blue-400" />
+                    Import from Cloudflare
+                  </button>
+                  <button
+                    onClick={() => {
+                      setNewKey('');
+                      setNewValue('');
+                      setNewTtl(0);
+                      setNewMetadata('');
+                      setShowPutKeyModal(true);
+                    }}
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-medium transition"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Add Key / Value
+                  </button>
+                </div>
               </div>
 
               {/* Search Keys */}
@@ -478,6 +537,104 @@ export function KVView({ initialSelectedId }: { initialSelectedId?: string } = {
                   className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-zinc-950 text-sm font-semibold transition"
                 >
                   Save Key
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Import Modal */}
+      {showImportModal && selectedNs && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="w-full max-w-lg bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-bold">Import Cloudflare KV Data</h3>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  Target namespace: <span className="font-mono text-emerald-400">{selectedNs.name}</span>
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 rounded-xl bg-zinc-950 border border-zinc-800/80 text-xs text-zinc-400 space-y-1">
+              <div className="font-semibold text-zinc-300">Wrangler Export Command:</div>
+              <code className="block font-mono text-[11px] text-emerald-400 select-all">
+                npx wrangler kv bulk get --binding=MY_KV &gt; kv_dump.json
+              </code>
+              <div className="text-[11px] text-zinc-500 pt-1">
+                Accepts Wrangler bulk export JSON, arrays of <span className="font-mono">[{'{'}key, value{'}'}]</span>, or key-value object maps.
+              </div>
+            </div>
+
+            <form onSubmit={handleImportKV} className="space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider block mb-1">
+                  Upload Export File (.json)
+                </label>
+                <input
+                  type="file"
+                  accept=".json,application/json"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      const reader = new FileReader();
+                      reader.onload = (ev) => {
+                        if (typeof ev.target?.result === 'string') {
+                          setImportJson(ev.target.result);
+                        }
+                      };
+                      reader.readAsText(file);
+                    }
+                  }}
+                  className="w-full text-xs text-zinc-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-zinc-800 file:text-zinc-200 hover:file:bg-zinc-700 cursor-pointer"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider block mb-1">
+                  Or Paste JSON Dump
+                </label>
+                <textarea
+                  rows={6}
+                  required
+                  placeholder='[&#10;  { "key": "user:1", "value": "{\\"name\\":\\"Alice\\"}" }&#10;]'
+                  value={importJson}
+                  onChange={(e) => setImportJson(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 font-mono text-xs focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              {importError && (
+                <div className="p-3 rounded-xl border border-red-900/50 bg-red-950/20 text-red-400 text-xs flex items-center gap-2 font-mono">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  <span>{importError}</span>
+                </div>
+              )}
+
+              {importSuccess && (
+                <div className="p-3 rounded-xl border border-emerald-900/50 bg-emerald-950/20 text-emerald-400 text-xs flex items-center gap-2 font-mono">
+                  <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                  <span>{importSuccess}</span>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowImportModal(false)}
+                  disabled={importLoading}
+                  className="px-4 py-2 rounded-lg text-sm text-zinc-400 hover:text-white transition disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={importLoading || !importJson.trim()}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-zinc-950 text-sm font-semibold transition"
+                >
+                  <Upload className={`w-4 h-4 ${importLoading ? 'animate-spin' : ''}`} />
+                  {importLoading ? 'Importing...' : 'Import Keys'}
                 </button>
               </div>
             </form>

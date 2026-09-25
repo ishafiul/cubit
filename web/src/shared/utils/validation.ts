@@ -25,12 +25,17 @@ export type EnvironmentVariableInput = z.infer<typeof environmentVariableSchema>
 
 export const resourceBindingTypeSchema = z.enum([
   'kv',
+  'kv_namespace',
   'd1',
+  'd1_database',
   'r2',
+  'r2_bucket',
   'service',
   'queue',
   'durable_object',
   'workflow',
+  'container',
+  'assets',
 ]);
 
 export const resourceBindingSchema = z.object({

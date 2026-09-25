@@ -32,6 +32,8 @@ import type {
   InternalErrorResponse,
   NotFoundResponse,
   R2Bucket,
+  R2ImportObject,
+  R2ImportResult,
   R2Object,
   UploadR2Object200,
   UploadR2ObjectRequest
@@ -411,6 +413,71 @@ export const useUploadR2Object = <TError = BadRequestResponse | NotFoundResponse
       > => {
 
       const mutationOptions = getUploadR2ObjectMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * @summary Bulk import objects into an R2 bucket
+ */
+export const importR2Objects = (
+    name: string,
+    r2ImportObject: R2ImportObject[],
+ signal?: AbortSignal
+) => {
+      
+      
+      return customInstance<R2ImportResult>(
+      {url: `/r2/buckets/${name}/import`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: r2ImportObject, signal
+    },
+      );
+    }
+  
+
+
+export const getImportR2ObjectsMutationOptions = <TError = BadRequestResponse | NotFoundResponse | InternalErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importR2Objects>>, TError,{name: string;data: R2ImportObject[]}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof importR2Objects>>, TError,{name: string;data: R2ImportObject[]}, TContext> => {
+
+const mutationKey = ['importR2Objects'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof importR2Objects>>, {name: string;data: R2ImportObject[]}> = (props) => {
+          const {name,data} = props ?? {};
+
+          return  importR2Objects(name,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ImportR2ObjectsMutationResult = NonNullable<Awaited<ReturnType<typeof importR2Objects>>>
+    export type ImportR2ObjectsMutationBody = R2ImportObject[]
+    export type ImportR2ObjectsMutationError = BadRequestResponse | NotFoundResponse | InternalErrorResponse
+
+    /**
+ * @summary Bulk import objects into an R2 bucket
+ */
+export const useImportR2Objects = <TError = BadRequestResponse | NotFoundResponse | InternalErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importR2Objects>>, TError,{name: string;data: R2ImportObject[]}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof importR2Objects>>,
+        TError,
+        {name: string;data: R2ImportObject[]},
+        TContext
+      > => {
+
+      const mutationOptions = getImportR2ObjectsMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }
