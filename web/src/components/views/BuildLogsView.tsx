@@ -1,6 +1,11 @@
 import { useState, useEffect } from 'react';
 import { ShieldCheck, X, RefreshCw } from 'lucide-react';
-import { useDashboard } from '../../context/DashboardContext';
+import { useListApplications } from '../../api/generated/applications/applications';
+import {
+  useActiveDeploymentId,
+  useDeployStatus,
+  useDeploymentLogs,
+} from '../../shared/stores/useDeploymentTrackerStore';
 import { useListDeployments } from '../../api/generated/deployments/deployments';
 import type { Application } from '../../api/model';
 import { getDeploymentStatusBadge } from '../ApplicationDetailPage';
@@ -12,7 +17,11 @@ export function BuildLogsView({
   initialAppId?: string;
   onAppChange?: (appId: string) => void;
 } = {}) {
-  const { apps, activeDeploymentId, deployStatus, logs } = useDashboard();
+  const { data: appsData } = useListApplications();
+  const apps = Array.isArray(appsData) ? appsData : [];
+  const activeDeploymentId = useActiveDeploymentId();
+  const deployStatus = useDeployStatus();
+  const logs = useDeploymentLogs();
   const [selectedLogsAppId, setSelectedLogsAppId] = useState<string>(initialAppId || '');
 
   useEffect(() => {

@@ -17,7 +17,12 @@ import {
   FileCode,
   GitBranch,
 } from 'lucide-react';
-import { DashboardProvider, useDashboard } from './context/DashboardContext';
+import { useListNodes } from './api/generated/nodes/nodes';
+import { useListApplications } from './api/generated/applications/applications';
+import { useListDomains } from './api/generated/domains/domains';
+import { useGetRuntimeStatus } from './api/generated/runtime/runtime';
+import { useModalStore, useModalActions } from './shared/stores/useModalStore';
+import { ToastContainer } from './shared/components/ToastContainer';
 import { NewAppModal } from './components/modals/NewAppModal';
 import { AddNodeModal } from './components/modals/AddNodeModal';
 import { UpgradeModal } from './components/modals/UpgradeModal';
@@ -63,20 +68,27 @@ function getHeaderTitle(pathname: string): string {
 
 function DashboardLayout() {
   const location = useLocation();
+  const { data: nodesData } = useListNodes();
+  const { data: appsData } = useListApplications();
+  const { data: domainsData } = useListDomains();
+  const { data: runtimeStatus } = useGetRuntimeStatus({
+    query: { refetchInterval: 5000 },
+  });
+
+  const nodes = Array.isArray(nodesData) ? nodesData : [];
+  const apps = Array.isArray(appsData) ? appsData : [];
+  const domains = Array.isArray(domainsData) ? domainsData : [];
+
+  const testingApp = useModalStore((state) => state.testingApp);
+  const historyApp = useModalStore((state) => state.historyApp);
   const {
-    nodes,
-    apps,
-    domains,
-    runtimeStatus,
     setShowNewAppModal,
     setShowAddNodeModal,
     setShowUpgradeModal,
     setShowNewDomainModal,
-    testingApp,
     setTestingApp,
-    historyApp,
     setHistoryApp,
-  } = useDashboard();
+  } = useModalActions();
 
   const pathname = location.pathname;
   const isAppDetailPage = pathname.startsWith('/apps/') && pathname !== '/apps';
@@ -360,7 +372,8 @@ function DashboardLayout() {
         </div>
       </main>
 
-      {/* Global Modals */}
+      {/* Global Modals & Notifications */}
+      <ToastContainer />
       <NewAppModal />
       <AddNodeModal />
       <UpgradeModal />
@@ -385,9 +398,5 @@ function DashboardLayout() {
 }
 
 export default function App() {
-  return (
-    <DashboardProvider>
-      <DashboardLayout />
-    </DashboardProvider>
-  );
+  return <DashboardLayout />;
 }

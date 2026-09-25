@@ -1,8 +1,9 @@
 import { X } from 'lucide-react';
-import { useDashboard } from '../../context/DashboardContext';
+import { useModalStore, useModalActions } from '../../shared/stores/useModalStore';
 
 export function ViewCodeModal() {
-  const { viewingCodeApp, setViewingCodeApp } = useDashboard();
+  const viewingCodeApp = useModalStore((state) => state.viewingCodeApp);
+  const { setViewingCodeApp } = useModalActions();
 
   if (!viewingCodeApp) return null;
 

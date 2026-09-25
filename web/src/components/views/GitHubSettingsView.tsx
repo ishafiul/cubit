@@ -14,7 +14,7 @@ import {
   Key,
   CheckCircle2,
 } from 'lucide-react';
-import { useDashboard } from '../../context/DashboardContext';
+import { useModalActions } from '../../shared/stores/useModalStore';
 
 interface GitHubSettings {
   id: string;
@@ -41,7 +41,7 @@ interface GitHubRepoItem {
 }
 
 export function GitHubSettingsView() {
-  const { setShowNewAppModal } = useDashboard();
+  const { setShowNewAppModal } = useModalActions();
 
   const [settings, setSettings] = useState<GitHubSettings | null>(null);
   const [repositories, setRepositories] = useState<GitHubRepoItem[]>([]);

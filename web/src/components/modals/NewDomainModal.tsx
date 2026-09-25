@@ -1,16 +1,57 @@
 import React, { useState } from 'react';
-import { useDashboard } from '../../context/DashboardContext';
+import { useQueryClient } from '@tanstack/react-query';
+import { useModalStore, useModalActions } from '../../shared/stores/useModalStore';
+import { useListApplications } from '../../api/generated/applications/applications';
+import { useCreateDomain, getListDomainsQueryKey } from '../../api/generated/domains/domains';
+import { useToastActions } from '../../shared/stores/useToastStore';
 
 export function NewDomainModal() {
-  const { showNewDomainModal, setShowNewDomainModal, apps, handleCreateDomain } = useDashboard();
+  const showNewDomainModal = useModalStore((state) => state.showNewDomainModal);
+  const { setShowNewDomainModal } = useModalActions();
+  const { data: appsData } = useListApplications();
+  const apps = Array.isArray(appsData) ? appsData : [];
+  const createDomainMutation = useCreateDomain();
+  const queryClient = useQueryClient();
+  const { addToast } = useToastActions();
+
   const [selectedAppId, setSelectedAppId] = useState('');
   const [domainHost, setDomainHost] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!showNewDomainModal) return null;
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    await handleCreateDomain(selectedAppId, domainHost);
+    if (!selectedAppId || !domainHost.trim()) return;
+
+    setIsSubmitting(true);
+    try {
+      await createDomainMutation.mutateAsync({
+        data: { applicationId: selectedAppId, hostname: domainHost.trim(), pathPrefix: '/' },
+      });
+      await queryClient.invalidateQueries({ queryKey: getListDomainsQueryKey() });
+      setShowNewDomainModal(false);
+      setSelectedAppId('');
+      setDomainHost('');
+      addToast({
+        title: 'Domain Added',
+        description: `Domain ${domainHost} route created successfully.`,
+        variant: 'success',
+      });
+    } catch (err: unknown) {
+      const errorMsg =
+        (err as { response?: { data?: { error?: string } }; message?: string })?.response?.data
+          ?.error ||
+        (err as { message?: string })?.message ||
+        'Failed to create domain route';
+      addToast({
+        title: 'Creation Failed',
+        description: errorMsg,
+        variant: 'error',
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -23,12 +64,14 @@ export function NewDomainModal() {
             <select
               required
               value={selectedAppId}
-              onChange={e => setSelectedAppId(e.target.value)}
+              onChange={(e) => setSelectedAppId(e.target.value)}
               className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-500"
             >
               <option value="">Select an application...</option>
-              {apps.map(a => (
-                <option key={a.id} value={a.id}>{a.name}</option>
+              {apps.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
               ))}
             </select>
           </div>
@@ -40,7 +83,7 @@ export function NewDomainModal() {
               required
               placeholder="api.example.com"
               value={domainHost}
-              onChange={e => setDomainHost(e.target.value)}
+              onChange={(e) => setDomainHost(e.target.value)}
               className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-500 font-mono"
             />
           </div>
@@ -55,9 +98,12 @@ export function NewDomainModal() {
             </button>
             <button
               type="submit"
-              className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-zinc-950 text-sm font-semibold transition"
+              disabled={isSubmitting}
+              className={`px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-zinc-950 text-sm font-semibold transition ${
+                isSubmitting ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
             >
-              Create Domain Route
+              {isSubmitting ? 'Creating...' : 'Create Domain Route'}
             </button>
           </div>
         </form>
