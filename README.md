@@ -110,59 +110,51 @@ curl -fsSL https://raw.githubusercontent.com/ishafiul/cubit/main/scripts/install
 
 ## 💻 Local PC / Development Setup
 
-Running Cubit locally on your development machine (macOS / Linux / Windows WSL) takes 3 simple steps:
-
-### Step 1: Start Infrastructure Services (Docker)
-
-Spin up Garage S3, Traefik v3, and the `celld` runtime daemon in the background:
+You can start the entire local development stack with **a single command**:
 
 ```bash
-docker compose -f deploy/docker-compose.yml up -d garage traefik celld
+make dev
 ```
+*(Or `task dev` if using [Task](https://taskfile.dev))*
 
-Verify that the services are healthy:
-```bash
-docker compose -f deploy/docker-compose.yml ps
-```
+### What `make dev` does automatically:
+1. Starts the background Docker infrastructure (`garage`, `traefik`, `celld`).
+2. Builds the frontend web assets into `web/dist` if not already present.
+3. Launches the `cubitd` control plane on `http://localhost:8000`.
 
-* **Garage S3 API**: `http://localhost:3900`
-* **celld Daemon**: `http://localhost:8080`
-* **Traefik Ingress**: `http://localhost:80` (Dashboard: `http://localhost:8081`)
+Open your browser at 👉 **`http://localhost:8000`** to access the complete web dashboard and API!
 
 ---
 
-### Step 2: Build & Start Cubit (`cubitd`)
+### 🛠️ Developer Make Targets
 
-`cubitd` serves **both** the backend REST API and the React 19 web dashboard from a single Go process.
+| Target | Description |
+| :--- | :--- |
+| **`make dev`** | **One-step start**: boots infra, builds web assets if needed, and starts `cubitd` on `:8000`. |
+| **`make dev-ui`** | Runs Vite dev server with Hot Module Replacement (HMR) on `:5173`. |
+| **`make build`** | Builds frontend assets and compiles the `bin/cubitd` Go binary. |
+| **`make test`** | Runs all Go backend and frontend Vitest test suites. |
+| **`make infra-up`** | Starts background Docker infrastructure (Garage S3, Traefik, celld). |
+| **`make infra-down`** | Stops all Docker infrastructure containers. |
+| **`make infra-logs`** | Follows Docker infrastructure container logs. |
+| **`make clean`** | Cleans build artifacts, binaries, and local SQLite state. |
 
-Build the frontend assets once:
+---
+
+### Manual Step-by-Step Setup
+
+If you prefer running commands manually without `make`:
+
 ```bash
-cd web
-npm install
-npm run build
-cd ..
-```
+# 1. Start Docker dependencies
+docker compose -f deploy/docker-compose.yml up -d garage traefik celld
 
-Now start the `cubitd` daemon:
-```bash
+# 2. Build web assets once
+cd web && npm install && npm run build && cd ..
+
+# 3. Start cubitd (serves API & dashboard on http://localhost:8000)
 go run cmd/cubitd/main.go
 ```
-
-That's it! Access the full web dashboard and API directly at:
-👉 **`http://localhost:8000`**
-
----
-
-### (Optional) Frontend Development with Live HMR
-
-If you are actively developing and modifying React UI components, you can run Vite in a separate terminal for instant Hot Module Replacement (HMR):
-
-```bash
-cd web
-npm run dev
-```
-
-The Vite dev server runs at `http://localhost:5173` and automatically proxies all API calls (`/api/*`) to `cubitd` on port `8000`.
 
 ---
 
