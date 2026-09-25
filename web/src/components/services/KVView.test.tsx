@@ -1,6 +1,5 @@
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import React from 'react';
 import { KVView } from './KVView';
 
 describe('KVView Import Flow', () => {
