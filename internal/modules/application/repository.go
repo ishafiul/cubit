@@ -35,7 +35,7 @@ func NewRepository(db *sql.DB) *SQLiteRepository {
 
 const selectApplicationColumns = `
 	id, name, source_type, subdomain, git_repo, branch, COALESCE(root_dir, ''), inline_code, COALESCE(auto_deploy, 1), status, env_vars, bindings, COALESCE(migrations, '[]'), active_deployment_id,
-	COALESCE(compatibility_date, '2024-09-23'), COALESCE(compatibility_flags, '[]'), COALESCE(memory_limit_mb, 128), COALESCE(max_duration_ms, 50),
+	COALESCE(compatibility_date, '2024-09-23'), COALESCE(compatibility_flags, '[]'), COALESCE(memory_limit_mb, 128), COALESCE(max_duration_ms, 50), COALESCE(worker_port, 0),
 	created_at, updated_at
 `
 
@@ -50,13 +50,13 @@ func scanApplicationRow(s rowScanner) (*domain.Application, error) {
 		createdAtStr, updatedAtStr                                                    string
 		compatDateStr, compatFlagsJSON                                                string
 		gitRepoNull, inlineCodeNull, activeDepID                                      sql.NullString
-		autoDeployInt, memLimitInt, maxDurationInt                                    int
+		autoDeployInt, memLimitInt, maxDurationInt, workerPortInt                      int
 	)
 
 	err := s.Scan(
 		&app.ID, &app.Name, &sourceTypeStr, &subdomainStr, &gitRepoNull, &app.Branch, &app.RootDir, &inlineCodeNull, &autoDeployInt, &statusStr,
 		&envJSON, &bindingsJSON, &migrationsJSON, &activeDepID,
-		&compatDateStr, &compatFlagsJSON, &memLimitInt, &maxDurationInt,
+		&compatDateStr, &compatFlagsJSON, &memLimitInt, &maxDurationInt, &workerPortInt,
 		&createdAtStr, &updatedAtStr,
 	)
 	if err != nil {
@@ -103,6 +103,7 @@ func scanApplicationRow(s rowScanner) (*domain.Application, error) {
 	}
 	app.MemoryLimitMB = memLimitInt
 	app.MaxDurationMs = maxDurationInt
+	app.WorkerPort = workerPortInt
 
 	if createdAtStr != "" {
 		t, err := time.Parse(time.RFC3339, createdAtStr)
@@ -167,13 +168,13 @@ func (r *SQLiteRepository) Save(ctx context.Context, app *domain.Application) er
 	}
 
 	query := `
-		INSERT INTO applications (id, name, source_type, subdomain, git_repo, branch, root_dir, inline_code, auto_deploy, status, env_vars, bindings, migrations, active_deployment_id, compatibility_date, compatibility_flags, memory_limit_mb, max_duration_ms, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO applications (id, name, source_type, subdomain, git_repo, branch, root_dir, inline_code, auto_deploy, status, env_vars, bindings, migrations, active_deployment_id, compatibility_date, compatibility_flags, memory_limit_mb, max_duration_ms, worker_port, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	_, err = r.db.ExecContext(ctx, query,
 		app.ID, app.Name, sourceType, subdomain, app.GitRepo, app.Branch, app.RootDir, app.InlineCode, autoDeployInt, string(app.Status),
 		string(envVarsJSON), string(bindingsJSON), string(migrationsJSON), app.ActiveDeploymentID,
-		compatDate, string(compatFlagsJSON), memLimit, maxDuration,
+		compatDate, string(compatFlagsJSON), memLimit, maxDuration, app.WorkerPort,
 		app.CreatedAt.Format(time.RFC3339), app.UpdatedAt.Format(time.RFC3339),
 	)
 	if err != nil {
@@ -315,13 +316,13 @@ func (r *SQLiteRepository) Update(ctx context.Context, app *domain.Application) 
 	query := `
 		UPDATE applications
 		SET name = ?, source_type = ?, subdomain = ?, git_repo = ?, branch = ?, root_dir = ?, inline_code = ?, auto_deploy = ?, status = ?,
-		    env_vars = ?, bindings = ?, migrations = ?, active_deployment_id = ?, compatibility_date = ?, compatibility_flags = ?, memory_limit_mb = ?, max_duration_ms = ?, updated_at = ?
+		    env_vars = ?, bindings = ?, migrations = ?, active_deployment_id = ?, compatibility_date = ?, compatibility_flags = ?, memory_limit_mb = ?, max_duration_ms = ?, worker_port = ?, updated_at = ?
 		WHERE id = ?
 	`
 	res, err := r.db.ExecContext(ctx, query,
 		app.Name, sourceType, subdomain, app.GitRepo, app.Branch, app.RootDir, app.InlineCode, autoDeployInt, string(app.Status),
 		string(envVarsJSON), string(bindingsJSON), string(migrationsJSON), app.ActiveDeploymentID,
-		compatDate, string(compatFlagsJSON), memLimit, maxDuration,
+		compatDate, string(compatFlagsJSON), memLimit, maxDuration, app.WorkerPort,
 		app.UpdatedAt.Format(time.RFC3339), app.ID,
 	)
 	if err != nil {
