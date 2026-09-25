@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/ishaf/cubit/internal/adapters/out/traefik"
 	"github.com/ishaf/cubit/internal/domain"
 )
 
@@ -42,6 +43,8 @@ func SubdomainRouter(invoker WorkerInvoker) gin.HandlerFunc {
 					return
 				}
 
+				traefik.InjectEdgeHeaders(c.Request, traefik.EdgeHeaderOptions{})
+
 				reqBody, _ := io.ReadAll(c.Request.Body)
 				headers := make(map[string]string)
 				for k, v := range c.Request.Header {
@@ -49,11 +52,19 @@ func SubdomainRouter(invoker WorkerInvoker) gin.HandlerFunc {
 						headers[k] = strings.Join(v, ", ")
 					}
 				}
+				for _, h := range []string{
+					traefik.HeaderCFConnectingIP,
+					traefik.HeaderCFIPCountry,
+					traefik.HeaderCFIPCity,
+					traefik.HeaderCFRay,
+					traefik.HeaderCFVisitor,
+				} {
+					if val := c.Request.Header.Get(h); val != "" {
+						headers[h] = val
+					}
+				}
 				if _, ok := headers["Host"]; !ok && c.Request.Host != "" {
 					headers["Host"] = c.Request.Host
-				}
-				if _, ok := headers["CF-Connecting-IP"]; !ok {
-					headers["CF-Connecting-IP"] = c.ClientIP()
 				}
 				if _, ok := headers["X-Forwarded-For"]; !ok {
 					headers["X-Forwarded-For"] = c.ClientIP()

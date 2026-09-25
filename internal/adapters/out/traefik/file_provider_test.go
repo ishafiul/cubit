@@ -121,4 +121,76 @@ func TestFileProvider(t *testing.T) {
 			})
 		})
 	})
+
+	t.Run("Given Traefik FileProvider configured with Edge Headers and GeoIP", func(t *testing.T) {
+		edgeCfg := traefik.EdgeHeaderConfig{
+			EnableEdgeHeaders: true,
+			DefaultCountry:    "US",
+			DefaultCity:       "Dallas",
+			DefaultColo:       "DFW",
+			GeoIPDBPath:       "/etc/traefik/GeoLite2-City.mmdb",
+		}
+
+		edgeOutFile := filepath.Join(tmpDir, "edge-cubit.yaml")
+		edgeProvider := traefik.NewFileProviderWithEdgeHeaders(edgeOutFile, "letsencrypt", edgeCfg)
+
+		rules := []traefik.RouteRule{
+			{
+				AppName:    "geo-worker",
+				Hostname:   "geo.example.com",
+				PathPrefix: "/",
+				TargetURLs: []string{"http://10.0.0.1:9001"},
+				EnableTLS:  true,
+			},
+		}
+
+		t.Run("When synchronizing routes", func(t *testing.T) {
+			if err := edgeProvider.SyncRoutes(ctx, rules); err != nil {
+				t.Fatalf("expected no error syncing routes with edge headers: %v", err)
+			}
+
+			content, err := os.ReadFile(edgeOutFile)
+			if err != nil {
+				t.Fatalf("expected config file to exist: %v", err)
+			}
+			yamlStr := string(content)
+
+			t.Run("Then middlewares section is defined in dynamic YAML", func(t *testing.T) {
+				if !strings.Contains(yamlStr, "middlewares:") {
+					t.Errorf("expected middlewares section in yaml, got:\n%s", yamlStr)
+				}
+			})
+
+			t.Run("Then cubit-edge-headers middleware is configured with CF headers", func(t *testing.T) {
+				if !strings.Contains(yamlStr, "cubit-edge-headers:") {
+					t.Errorf("expected cubit-edge-headers middleware, got:\n%s", yamlStr)
+				}
+				if !strings.Contains(yamlStr, "CF-Visitor") {
+					t.Errorf("expected CF-Visitor in headers middleware, got:\n%s", yamlStr)
+				}
+				if !strings.Contains(yamlStr, "CF-IPCountry") {
+					t.Errorf("expected CF-IPCountry in headers middleware, got:\n%s", yamlStr)
+				}
+				if !strings.Contains(yamlStr, "CF-IPCity") {
+					t.Errorf("expected CF-IPCity in headers middleware, got:\n%s", yamlStr)
+				}
+			})
+
+			t.Run("Then router attaches cubit-edge-headers middleware", func(t *testing.T) {
+				if !strings.Contains(yamlStr, "- cubit-edge-headers") {
+					t.Errorf("expected router to reference cubit-edge-headers middleware, got:\n%s", yamlStr)
+				}
+			})
+
+			t.Run("Then GeoIP plugin middleware is configured when GeoIPDBPath is provided", func(t *testing.T) {
+				if !strings.Contains(yamlStr, "cubit-geoip:") {
+					t.Errorf("expected cubit-geoip middleware, got:\n%s", yamlStr)
+				}
+				if !strings.Contains(yamlStr, "- cubit-geoip") {
+					t.Errorf("expected router to reference cubit-geoip middleware, got:\n%s", yamlStr)
+				}
+			})
+		})
+	})
 }
+
