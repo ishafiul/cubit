@@ -1,8 +1,11 @@
 import { ShieldCheck, Plus, Globe } from 'lucide-react';
-import { useDashboard } from '../../context/DashboardContext';
+import { useListDomains } from '../../api/generated/domains/domains';
+import { useModalActions } from '../../shared/stores/useModalStore';
 
 export function DomainsView() {
-  const { domains, setShowNewDomainModal } = useDashboard();
+  const { data: domainsData } = useListDomains();
+  const domains = Array.isArray(domainsData) ? domainsData : [];
+  const { setShowNewDomainModal } = useModalActions();
 
   return (
     <div className="space-y-6">

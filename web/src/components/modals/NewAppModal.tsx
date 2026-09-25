@@ -1,7 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { X, Zap, GitBranch, Globe, RefreshCw, AlertCircle, ExternalLink, Folder, Search } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
-import { useDashboard } from '../../context/DashboardContext';
+import { useQueryClient } from '@tanstack/react-query';
+import { useModalStore, useModalActions } from '../../shared/stores/useModalStore';
+import {
+  useCreateApplication,
+  getListApplicationsQueryKey,
+} from '../../api/generated/applications/applications';
+import { useDeploymentManager } from '../../shared/hooks/useDeploymentManager';
+import { useToastActions } from '../../shared/stores/useToastStore';
 
 interface GitHubRepoItem {
   id: number;
@@ -22,7 +29,13 @@ interface GitHubFolderItem {
 
 export function NewAppModal() {
   const navigate = useNavigate();
-  const { showNewAppModal, setShowNewAppModal, handleCreateApp } = useDashboard();
+  const showNewAppModal = useModalStore((state) => state.showNewAppModal);
+  const { setShowNewAppModal } = useModalActions();
+  const createAppMutation = useCreateApplication();
+  const { deployApp } = useDeploymentManager();
+  const queryClient = useQueryClient();
+  const { addToast } = useToastActions();
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [appName, setAppName] = useState('');
   const [sourceType, setSourceType] = useState<'inline' | 'github' | 'git'>('inline');
@@ -165,16 +178,55 @@ export function NewAppModal() {
   if (!showNewAppModal) return null;
 
   const onSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!appName.trim()) return;
+
+    setIsSubmitting(true);
     const actualSourceType = sourceType === 'inline' ? 'inline' : 'git';
-    await handleCreateApp(e, {
-      name: appName,
-      sourceType: actualSourceType,
-      gitRepo,
-      gitBranch,
-      rootDir,
-      inlineCode,
-      autoDeploy,
-    });
+    const payload =
+      actualSourceType === 'git'
+        ? {
+            name: appName.trim(),
+            sourceType: 'git' as const,
+            gitRepo,
+            branch: gitBranch || 'main',
+            rootDir: rootDir || '',
+          }
+        : {
+            name: appName.trim(),
+            sourceType: 'inline' as const,
+            inlineCode: inlineCode || undefined,
+          };
+
+    try {
+      const res = await createAppMutation.mutateAsync({ data: payload });
+      await queryClient.invalidateQueries({ queryKey: getListApplicationsQueryKey() });
+      setShowNewAppModal(false);
+      addToast({
+        title: 'Worker Created',
+        description: `Worker "${appName.trim()}" created successfully.`,
+        variant: 'success',
+      });
+      if (res && res.id) {
+        if (autoDeploy) {
+          await deployApp(res.id);
+        }
+        navigate({ to: '/apps/$appId', params: { appId: res.id } });
+      }
+    } catch (err: unknown) {
+      const errorMsg =
+        (err as { response?: { data?: { error?: string } }; message?: string })?.response?.data
+          ?.error ||
+        (err as { message?: string })?.message ||
+        'Failed to create worker';
+      addToast({
+        title: 'Creation Failed',
+        description: errorMsg,
+        variant: 'error',
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -543,10 +595,10 @@ export function NewAppModal() {
             </button>
             <button
               type="submit"
-              disabled={sourceType === 'github' && !isGitHubConfigured}
+              disabled={isSubmitting || (sourceType === 'github' && !isGitHubConfigured)}
               className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-zinc-950 text-sm font-semibold transition"
             >
-              Create & Deploy
+              {isSubmitting ? 'Creating...' : 'Create & Deploy'}
             </button>
           </div>
         </form>

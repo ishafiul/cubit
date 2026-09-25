@@ -1,24 +1,66 @@
 import { useNavigate } from '@tanstack/react-router';
 import { Layers, Plus, ShieldCheck, X, RefreshCw } from 'lucide-react';
-import { useDashboard } from '../../context/DashboardContext';
+import { useQueryClient } from '@tanstack/react-query';
+import {
+  useListApplications,
+  useDeleteApplication,
+  getListApplicationsQueryKey,
+} from '../../api/generated/applications/applications';
+import { useModalActions } from '../../shared/stores/useModalStore';
+import { useDeploymentManager } from '../../shared/hooks/useDeploymentManager';
+import { useToastActions } from '../../shared/stores/useToastStore';
 import { ApplicationCard } from '../modals/ApplicationCard';
 import type { Application } from '../../api/model';
 
 export function WorkersView() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { data: appsData } = useListApplications();
+  const apps = Array.isArray(appsData) ? appsData : [];
+
   const {
-    apps,
-    handleDeployApp,
-    handleDeleteApp,
+    deployApp: handleDeployApp,
     isDeploying,
-    setViewingCodeApp,
-    setTestingApp,
-    setHistoryApp,
-    setShowNewAppModal,
     activeDeploymentId,
     deployStatus,
     logs,
-  } = useDashboard();
+  } = useDeploymentManager();
+
+  const {
+    setShowNewAppModal,
+    setViewingCodeApp,
+    setTestingApp,
+    setHistoryApp,
+  } = useModalActions();
+  const { addToast } = useToastActions();
+
+  const deleteAppMutation = useDeleteApplication();
+
+  const handleDeleteApp = async (appId: string) => {
+    if (!window.confirm('Are you sure you want to delete this application?')) {
+      return;
+    }
+    try {
+      await deleteAppMutation.mutateAsync({ id: appId });
+      queryClient.setQueryData(
+        getListApplicationsQueryKey(),
+        (old: Application[] | undefined) => (old ? old.filter((a) => a.id !== appId) : [])
+      );
+      await queryClient.invalidateQueries({ queryKey: getListApplicationsQueryKey() });
+      addToast({
+        title: 'Worker Deleted',
+        description: 'Worker deleted successfully.',
+        variant: 'info',
+      });
+    } catch (err: unknown) {
+      console.error('Failed to delete application', err);
+      addToast({
+        title: 'Delete Failed',
+        description: 'Failed to delete worker.',
+        variant: 'error',
+      });
+    }
+  };
 
   return (
     <div className="space-y-6">

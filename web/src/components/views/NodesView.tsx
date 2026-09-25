@@ -12,18 +12,34 @@ import {
   Shield,
   Lock,
 } from 'lucide-react';
-import { useDashboard } from '../../context/DashboardContext';
+import { useQueryClient } from '@tanstack/react-query';
+import {
+  useListNodes,
+  useDrainNode,
+  useActivateNode,
+  useDeleteNode,
+  getListNodesQueryKey,
+} from '../../api/generated/nodes/nodes';
+import { useListApplications } from '../../api/generated/applications/applications';
+import { useListDomains } from '../../api/generated/domains/domains';
+import { useModalActions } from '../../shared/stores/useModalStore';
+import { useToastActions } from '../../shared/stores/useToastStore';
 
 export function NodesView() {
-  const {
-    nodes,
-    apps,
-    domains,
-    setShowAddNodeModal,
-    handleDrainNode,
-    handleActivateNode,
-    handleDeleteNode,
-  } = useDashboard();
+  const queryClient = useQueryClient();
+  const { data: nodesData } = useListNodes();
+  const { data: appsData } = useListApplications();
+  const { data: domainsData } = useListDomains();
+  const nodes = Array.isArray(nodesData) ? nodesData : [];
+  const apps = Array.isArray(appsData) ? appsData : [];
+  const domains = Array.isArray(domainsData) ? domainsData : [];
+
+  const { setShowAddNodeModal } = useModalActions();
+  const { addToast } = useToastActions();
+
+  const drainNodeMutation = useDrainNode();
+  const activateNodeMutation = useActivateNode();
+  const deleteNodeMutation = useDeleteNode();
 
   const [loadingNodeId, setLoadingNodeId] = useState<string | null>(null);
 
@@ -33,9 +49,20 @@ export function NodesView() {
     }
     setLoadingNodeId(nodeId);
     try {
-      await handleDrainNode(nodeId);
-    } catch (err) {
+      await drainNodeMutation.mutateAsync({ id: nodeId });
+      await queryClient.invalidateQueries({ queryKey: getListNodesQueryKey() });
+      addToast({
+        title: 'Node Drained',
+        description: `Node "${nodeName}" drained successfully.`,
+        variant: 'info',
+      });
+    } catch (err: unknown) {
       console.error('Failed to drain node', err);
+      addToast({
+        title: 'Drain Failed',
+        description: 'Failed to drain node',
+        variant: 'error',
+      });
     } finally {
       setLoadingNodeId(null);
     }
@@ -44,9 +71,20 @@ export function NodesView() {
   const onActivate = async (nodeId: string) => {
     setLoadingNodeId(nodeId);
     try {
-      await handleActivateNode(nodeId);
-    } catch (err) {
+      await activateNodeMutation.mutateAsync({ id: nodeId });
+      await queryClient.invalidateQueries({ queryKey: getListNodesQueryKey() });
+      addToast({
+        title: 'Node Activated',
+        description: 'Node activated successfully.',
+        variant: 'success',
+      });
+    } catch (err: unknown) {
       console.error('Failed to activate node', err);
+      addToast({
+        title: 'Activation Failed',
+        description: 'Failed to activate node',
+        variant: 'error',
+      });
     } finally {
       setLoadingNodeId(null);
     }
@@ -58,9 +96,20 @@ export function NodesView() {
     }
     setLoadingNodeId(nodeId);
     try {
-      await handleDeleteNode(nodeId);
-    } catch (err) {
+      await deleteNodeMutation.mutateAsync({ id: nodeId });
+      await queryClient.invalidateQueries({ queryKey: getListNodesQueryKey() });
+      addToast({
+        title: 'Node Deregistered',
+        description: `Node "${nodeName}" removed from fleet.`,
+        variant: 'info',
+      });
+    } catch (err: unknown) {
       console.error('Failed to delete node', err);
+      addToast({
+        title: 'Deregister Failed',
+        description: 'Failed to deregister node',
+        variant: 'error',
+      });
     } finally {
       setLoadingNodeId(null);
     }

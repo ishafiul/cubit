@@ -1,9 +1,16 @@
 import React, { useState } from 'react';
 import { Server, Terminal, Copy, Check, X, AlertCircle, Info } from 'lucide-react';
-import { useDashboard } from '../../context/DashboardContext';
+import { useQueryClient } from '@tanstack/react-query';
+import { useModalStore, useModalActions } from '../../shared/stores/useModalStore';
+import { useCreateNode, getListNodesQueryKey } from '../../api/generated/nodes/nodes';
+import { useToastActions } from '../../shared/stores/useToastStore';
 
 export function AddNodeModal() {
-  const { showAddNodeModal, setShowAddNodeModal, handleCreateNode } = useDashboard();
+  const showAddNodeModal = useModalStore((state) => state.showAddNodeModal);
+  const { setShowAddNodeModal } = useModalActions();
+  const createNodeMutation = useCreateNode();
+  const queryClient = useQueryClient();
+  const { addToast } = useToastActions();
 
   const [activeTab, setActiveTab] = useState<'docker' | 'manual'>('docker');
   const [nodeName, setNodeName] = useState('');
@@ -65,11 +72,19 @@ export function AddNodeModal() {
     setErrorMessage(null);
 
     try {
-      await handleCreateNode({
-        name: nodeName.trim(),
-        ipAddress: ipAddress.trim(),
-        workerPort: Number(workerPort) || 8080,
-        internalPort: Number(internalPort) || 8081,
+      await createNodeMutation.mutateAsync({
+        data: {
+          name: nodeName.trim(),
+          ipAddress: ipAddress.trim(),
+          workerPort: Number(workerPort) || 8080,
+          internalPort: Number(internalPort) || 8081,
+        },
+      });
+      await queryClient.invalidateQueries({ queryKey: getListNodesQueryKey() });
+      addToast({
+        title: 'Node Registered',
+        description: `Node ${nodeName.trim()} registered in fleet successfully.`,
+        variant: 'success',
       });
       handleClose();
     } catch (err: any) {

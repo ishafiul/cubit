@@ -1,15 +1,54 @@
 import React, { useState } from 'react';
-import { useDashboard } from '../../context/DashboardContext';
+import { useQueryClient } from '@tanstack/react-query';
+import { useModalStore, useModalActions } from '../../shared/stores/useModalStore';
+import {
+  useUpgradeCelldDaemon,
+  getGetRuntimeStatusQueryKey,
+} from '../../api/generated/runtime/runtime';
+import { useToastActions } from '../../shared/stores/useToastStore';
 
 export function UpgradeModal() {
-  const { showUpgradeModal, setShowUpgradeModal, handleUpgradeCelld } = useDashboard();
+  const showUpgradeModal = useModalStore((state) => state.showUpgradeModal);
+  const { setShowUpgradeModal } = useModalActions();
+  const upgradeCelldMutation = useUpgradeCelldDaemon();
+  const queryClient = useQueryClient();
+  const { addToast } = useToastActions();
+
   const [targetVersion, setTargetVersion] = useState('0.3.0');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!showUpgradeModal) return null;
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    await handleUpgradeCelld(targetVersion);
+    if (!targetVersion.trim()) return;
+
+    setIsSubmitting(true);
+    try {
+      await upgradeCelldMutation.mutateAsync({
+        data: { targetVersion: targetVersion.trim() },
+      });
+      await queryClient.invalidateQueries({ queryKey: getGetRuntimeStatusQueryKey() });
+      setShowUpgradeModal(false);
+      addToast({
+        title: 'Upgrade Initiated',
+        description: `Rolling upgrade to v${targetVersion} started across fleet.`,
+        variant: 'info',
+      });
+    } catch (err: unknown) {
+      const errorMsg =
+        (err as { response?: { data?: { error?: string } }; message?: string })?.response?.data
+          ?.error ||
+        (err as { message?: string })?.message ||
+        'Failed to start upgrade';
+      addToast({
+        title: 'Upgrade Failed',
+        description: errorMsg,
+        variant: 'error',
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -30,7 +69,7 @@ export function UpgradeModal() {
               required
               placeholder="0.3.0"
               value={targetVersion}
-              onChange={e => setTargetVersion(e.target.value)}
+              onChange={(e) => setTargetVersion(e.target.value)}
               className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-500 font-mono"
             />
           </div>
@@ -45,9 +84,12 @@ export function UpgradeModal() {
             </button>
             <button
               type="submit"
-              className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-zinc-950 text-sm font-semibold transition"
+              disabled={isSubmitting}
+              className={`px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-zinc-950 text-sm font-semibold transition ${
+                isSubmitting ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
             >
-              Start Rolling Upgrade
+              {isSubmitting ? 'Starting...' : 'Start Rolling Upgrade'}
             </button>
           </div>
         </form>
