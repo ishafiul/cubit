@@ -254,4 +254,129 @@ func TestServicesHandler(t *testing.T) {
 			})
 		})
 	})
+
+	t.Run("Given State Data Import REST endpoints", func(t *testing.T) {
+		t.Run("When importing KV bulk JSON array", func(t *testing.T) {
+			kvData := `[{"key":"theme","value":"dark"},{"key":"lang","value":"en"}]`
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/kv/namespaces/import-ns/import", bytes.NewReader([]byte(kvData)))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			t.Run("Then responds with 200 OK and import stats", func(t *testing.T) {
+				if rec.Code != http.StatusOK {
+					t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+				}
+				var res srvModule.KVImportResult
+				if err := json.NewDecoder(rec.Body).Decode(&res); err != nil {
+					t.Fatalf("failed decoding response: %v", err)
+				}
+				if res.Imported != 2 || res.Total != 2 {
+					t.Errorf("expected 2 imported, got %+v", res)
+				}
+			})
+		})
+
+		t.Run("When importing D1 SQL dump", func(t *testing.T) {
+			sqlDump := `CREATE TABLE import_test (id INTEGER PRIMARY KEY, note TEXT);
+INSERT INTO import_test (id, note) VALUES (1, 'imported');`
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/d1/databases/import-db/import", bytes.NewReader([]byte(sqlDump)))
+			req.Header.Set("Content-Type", "application/sql")
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			t.Run("Then responds with 200 OK and executed statement count", func(t *testing.T) {
+				if rec.Code != http.StatusOK {
+					t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+				}
+				var res srvModule.D1ImportResult
+				if err := json.NewDecoder(rec.Body).Decode(&res); err != nil {
+					t.Fatalf("failed decoding response: %v", err)
+				}
+				if res.Executed < 1 {
+					t.Errorf("expected executed statements > 0, got %+v", res)
+				}
+			})
+		})
+
+		t.Run("When importing R2 batch objects", func(t *testing.T) {
+			r2Payload := `{"objects": [{"key": "banner.txt", "content": "welcome", "base64": false}]}`
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/r2/buckets/import-bucket/import", bytes.NewReader([]byte(r2Payload)))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			t.Run("Then responds with 200 OK and imported count", func(t *testing.T) {
+				if rec.Code != http.StatusOK {
+					t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+				}
+				var res srvModule.R2ImportResult
+				if err := json.NewDecoder(rec.Body).Decode(&res); err != nil {
+					t.Fatalf("failed decoding response: %v", err)
+				}
+				if res.Imported != 1 {
+					t.Errorf("expected 1 imported, got %+v", res)
+				}
+			})
+		})
+
+		t.Run("When submitting invalid payloads", func(t *testing.T) {
+			cases := []struct {
+				name       string
+				method     string
+				url        string
+				body       string
+				wantStatus int
+			}{
+				{
+					name:       "empty KV body returns 400",
+					method:     http.MethodPost,
+					url:        "/api/v1/kv/namespaces/test-ns/import",
+					body:       "",
+					wantStatus: http.StatusBadRequest,
+				},
+				{
+					name:       "invalid KV JSON returns 400",
+					method:     http.MethodPost,
+					url:        "/api/v1/kv/namespaces/test-ns/import",
+					body:       "not-valid-json",
+					wantStatus: http.StatusBadRequest,
+				},
+				{
+					name:       "empty D1 body returns 400",
+					method:     http.MethodPost,
+					url:        "/api/v1/d1/databases/test-db/import",
+					body:       "   ",
+					wantStatus: http.StatusBadRequest,
+				},
+				{
+					name:       "empty R2 body returns 400",
+					method:     http.MethodPost,
+					url:        "/api/v1/r2/buckets/test-bucket/import",
+					body:       "",
+					wantStatus: http.StatusBadRequest,
+				},
+				{
+					name:       "invalid R2 payload returns 400",
+					method:     http.MethodPost,
+					url:        "/api/v1/r2/buckets/test-bucket/import",
+					body:       `{"unexpected":"structure"}`,
+					wantStatus: http.StatusBadRequest,
+				},
+			}
+
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					req := httptest.NewRequest(tc.method, tc.url, bytes.NewReader([]byte(tc.body)))
+					req.Header.Set("Content-Type", "application/json")
+					rec := httptest.NewRecorder()
+					router.ServeHTTP(rec, req)
+
+					if rec.Code != tc.wantStatus {
+						t.Errorf("expected status %d, got %d", tc.wantStatus, rec.Code)
+					}
+				})
+			}
+		})
+	})
 }

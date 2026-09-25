@@ -14,6 +14,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		kv.GET("/namespaces/:id/values/:key", h.GetKVPair)
 		kv.PUT("/namespaces/:id/values/:key", h.PutKVPair)
 		kv.DELETE("/namespaces/:id/values/:key", h.DeleteKVPair)
+		kv.POST("/namespaces/:id/import", h.ImportKVBulk)
 	}
 
 	// 2. D1 SQL Databases
@@ -23,6 +24,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		d1.POST("/databases", h.CreateD1Database)
 		d1.DELETE("/databases/:id", h.DeleteD1Database)
 		d1.POST("/databases/:id/query", h.ExecuteD1Query)
+		d1.POST("/databases/:id/import", h.ImportD1SQL)
 	}
 
 	// 3. R2 Object Storage
@@ -35,6 +37,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		r2.GET("/buckets/:name/objects/*key", h.GetR2Object)
 		r2.DELETE("/buckets/:name/objects/*key", h.DeleteR2Object)
 		r2.POST("/buckets/:name/upload", h.UploadR2Object)
+		r2.POST("/buckets/:name/import", h.ImportR2Objects)
 	}
 
 	// 4. Queues

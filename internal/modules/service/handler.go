@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -74,6 +75,17 @@ func (h *Handler) respondError(c *gin.Context, err error) {
 		"message": err.Error(),
 		"error":   err.Error(),
 	})
+}
+
+func (h *Handler) readRequestBody(c *gin.Context) ([]byte, error) {
+	bodyBytes, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return nil, domain.NewValidationError("failed reading request body")
+	}
+	if len(bytes.TrimSpace(bodyBytes)) == 0 {
+		return nil, domain.NewValidationError("request body must not be empty")
+	}
+	return bodyBytes, nil
 }
 
 // --- KV Endpoints ---
@@ -185,6 +197,21 @@ func (h *Handler) DeleteKVPair(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+func (h *Handler) ImportKVBulk(c *gin.Context) {
+	id := c.Param("id")
+	bodyBytes, err := h.readRequestBody(c)
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+	res, err := h.service.ImportKVBulk(c.Request.Context(), id, bodyBytes)
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+	h.respondJSON(c, http.StatusOK, res)
+}
+
 // --- D1 Endpoints ---
 
 type CreateD1Req struct {
@@ -245,6 +272,37 @@ func (h *Handler) ExecuteD1Query(c *gin.Context) {
 		return
 	}
 	h.respondJSON(c, http.StatusOK, result)
+}
+
+type ImportD1Req struct {
+	SQL    string `json:"sql"`
+	Script string `json:"script"`
+}
+
+func (h *Handler) ImportD1SQL(c *gin.Context) {
+	id := c.Param("id")
+	bodyBytes, err := h.readRequestBody(c)
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+
+	sqlScript := string(bodyBytes)
+	var req ImportD1Req
+	if err := json.Unmarshal(bodyBytes, &req); err == nil {
+		if req.SQL != "" {
+			sqlScript = req.SQL
+		} else if req.Script != "" {
+			sqlScript = req.Script
+		}
+	}
+
+	res, err := h.service.ImportD1SQL(c.Request.Context(), id, sqlScript)
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+	h.respondJSON(c, http.StatusOK, res)
 }
 
 // --- R2 Endpoints ---
@@ -337,6 +395,33 @@ func (h *Handler) DeleteR2Object(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) ImportR2Objects(c *gin.Context) {
+	bucketName := c.Param("name")
+	bodyBytes, err := h.readRequestBody(c)
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+
+	var objects []R2ImportObject
+	if err := json.Unmarshal(bodyBytes, &objects); err != nil {
+		var req R2ImportRequest
+		if errReq := json.Unmarshal(bodyBytes, &req); errReq == nil && len(req.Objects) > 0 {
+			objects = req.Objects
+		} else {
+			h.respondError(c, domain.NewValidationError("invalid R2 import payload"))
+			return
+		}
+	}
+
+	res, err := h.service.ImportR2Objects(c.Request.Context(), bucketName, objects)
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+	h.respondJSON(c, http.StatusOK, res)
 }
 
 // --- Queues Endpoints ---

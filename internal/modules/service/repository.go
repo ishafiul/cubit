@@ -25,6 +25,7 @@ type Repository interface {
 	GetKVPair(ctx context.Context, namespaceID, key string) (*domain.KVPair, error)
 	ListKVPairs(ctx context.Context, namespaceID string) ([]*domain.KVPair, error)
 	DeleteKVPair(ctx context.Context, namespaceID, key string) error
+	BulkInsertKVEntries(ctx context.Context, namespaceID string, entries []*domain.KVPair) (int, error)
 
 	// D1
 	SaveD1Database(ctx context.Context, db *domain.D1Database) error
@@ -32,6 +33,7 @@ type Repository interface {
 	GetD1Database(ctx context.Context, id string) (*domain.D1Database, error)
 	DeleteD1Database(ctx context.Context, id string) error
 	ExecuteD1Query(ctx context.Context, id, query string) (*domain.D1QueryResult, error)
+	ExecuteD1Script(ctx context.Context, id, script string) (int, error)
 
 	// Queues
 	SaveQueue(ctx context.Context, q *domain.Queue) error
@@ -218,6 +220,49 @@ func (r *SQLiteRepository) DeleteKVPair(ctx context.Context, namespaceID, key st
 	return err
 }
 
+func (r *SQLiteRepository) BulkInsertKVEntries(ctx context.Context, namespaceID string, entries []*domain.KVPair) (int, error) {
+	if len(entries) == 0 {
+		return 0, nil
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("failed starting bulk KV insert transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	query := `INSERT INTO kv_entries (namespace_id, key, value, expiration_ttl, metadata, updated_at) 
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(namespace_id, key) DO UPDATE SET 
+    value = excluded.value, 
+    expiration_ttl = excluded.expiration_ttl, 
+    metadata = excluded.metadata, 
+    updated_at = excluded.updated_at`
+
+	stmt, err := tx.PrepareContext(ctx, query)
+	if err != nil {
+		return 0, fmt.Errorf("failed preparing bulk KV insert statement: %w", err)
+	}
+	defer stmt.Close()
+
+	nowStr := time.Now().UTC().Format(time.RFC3339)
+	inserted := 0
+	for _, entry := range entries {
+		updatedAt := nowStr
+		if !entry.UpdatedAt.IsZero() {
+			updatedAt = entry.UpdatedAt.Format(time.RFC3339)
+		}
+		if _, err := stmt.ExecContext(ctx, namespaceID, entry.Key, entry.Value, entry.ExpirationTTL, entry.Metadata, updatedAt); err != nil {
+			return inserted, fmt.Errorf("failed inserting kv entry %q: %w", entry.Key, err)
+		}
+		inserted++
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("failed committing bulk KV insert: %w", err)
+	}
+	return inserted, nil
+}
+
 // -----------------------------------------------------------------------------
 // D1 Operations (Serverless SQLite)
 // -----------------------------------------------------------------------------
@@ -299,16 +344,26 @@ func (r *SQLiteRepository) DeleteD1Database(ctx context.Context, id string) erro
 	return nil
 }
 
-func (r *SQLiteRepository) ExecuteD1Query(ctx context.Context, id, queryStr string) (*domain.D1QueryResult, error) {
+func (r *SQLiteRepository) openD1DB(ctx context.Context, id string) (*sql.DB, error) {
 	if d1, err := r.GetD1Database(ctx, id); err == nil {
 		id = d1.ID
 	}
 	d1Dir := filepath.Join(r.baseDir, "d1")
-	_ = os.MkdirAll(d1Dir, 0755)
+	if err := os.MkdirAll(d1Dir, 0755); err != nil {
+		return nil, fmt.Errorf("failed creating d1 directory: %w", err)
+	}
 	dbPath := filepath.Join(d1Dir, fmt.Sprintf("%s.db", id))
 	subDB, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed opening D1 database: %w", err)
+	}
+	return subDB, nil
+}
+
+func (r *SQLiteRepository) ExecuteD1Query(ctx context.Context, id, queryStr string) (*domain.D1QueryResult, error) {
+	subDB, err := r.openD1DB(ctx, id)
+	if err != nil {
+		return nil, err
 	}
 	defer subDB.Close()
 
@@ -372,6 +427,38 @@ func (r *SQLiteRepository) ExecuteD1Query(ctx context.Context, id, queryStr stri
 		RowsAffected: affected,
 		DurationMs:   duration,
 	}, nil
+}
+
+func (r *SQLiteRepository) ExecuteD1Script(ctx context.Context, id, script string) (int, error) {
+	subDB, err := r.openD1DB(ctx, id)
+	if err != nil {
+		return 0, err
+	}
+	defer subDB.Close()
+
+	script = strings.TrimSpace(script)
+	if script == "" {
+		return 0, nil
+	}
+
+	if _, err := subDB.ExecContext(ctx, script); err != nil {
+		return 0, fmt.Errorf("failed executing D1 script: %w", err)
+	}
+
+	// Count non-empty statements executed
+	statements := strings.Split(script, ";")
+	executedCount := 0
+	for _, s := range statements {
+		trimmed := strings.TrimSpace(s)
+		if trimmed != "" && !strings.HasPrefix(trimmed, "--") {
+			executedCount++
+		}
+	}
+	if executedCount == 0 && len(script) > 0 {
+		executedCount = 1
+	}
+
+	return executedCount, nil
 }
 
 // -----------------------------------------------------------------------------
