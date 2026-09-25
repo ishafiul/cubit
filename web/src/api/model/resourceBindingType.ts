@@ -17,4 +17,7 @@ export const ResourceBindingType = {
   queue: 'queue',
   workflow: 'workflow',
   service: 'service',
+  durable_object: 'durable_object',
+  container: 'container',
+  assets: 'assets',
 } as const;

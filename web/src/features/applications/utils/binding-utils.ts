@@ -21,6 +21,12 @@ export function getServiceTabForBindingType(type: ResourceBindingType): ActiveTa
       return 'queues';
     case 'workflow':
       return 'workflows';
+    case 'durable_object':
+      return 'durable-objects';
+    case 'container':
+      return 'containers';
+    case 'assets':
+      return 'static-assets';
     case 'service':
       return 'apps';
     default:
@@ -40,6 +46,12 @@ export function getServiceLabelForBindingType(type: ResourceBindingType): string
       return 'Queue Producer';
     case 'workflow':
       return 'Workflow';
+    case 'durable_object':
+      return 'Durable Object';
+    case 'container':
+      return 'Container';
+    case 'assets':
+      return 'Static Assets';
     case 'service':
       return 'Worker RPC';
     default:
@@ -59,6 +71,12 @@ export function getServicePageName(type: ResourceBindingType): string {
       return 'Queues';
     case 'workflow':
       return 'Workflows';
+    case 'durable_object':
+      return 'Durable Objects';
+    case 'container':
+      return 'Containers';
+    case 'assets':
+      return 'Static Assets';
     case 'service':
       return 'Workers';
     default:

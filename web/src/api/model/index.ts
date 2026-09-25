@@ -37,6 +37,8 @@ export * from './nodeSpecs';
 export * from './nodeStatus';
 export * from './notFoundResponse';
 export * from './r2Bucket';
+export * from './r2ImportObject';
+export * from './r2ImportResult';
 export * from './r2Object';
 export * from './requestLogEvent';
 export * from './requestLogEventCf';
