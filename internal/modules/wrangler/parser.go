@@ -63,9 +63,11 @@ type TriggerConfig struct {
 
 // AssetsConfig represents static assets configuration in wrangler.
 type AssetsConfig struct {
-	Directory    string `json:"directory,omitempty" toml:"directory,omitempty"`
-	Binding      string `json:"binding,omitempty" toml:"binding,omitempty"`
-	HTMLHandling string `json:"html_handling,omitempty" toml:"html_handling,omitempty"`
+	Directory        string `json:"directory,omitempty" toml:"directory,omitempty"`
+	Binding          string `json:"binding,omitempty" toml:"binding,omitempty"`
+	HTMLHandling     string `json:"html_handling,omitempty" toml:"html_handling,omitempty"`
+	NotFoundHandling string `json:"not_found_handling,omitempty" toml:"not_found_handling,omitempty"`
+	RunWorkerFirst   bool   `json:"run_worker_first,omitempty" toml:"run_worker_first,omitempty"`
 }
 
 // DurableObjectBinding represents a Durable Object binding in wrangler configuration.

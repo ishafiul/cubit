@@ -127,8 +127,9 @@ func TestBuildCelldManifest(t *testing.T) {
 				Crons: []string{"0 * * * *", "*/15 * * * *"},
 			},
 			Assets: &wrangler.AssetsConfig{
-				Directory: "./dist",
-				Binding:   "ASSETS",
+				Directory:      "./dist",
+				Binding:        "ASSETS",
+				RunWorkerFirst: true,
 			},
 		}
 
@@ -179,8 +180,8 @@ func TestBuildCelldManifest(t *testing.T) {
 					t.Errorf("unexpected crons: %v", manifest.Crons)
 				}
 
-				// Check assets
-				if manifest.Assets == nil || manifest.Assets.Directory != "./dist" || manifest.Assets.Binding != "ASSETS" {
+				// Check assets including RunWorkerFirst
+				if manifest.Assets == nil || manifest.Assets.Directory != "./dist" || manifest.Assets.Binding != "ASSETS" || !manifest.Assets.RunWorkerFirst {
 					t.Errorf("unexpected assets configuration: %+v", manifest.Assets)
 				}
 

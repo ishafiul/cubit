@@ -159,9 +159,11 @@ func BuildCelldManifest(
 	var assets *CelldAssetConfig
 	if sanitizedConfig != nil && sanitizedConfig.Assets != nil {
 		assets = &CelldAssetConfig{
-			Directory:    sanitizedConfig.Assets.Directory,
-			Binding:      sanitizedConfig.Assets.Binding,
-			HTMLHandling: sanitizedConfig.Assets.HTMLHandling,
+			Directory:        sanitizedConfig.Assets.Directory,
+			Binding:          sanitizedConfig.Assets.Binding,
+			HTMLHandling:     sanitizedConfig.Assets.HTMLHandling,
+			NotFoundHandling: sanitizedConfig.Assets.NotFoundHandling,
+			RunWorkerFirst:   sanitizedConfig.Assets.RunWorkerFirst,
 		}
 	} else {
 		for _, b := range app.Bindings {
