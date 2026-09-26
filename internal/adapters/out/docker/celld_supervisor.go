@@ -178,7 +178,7 @@ func (s *CelldSupervisor) resolveImage(version string) string {
 	if version != "" {
 		return fmt.Sprintf("%s:%s", base, version)
 	}
-	return fmt.Sprintf("%s:latest", base)
+	return fmt.Sprintf("%s:%s", base, domain.DefaultCelldVersion)
 }
 
 // IsContainerRunning inspects whether a Docker container is active and running.

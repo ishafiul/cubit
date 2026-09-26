@@ -65,7 +65,7 @@ func TestBuildRunArgs(t *testing.T) {
 			name: "Given complete container options with credentials and network, When BuildRunArgs is invoked, Then returns expected arguments",
 			opts: docker.CelldContainerOptions{
 				ContainerName:   "celld-worker-1",
-				Image:           "ghcr.io/denoland/celld:0.5.1",
+				Image:           "ghcr.io/denoland/celld:0.6.0",
 				WorkerPort:      8080,
 				InternalPort:    8081,
 				AdvertiseIP:     "192.168.1.100",
@@ -85,7 +85,7 @@ func TestBuildRunArgs(t *testing.T) {
 				"-e", "AWS_ACCESS_KEY_ID=test-key",
 				"-e", "AWS_SECRET_ACCESS_KEY=test-secret",
 				"--network", "cubit_net",
-				"ghcr.io/denoland/celld:0.5.1",
+				"ghcr.io/denoland/celld:0.6.0",
 				"--bucket", "cubit-fleet",
 				"--endpoint", "http://garage:3900",
 				"--region", "cubit-local",
@@ -178,14 +178,14 @@ func TestCelldSupervisor_NodeLifecycle(t *testing.T) {
 		Runner:          runner,
 	}
 	supervisor := docker.NewCelldSupervisorWithConfig(cfg)
-	node, err := domain.NewNode("n-1", "node-1", "10.0.0.1", 8081, 8080, "0.5.1")
+	node, err := domain.NewNode("n-1", "node-1", "10.0.0.1", 8081, 8080, "0.6.0")
 	if err != nil {
 		t.Fatalf("failed to create node: %v", err)
 	}
 
 	t.Run("Given a configured supervisor and a node", func(t *testing.T) {
 		t.Run("When starting celld on the node", func(t *testing.T) {
-			err := supervisor.StartCelld(ctx, node, "0.5.1", "cubit-fleet")
+			err := supervisor.StartCelld(ctx, node, "0.6.0", "cubit-fleet")
 
 			t.Run("Then it executes docker run, verifies health, and marks the container supervised", func(t *testing.T) {
 				if err != nil {
@@ -333,10 +333,10 @@ func TestCelldSupervisor_HealthAndErrorHandling(t *testing.T) {
 		supervisor := docker.NewCelldSupervisorWithConfig(docker.CelldSupervisorConfig{
 			Runner: runner,
 		})
-		node, _ := domain.NewNode("n-dead", "node-dead", "127.0.0.1", 9091, 9090, "0.5.1")
+		node, _ := domain.NewNode("n-dead", "node-dead", "127.0.0.1", 9091, 9090, "0.6.0")
 
 		t.Run("When StartCelld is called", func(t *testing.T) {
-			err := supervisor.StartCelld(ctx, node, "0.5.1", "cubit-fleet")
+			err := supervisor.StartCelld(ctx, node, "0.6.0", "cubit-fleet")
 
 			t.Run("Then it returns error indicating container is not running", func(t *testing.T) {
 				if err == nil {
@@ -355,10 +355,10 @@ func TestCelldSupervisor_HealthAndErrorHandling(t *testing.T) {
 		supervisor := docker.NewCelldSupervisorWithConfig(docker.CelldSupervisorConfig{
 			Runner: runner,
 		})
-		node, _ := domain.NewNode("n-err", "node-err", "127.0.0.1", 9091, 9090, "0.5.1")
+		node, _ := domain.NewNode("n-err", "node-err", "127.0.0.1", 9091, 9090, "0.6.0")
 
 		t.Run("When StartCelld is called", func(t *testing.T) {
-			err := supervisor.StartCelld(ctx, node, "0.5.1", "cubit-fleet")
+			err := supervisor.StartCelld(ctx, node, "0.6.0", "cubit-fleet")
 
 			t.Run("Then it returns wrapped error and node is not marked supervised", func(t *testing.T) {
 				if err == nil {
@@ -380,7 +380,7 @@ func TestCelldSupervisor_HealthAndErrorHandling(t *testing.T) {
 		supervisor := docker.NewCelldSupervisorWithConfig(docker.CelldSupervisorConfig{
 			Runner: runner,
 		})
-		node, _ := domain.NewNode("n-restart-err", "node-restart-err", "127.0.0.1", 9091, 9090, "0.5.1")
+		node, _ := domain.NewNode("n-restart-err", "node-restart-err", "127.0.0.1", 9091, 9090, "0.6.0")
 
 		t.Run("When GracefulRestartCelld is called", func(t *testing.T) {
 			err := supervisor.GracefulRestartCelld(ctx, node, "0.5.2", "cubit-fleet")
