@@ -113,6 +113,13 @@ const sourceRules: PatternRule[] = [
     status: 'supported',
     details: 'Asynchronous background task lifecycle fully supported.',
   },
+  {
+    regex: /(?:["'](?:Ed25519|NODE-ED25519|X25519)["'])/i,
+    name: 'Web Crypto (Ed25519 / X25519)',
+    category: 'api_usage',
+    status: 'supported',
+    details: 'Ed25519 and X25519 algorithms natively supported with raw import/export in celld v0.6.0.',
+  },
 ];
 
 export function analyzeSourceCode(code: string, fileName = 'src/index.ts'): FeatureFinding[] {
