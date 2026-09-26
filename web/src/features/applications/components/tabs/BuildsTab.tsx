@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Terminal, RefreshCw, RotateCcw, Clock, AlertCircle } from 'lucide-react';
+import { Terminal, RefreshCw, RotateCcw, Clock, AlertCircle, Radio } from 'lucide-react';
 import type { Application } from '../../../../api/model';
 import {
   useListDeployments,
@@ -12,8 +12,18 @@ import {
 } from '../../../../shared/stores/useDeploymentTrackerStore';
 import { useToastActions } from '../../../../shared/stores/useToastStore';
 import { getDeploymentStatusBadge } from '../WorkbenchHeader';
+import {
+  useBuildsViewMode,
+  useApplicationActions,
+} from '../../stores/applicationStore';
+import { LiveTailView } from './LiveTailView';
 
-export function BuildsTab({ app }: { app: Application }) {
+export interface BuildsTabProps {
+  app: Application;
+  onTestApp?: (app: Application) => void;
+}
+
+export function BuildsTab({ app, onTestApp }: BuildsTabProps) {
   const { data: deployments, refetch: refetchDeployments, isLoading } = useListDeployments(app.id);
 
   const rollbackMutation = useRollbackApplication();
@@ -22,6 +32,9 @@ export function BuildsTab({ app }: { app: Application }) {
   const activeDeploymentId = useActiveDeploymentId();
   const deployStatus = useDeployStatus();
   const logs = useDeploymentLogs();
+
+  const buildsViewMode = useBuildsViewMode();
+  const { setBuildsViewMode } = useApplicationActions();
 
   const [rollingBackId, setRollingBackId] = useState<string | null>(null);
 
@@ -49,8 +62,46 @@ export function BuildsTab({ app }: { app: Application }) {
     }
   };
 
+  const deploymentsList = Array.isArray(deployments) ? deployments : [];
+
   return (
     <div data-testid="tab-content-builds" className="p-6 max-w-6xl mx-auto w-full space-y-6">
+      {/* Sub-View Switcher: Deployment History vs Live Request Tail */}
+      <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            data-testid="mode-history-btn"
+            onClick={() => setBuildsViewMode('history')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 transition ${
+              buildsViewMode === 'history'
+                ? 'bg-zinc-800 text-zinc-100 border border-zinc-700'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
+            }`}
+          >
+            <Terminal className="w-3.5 h-3.5" />
+            <span>Deployment History ({deploymentsList.length})</span>
+          </button>
+          <button
+            type="button"
+            data-testid="mode-tail-btn"
+            onClick={() => setBuildsViewMode('tail')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 transition ${
+              buildsViewMode === 'tail'
+                ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-800'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
+            }`}
+          >
+            <Radio className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+            <span>Live Request Tail (Realtime SSE)</span>
+          </button>
+        </div>
+      </div>
+
+      {buildsViewMode === 'tail' ? (
+        <LiveTailView app={app} onTestApp={onTestApp} />
+      ) : (
+        <>
       {/* Live Log Stream if currently building or active logs exist */}
       {(activeDeploymentId || logs.length > 0) && (
         <div className="bg-zinc-950 border border-zinc-800 rounded-xl overflow-hidden shadow-2xl">
@@ -151,6 +202,8 @@ export function BuildsTab({ app }: { app: Application }) {
           </div>
         )}
       </div>
+        </>
+      )}
     </div>
   );
 }

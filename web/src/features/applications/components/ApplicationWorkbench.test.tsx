@@ -102,5 +102,54 @@ describe('Given ApplicationWorkbench with 4-tier state architecture', () => {
       expect(screen.getByTestId('workbench-app-name').textContent).toBe('second-worker');
       expect(screen.getByTestId('tab-content-overview')).toBeDefined();
     });
+
+    it('Then clicking builds tab and switching to tail mode renders LiveTailView', () => {
+      renderWithClient(
+        <ApplicationWorkbench
+          app={mockApp}
+          initialTab="builds"
+          onBack={vi.fn()}
+          onDeploy={vi.fn()}
+          isDeploying={false}
+          onTestApp={vi.fn()}
+        />
+      );
+
+      expect(screen.getByTestId('tab-content-builds')).toBeDefined();
+      expect(screen.getByTestId('mode-history-btn')).toBeDefined();
+      expect(screen.getByTestId('mode-tail-btn')).toBeDefined();
+
+      act(() => {
+        screen.getByTestId('mode-tail-btn').click();
+      });
+
+      expect(screen.getByTestId('live-tail-view')).toBeDefined();
+      expect(screen.getByTestId('tail-status-indicator')).toBeDefined();
+      expect(screen.getByTestId('tail-pause-resume-btn')).toBeDefined();
+    });
+
+    it('Then clicking open full live tail in RecentRequestsTable switches to builds tab in tail mode', () => {
+      renderWithClient(
+        <ApplicationWorkbench
+          app={mockApp}
+          initialTab="overview"
+          onBack={vi.fn()}
+          onDeploy={vi.fn()}
+          isDeploying={false}
+          onTestApp={vi.fn()}
+        />
+      );
+
+      expect(screen.getByTestId('recent-requests-table')).toBeDefined();
+      const openTailBtn = screen.getByTestId('open-full-live-tail-btn');
+      expect(openTailBtn).toBeDefined();
+
+      act(() => {
+        openTailBtn.click();
+      });
+
+      expect(screen.getByTestId('tab-content-builds')).toBeDefined();
+      expect(screen.getByTestId('live-tail-view')).toBeDefined();
+    });
   });
 });

@@ -14,6 +14,8 @@ export interface ApplicationState {
   secretVisibility: Record<string, boolean>;
   logFilter: string;
   logLevelFilter: string;
+  buildsViewMode: 'history' | 'tail';
+  expandedLogId: string | null;
 }
 
 export interface ApplicationActions {
@@ -25,6 +27,8 @@ export interface ApplicationActions {
   toggleSecretVisibility: (key: string) => void;
   setLogFilter: (filter: string) => void;
   setLogLevelFilter: (level: string) => void;
+  setBuildsViewMode: (mode: 'history' | 'tail') => void;
+  setExpandedLogId: (id: string | null) => void;
 }
 
 export interface ApplicationStoreProps {
@@ -78,6 +82,10 @@ export const {
       setLogFilter: (logFilter) => set({ logFilter }),
 
       setLogLevelFilter: (logLevelFilter) => set({ logLevelFilter }),
+
+      setBuildsViewMode: (buildsViewMode) => set({ buildsViewMode }),
+
+      setExpandedLogId: (expandedLogId) => set({ expandedLogId }),
     };
 
     return {
@@ -90,6 +98,8 @@ export const {
       secretVisibility: {},
       logFilter: '',
       logLevelFilter: 'all',
+      buildsViewMode: 'history',
+      expandedLogId: null,
       actions,
     };
   },
@@ -123,4 +133,12 @@ export function useLogFilter(): string {
 
 export function useLogLevelFilter(): string {
   return useApplicationSelector((state) => state.logLevelFilter);
+}
+
+export function useBuildsViewMode(): 'history' | 'tail' {
+  return useApplicationSelector((state) => state.buildsViewMode);
+}
+
+export function useExpandedLogId(): string | null {
+  return useApplicationSelector((state) => state.expandedLogId);
 }

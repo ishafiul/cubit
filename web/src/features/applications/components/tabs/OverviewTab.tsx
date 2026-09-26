@@ -1,8 +1,14 @@
 import { GitBranch, Calendar, Radio } from 'lucide-react';
 import type { Application } from '../../../../api/model';
 import { MetricsPanel } from './MetricsPanel';
+import { RecentRequestsTable } from './RecentRequestsTable';
 
-export function OverviewTab({ app }: { app: Application }) {
+export interface OverviewTabProps {
+  app: Application;
+  onTestApp?: (app: Application) => void;
+}
+
+export function OverviewTab({ app, onTestApp }: OverviewTabProps) {
   return (
     <div data-testid="tab-content-overview" className="p-6 space-y-6 max-w-6xl mx-auto w-full">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -45,6 +51,8 @@ export function OverviewTab({ app }: { app: Application }) {
       </div>
 
       <MetricsPanel appId={app.id} />
+
+      <RecentRequestsTable app={app} onTestApp={onTestApp} />
     </div>
   );
 }

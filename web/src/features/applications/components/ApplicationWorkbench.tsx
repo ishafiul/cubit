@@ -64,9 +64,9 @@ function ApplicationWorkbenchContent({
       />
 
       <div className="flex-1 overflow-y-auto">
-        {activeTab === 'overview' && <OverviewTab app={app} />}
+        {activeTab === 'overview' && <OverviewTab app={app} onTestApp={onTestApp} />}
         {activeTab === 'code' && <CodeEditorTab app={app} />}
-        {activeTab === 'builds' && <BuildsTab app={app} />}
+        {activeTab === 'builds' && <BuildsTab app={app} onTestApp={onTestApp} />}
         {activeTab === 'triggers' && <TriggersTab app={app} />}
         {activeTab === 'bindings' && <BindingsTab app={app} />}
         {activeTab === 'settings' && (

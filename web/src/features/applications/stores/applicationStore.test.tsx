@@ -232,5 +232,45 @@ describe('Given the scoped applicationStore', () => {
       expect(screen.getByTestId('vis-API_KEY').textContent).toBe('visible');
       expect(screen.getByTestId('vis-DB_PASS').textContent).toBe('hidden');
     });
+
+    it('Then buildsViewMode and expandedLogId update correctly via actions', () => {
+      function ModeViewer() {
+        const buildsViewMode = useApplicationSelector((s) => s.buildsViewMode);
+        const expandedLogId = useApplicationSelector((s) => s.expandedLogId);
+        const { setBuildsViewMode, setExpandedLogId } = useApplicationActions();
+
+        return (
+          <div>
+            <span data-testid="mode">{buildsViewMode}</span>
+            <span data-testid="expanded">{expandedLogId || 'none'}</span>
+            <button data-testid="switch-tail" onClick={() => setBuildsViewMode('tail')}>
+              Tail
+            </button>
+            <button data-testid="set-log" onClick={() => setExpandedLogId('req-123')}>
+              Set Log
+            </button>
+          </div>
+        );
+      }
+
+      render(
+        <ApplicationStoreProvider appId="app-1">
+          <ModeViewer />
+        </ApplicationStoreProvider>
+      );
+
+      expect(screen.getByTestId('mode').textContent).toBe('history');
+      expect(screen.getByTestId('expanded').textContent).toBe('none');
+
+      act(() => {
+        screen.getByTestId('switch-tail').click();
+      });
+      expect(screen.getByTestId('mode').textContent).toBe('tail');
+
+      act(() => {
+        screen.getByTestId('set-log').click();
+      });
+      expect(screen.getByTestId('expanded').textContent).toBe('req-123');
+    });
   });
 });
