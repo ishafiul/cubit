@@ -27,10 +27,10 @@ func setupRuntimeRouter(svc rtModule.Service) *gin.Engine {
 func TestRuntimeHandler(t *testing.T) {
 	t.Run("Given a runtime HTTP handler with running fleet", func(t *testing.T) {
 		nodes := []*domain.Node{
-			{ID: "node-1", Name: "n1", Status: domain.NodeStatusActive, CelldVersion: "0.5.1"},
+			{ID: "node-1", Name: "n1", Status: domain.NodeStatusActive, CelldVersion: "0.6.0"},
 		}
 		repo := &mockNodeLister{nodes: nodes}
-		svc := rtModule.NewService(repo, nil, nil, "s3://cubit-fleet", "0.5.1")
+		svc := rtModule.NewService(repo, nil, nil, "s3://cubit-fleet", "0.6.0")
 		router := setupRuntimeRouter(svc)
 
 		t.Run("When getting runtime status via GET /api/v1/runtime/status", func(t *testing.T) {

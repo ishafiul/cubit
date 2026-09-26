@@ -29,11 +29,11 @@ func (m *mockNodeLister) Update(ctx context.Context, n *domain.Node) error {
 func TestRuntimeService(t *testing.T) {
 	t.Run("Given a RuntimeService with active fleet nodes", func(t *testing.T) {
 		nodes := []*domain.Node{
-			{ID: "node-1", Name: "n1", Status: domain.NodeStatusActive, CelldVersion: "0.5.1"},
-			{ID: "node-2", Name: "n2", Status: domain.NodeStatusActive, CelldVersion: "0.5.1"},
+			{ID: "node-1", Name: "n1", Status: domain.NodeStatusActive, CelldVersion: "0.6.0"},
+			{ID: "node-2", Name: "n2", Status: domain.NodeStatusActive, CelldVersion: "0.6.0"},
 		}
 		repo := &mockNodeLister{nodes: nodes}
-		svc := rtModule.NewService(repo, nil, nil, "s3://cubit-fleet", "0.5.1")
+		svc := rtModule.NewService(repo, nil, nil, "s3://cubit-fleet", "0.6.0")
 
 		t.Run("When inspecting runtime status", func(t *testing.T) {
 			status, err := svc.GetStatus(context.Background())
@@ -45,8 +45,8 @@ func TestRuntimeService(t *testing.T) {
 				if status.ActiveNodesCount != 2 {
 					t.Fatalf("expected 2 active nodes, got %d", status.ActiveNodesCount)
 				}
-				if status.CurrentCelldVersion != "0.5.1" {
-					t.Fatalf("expected celld version 0.5.1, got %s", status.CurrentCelldVersion)
+				if status.CurrentCelldVersion != "0.6.0" {
+					t.Fatalf("expected celld version 0.6.0, got %s", status.CurrentCelldVersion)
 				}
 			})
 		})
