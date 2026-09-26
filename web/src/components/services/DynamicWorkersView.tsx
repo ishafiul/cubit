@@ -9,7 +9,7 @@ const TEMPLATES: Record<string, { name: string; code: string; method: string; pa
     path: '/',
     code: `export default {
   async fetch(request, env, ctx) {
-    return new Response("Hello World from Dynamic Celld 0.5.1 Worker!", {
+    return new Response("Hello World from Dynamic Celld 0.6.0 Worker!", {
       headers: { "content-type": "text/plain; charset=utf-8" },
     });
   },
@@ -24,7 +24,7 @@ const TEMPLATES: Record<string, { name: string; code: string; method: string; pa
     const url = new URL(request.url);
     return Response.json({
       status: "online",
-      celld_runtime: "v0.5.1",
+      celld_runtime: "v0.6.0",
       timestamp: new Date().toISOString(),
       path: url.pathname,
     });
@@ -190,7 +190,7 @@ export function DynamicWorkersView() {
                 <Code className="w-4 h-4 text-emerald-400" />
                 <span>Worker Script (ES Modules)</span>
               </div>
-              <span className="text-[11px] font-mono text-zinc-500">celld 0.5.1 Runtime</span>
+              <span className="text-[11px] font-mono text-zinc-500">celld 0.6.0 Runtime</span>
             </div>
 
             <div className="rounded-xl overflow-hidden border border-zinc-800">
