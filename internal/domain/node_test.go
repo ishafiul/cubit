@@ -61,12 +61,17 @@ func TestNode(t *testing.T) {
 		})
 	})
 
-	t.Run("Given invalid node parameters with identical ports", func(t *testing.T) {
-		t.Run("When creating a node then it returns a validation error", func(t *testing.T) {
-			_, err := domain.NewNode("node-1", "node-1", "10.0.0.1", 8080, 8080, "0.2.0")
-
-			if err == nil {
-				t.Fatal("expected validation error for identical ports, got nil")
+	t.Run("Given empty celldVersion", func(t *testing.T) {
+		t.Run("When creating a node then it defaults to DefaultCelldVersion 0.6.0", func(t *testing.T) {
+			node, err := domain.NewNode("node-default", "node-default", "10.0.0.1", 8081, 8080, "")
+			if err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+			if node.CelldVersion != "0.6.0" {
+				t.Fatalf("expected node CelldVersion to default to 0.6.0, got %s", node.CelldVersion)
+			}
+			if domain.DefaultCelldVersion != "0.6.0" {
+				t.Fatalf("expected DefaultCelldVersion 0.6.0, got %s", domain.DefaultCelldVersion)
 			}
 		})
 	})
