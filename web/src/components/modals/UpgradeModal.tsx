@@ -14,7 +14,7 @@ export function UpgradeModal() {
   const queryClient = useQueryClient();
   const { addToast } = useToastActions();
 
-  const [targetVersion, setTargetVersion] = useState('0.3.0');
+  const [targetVersion, setTargetVersion] = useState('0.6.0');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!showUpgradeModal) return null;
@@ -61,13 +61,23 @@ export function UpgradeModal() {
           </p>
         </div>
 
+        <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3 flex items-start gap-2.5">
+          <div className="w-2 h-2 rounded-full bg-emerald-400 mt-1.5 shrink-0" />
+          <div className="text-xs text-zinc-300">
+            <span className="font-semibold text-emerald-400">Bucket Durability Active (Garage S3)</span>
+            <p className="text-zinc-400 mt-0.5">
+              celld v0.6.0 supports zero-downtime rolling node updates when backed by bucket storage durability.
+            </p>
+          </div>
+        </div>
+
         <form onSubmit={onSubmit} className="space-y-4">
           <div>
             <label className="text-xs font-medium text-zinc-400 mb-1 block">Target Version</label>
             <input
               type="text"
               required
-              placeholder="0.3.0"
+              placeholder="0.6.0"
               value={targetVersion}
               onChange={(e) => setTargetVersion(e.target.value)}
               className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-500 font-mono"
