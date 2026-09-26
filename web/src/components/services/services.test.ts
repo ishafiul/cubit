@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { ActiveTab } from '../../App';
 import { isSystemBucket, isValidBucketName } from './R2View';
 
-describe('Given Celld 0.5.1 service suite definitions', () => {
+describe('Given Celld 0.6.0 service suite definitions', () => {
   describe('When verifying official 12 service coverage in the sidebar', () => {
     const officialServices: ActiveTab[] = [
       'apps',              // 1. Workers
