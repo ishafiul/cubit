@@ -157,6 +157,16 @@ func ValidateCompatibility(cfg *WranglerConfig, srcDir string) (*CompatibilityRe
 
 	// 1. Inspect Wrangler configuration bindings
 	if cfg != nil {
+		if strings.TrimSpace(cfg.CompatibilityDate) == "" {
+			report.Warnings = append(report.Warnings, FeatureFinding{
+				Name:        "Missing Compatibility Date",
+				Category:    "config",
+				Status:      StatusWarning,
+				Details:     "No compatibility_date specified in configuration; defaults to 2024-09-23.",
+				Remediation: "celld v0.6.0 strictly enforces workerd compatibilityDate parity. Add 'compatibility_date = \"YYYY-MM-DD\"' to wrangler.toml or '\"compatibility_date\": \"YYYY-MM-DD\"' to wrangler.jsonc.",
+			})
+		}
+
 		for _, kv := range cfg.KVNamespaces {
 			report.SupportedFeatures = append(report.SupportedFeatures, FeatureFinding{
 				Name:     fmt.Sprintf("KV Namespace (%s)", kv.Binding),
