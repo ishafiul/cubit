@@ -1414,6 +1414,9 @@ components:
       properties:
         branch:
           type: string
+        rootDir:
+          type: string
+          example: "services/worker"
         inlineCode:
           type: string
         envVars:

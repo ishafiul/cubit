@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Settings,
   Plus,
@@ -11,6 +11,11 @@ import {
   FileCode,
   Upload,
   Cpu,
+  Search,
+  X,
+  Check,
+  RefreshCw,
+  Save,
 } from 'lucide-react';
 import type { Application, EnvironmentVariable } from '../../../../api/model';
 import {
@@ -34,19 +39,43 @@ import { CompatibilityReportModal } from '../modals/CompatibilityReportModal';
 export interface SettingsTabProps {
   app: Application;
   onDeleteApp?: (appId: string) => Promise<void>;
+  onRefreshApps?: () => void;
 }
 
-export function SettingsTab({ app, onDeleteApp }: SettingsTabProps) {
+export function SettingsTab({ app, onDeleteApp, onRefreshApps }: SettingsTabProps) {
   const updateAppMutation = useUpdateApplication();
   const deleteAppMutation = useDeleteApplication();
   const importWranglerMutation = useImportWranglerConfig();
   const { addToast } = useToastActions();
   const { toggleSecretVisibility } = useApplicationActions();
 
+  // Environment Variables Form State
   const [envKey, setEnvKey] = useState('');
   const [envValue, setEnvValue] = useState('');
   const [isSecret, setIsSecret] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
+
+  // Environment Variables Filter & Search State
+  const [varSearchTerm, setVarSearchTerm] = useState('');
+  const [varTypeFilter, setVarTypeFilter] = useState<'ALL' | 'PLAIN' | 'SECRET'>('ALL');
+
+  // Runtime & Compatibility Settings State
+  const [compatDate, setCompatDate] = useState(app.compatibilityDate || '2024-04-03');
+  const [nodejsCompat, setNodejsCompat] = useState(
+    (app.compatibilityFlags || []).includes('nodejs_compat')
+  );
+  const [memoryLimitMB, setMemoryLimitMB] = useState(app.memoryLimitMb || 128);
+  const [maxDurationMs, setMaxDurationMs] = useState(app.maxDurationMs || 50);
+  const [isSavingRuntime, setIsSavingRuntime] = useState(false);
+  const [runtimeSaveStatus, setRuntimeSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
+
+  useEffect(() => {
+    setCompatDate(app.compatibilityDate || '2024-04-03');
+    setNodejsCompat((app.compatibilityFlags || []).includes('nodejs_compat'));
+    setMemoryLimitMB(app.memoryLimitMb || 128);
+    setMaxDurationMs(app.maxDurationMs || 50);
+  }, [app.compatibilityDate, app.compatibilityFlags, app.memoryLimitMb, app.maxDurationMs]);
+
   const [isDeleting, setIsDeleting] = useState(false);
 
   // Wrangler Import State
@@ -63,6 +92,20 @@ export function SettingsTab({ app, onDeleteApp }: SettingsTabProps) {
   }, [rawWranglerConfig]);
 
   const envVars: EnvironmentVariable[] = app.envVars || [];
+
+  const filteredEnvVars = useMemo(() => {
+    return envVars.filter((v) => {
+      if (varTypeFilter === 'PLAIN' && v.isSecret) return false;
+      if (varTypeFilter === 'SECRET' && !v.isSecret) return false;
+      if (varSearchTerm.trim()) {
+        const q = varSearchTerm.toLowerCase().trim();
+        const keyMatch = v.key.toLowerCase().includes(q);
+        const valMatch = !v.isSecret && (v.value || '').toLowerCase().includes(q);
+        return keyMatch || valMatch;
+      }
+      return true;
+    });
+  }, [envVars, varTypeFilter, varSearchTerm]);
 
   const handleAddEnvVar = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -100,6 +143,7 @@ export function SettingsTab({ app, onDeleteApp }: SettingsTabProps) {
       setEnvKey('');
       setEnvValue('');
       setIsSecret(false);
+      onRefreshApps?.();
     } catch (err: any) {
       addToast({
         title: 'Failed to Save Variable',
@@ -123,12 +167,48 @@ export function SettingsTab({ app, onDeleteApp }: SettingsTabProps) {
         description: `Removed ${key}`,
         variant: 'info',
       });
+      onRefreshApps?.();
     } catch (err: any) {
       addToast({
         title: 'Failed to Delete Variable',
         description: err?.message || 'Could not delete variable.',
         variant: 'error',
       });
+    }
+  };
+
+  const handleSaveRuntimeSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingRuntime(true);
+    setRuntimeSaveStatus('idle');
+
+    try {
+      await updateAppMutation.mutateAsync({
+        id: app.id,
+        data: {
+          compatibilityDate: compatDate.trim() || undefined,
+          compatibilityFlags: nodejsCompat ? ['nodejs_compat'] : [],
+          memoryLimitMb: Number(memoryLimitMB),
+          maxDurationMs: Number(maxDurationMs),
+        },
+      });
+      setRuntimeSaveStatus('saved');
+      addToast({
+        title: 'Runtime Settings Saved',
+        description: 'V8 isolate execution configuration updated successfully.',
+        variant: 'success',
+      });
+      onRefreshApps?.();
+      setTimeout(() => setRuntimeSaveStatus('idle'), 3000);
+    } catch (err: any) {
+      setRuntimeSaveStatus('error');
+      addToast({
+        title: 'Failed to Save Settings',
+        description: err?.message || 'Could not update runtime settings.',
+        variant: 'error',
+      });
+    } finally {
+      setIsSavingRuntime(false);
     }
   };
 
@@ -142,11 +222,12 @@ export function SettingsTab({ app, onDeleteApp }: SettingsTabProps) {
         await onDeleteApp(app.id);
       } else {
         await deleteAppMutation.mutateAsync({ id: app.id });
+        onRefreshApps?.();
       }
       addToast({
         title: 'Application Deleted',
-        description: `Successfully deleted ${app.name}`,
-        variant: 'success',
+        description: `Permanently removed ${app.name}`,
+        variant: 'info',
       });
     } catch (err: any) {
       addToast({
@@ -154,6 +235,7 @@ export function SettingsTab({ app, onDeleteApp }: SettingsTabProps) {
         description: err?.message || 'Could not delete application.',
         variant: 'error',
       });
+    } finally {
       setIsDeleting(false);
     }
   };
@@ -161,26 +243,27 @@ export function SettingsTab({ app, onDeleteApp }: SettingsTabProps) {
   const handleImportWrangler = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!rawWranglerConfig.trim()) return;
+
     setIsImportingWrangler(true);
     try {
-      const res = await importWranglerMutation.mutateAsync({
+      await importWranglerMutation.mutateAsync({
         id: app.id,
         data: {
           rawConfig: rawWranglerConfig,
-          format: 'auto',
         },
       });
       addToast({
         title: 'Wrangler Config Synced',
-        description: res.message || 'Updated configuration and extracted routes.',
+        description: 'Sanitized and applied routes, variables, and resource bindings.',
         variant: 'success',
       });
-      setRawWranglerConfig('');
       setShowImportWranglerModal(false);
+      setRawWranglerConfig('');
+      onRefreshApps?.();
     } catch (err: any) {
       addToast({
         title: 'Import Failed',
-        description: err?.message || 'Could not parse or apply wrangler configuration.',
+        description: err?.message || 'Failed to parse and sync wrangler configuration.',
         variant: 'error',
       });
     } finally {
@@ -190,92 +273,48 @@ export function SettingsTab({ app, onDeleteApp }: SettingsTabProps) {
 
   return (
     <div data-testid="tab-content-settings" className="p-6 max-w-6xl mx-auto w-full space-y-8">
-      {/* Environment Variables */}
+      {/* Application Identity */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
         <h3 className="text-sm font-bold text-zinc-100 flex items-center gap-2 mb-1">
-          <Settings className="w-4 h-4 text-emerald-400" />
-          Environment Variables & Secrets
+          <Settings className="w-4 h-4 text-zinc-400" />
+          Application Identity
         </h3>
-        <p className="text-xs text-zinc-400 mb-6">
-          Injected into the worker isolate runtime context (<code className="font-mono text-emerald-400">env.KEY</code>)
+        <p className="text-xs text-zinc-400 mb-4">
+          Core metadata and identifiers registered in the Cubit cluster
         </p>
 
-        <form onSubmit={handleAddEnvVar} className="grid grid-cols-1 sm:grid-cols-12 gap-2 mb-6">
-          <div className="sm:col-span-4">
-            <input
-              type="text"
-              placeholder="VARIABLE_NAME"
-              value={envKey}
-              onChange={(e) => setEnvKey(e.target.value)}
-              className="w-full px-3 py-1.5 rounded-lg bg-zinc-950 border border-zinc-800 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500 font-mono"
-            />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-mono">
+          <div>
+            <span className="text-zinc-500 block mb-1 font-sans">Application ID</span>
+            <div className="p-2.5 rounded-lg bg-zinc-950 border border-zinc-800 text-zinc-300 select-all">
+              {app.id}
+            </div>
           </div>
-          <div className="sm:col-span-5">
-            <input
-              type={isSecret ? 'password' : 'text'}
-              placeholder="Value"
-              value={envValue}
-              onChange={(e) => setEnvValue(e.target.value)}
-              className="w-full px-3 py-1.5 rounded-lg bg-zinc-950 border border-zinc-800 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500 font-mono"
-            />
+          <div>
+            <span className="text-zinc-500 block mb-1 font-sans">Cluster Ingress Subdomain</span>
+            <div className="p-2.5 rounded-lg bg-zinc-950 border border-zinc-800 text-emerald-400 font-semibold select-all">
+              {app.subdomain || app.name}.localhost
+            </div>
           </div>
-          <div className="sm:col-span-3 flex items-center gap-2">
-            <label className="flex items-center gap-1.5 text-xs text-zinc-400 select-none cursor-pointer">
-              <input
-                type="checkbox"
-                checked={isSecret}
-                onChange={(e) => setIsSecret(e.target.checked)}
-                className="rounded bg-zinc-950 border-zinc-800 text-emerald-500 focus:ring-0"
-              />
-              Secret
-            </label>
-            <button
-              type="submit"
-              className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold text-white transition"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Add
-            </button>
-          </div>
-        </form>
-
-        {validationError && (
-          <p className="text-xs text-rose-400 -mt-4 mb-4">{validationError}</p>
-        )}
-
-        {envVars.length === 0 ? (
-          <div className="p-4 rounded-lg bg-zinc-950/60 border border-zinc-800/60 text-xs text-zinc-500">
-            No environment variables configured.
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {envVars.map((env) => (
-              <EnvVarRow
-                key={env.key}
-                env={env}
-                onToggleVisibility={toggleSecretVisibility}
-                onDelete={handleDeleteEnvVar}
-              />
-            ))}
-          </div>
-        )}
+        </div>
       </div>
 
-      {/* Wrangler Configuration Spec */}
+      {/* Runtime & Compatibility Configuration Form */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
         <div className="flex items-center justify-between mb-4">
           <div>
             <h3 className="text-sm font-bold text-zinc-100 flex items-center gap-2 mb-1">
-              <FileCode className="w-4 h-4 text-blue-400" />
-              Worker Specification Preview
+              <Cpu className="w-4 h-4 text-purple-400" />
+              Runtime & Compatibility Settings
             </h3>
             <p className="text-xs text-zinc-400">
-              Generated Celld runtime manifest derived from active configuration
+              Configure V8 isolate execution limits, CPU thresholds, and Cloudflare compatibility flags
             </p>
           </div>
           <div className="flex items-center gap-2">
             <button
               type="button"
+              data-testid="celld-compat-btn"
               onClick={() => setShowCompatModal(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 text-xs font-medium transition"
               title="Inspect Celld runtime compatibility report"
@@ -285,6 +324,7 @@ export function SettingsTab({ app, onDeleteApp }: SettingsTabProps) {
             </button>
             <button
               type="button"
+              data-testid="sync-wrangler-btn"
               onClick={() => {
                 setRawWranglerConfig('');
                 setShowImportWranglerModal(true);
@@ -297,12 +337,267 @@ export function SettingsTab({ app, onDeleteApp }: SettingsTabProps) {
             </button>
           </div>
         </div>
+
+        <form onSubmit={handleSaveRuntimeSettings} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="text-xs font-semibold text-zinc-400 block mb-1 font-sans">
+                Compatibility Date
+              </label>
+              <input
+                type="text"
+                data-testid="runtime-compat-date-input"
+                placeholder="2024-09-23"
+                value={compatDate}
+                onChange={(e) => setCompatDate(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-xs text-zinc-200 font-mono focus:outline-none focus:border-emerald-500"
+              />
+              <p className="text-[10px] text-zinc-500 mt-1">Cloudflare runtime version flag</p>
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-zinc-400 block mb-1 font-sans">
+                Memory Limit (Isolate)
+              </label>
+              <select
+                data-testid="runtime-memory-select"
+                value={memoryLimitMB}
+                onChange={(e) => setMemoryLimitMB(Number(e.target.value))}
+                className="w-full px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-xs text-zinc-200 font-mono focus:outline-none focus:border-emerald-500 cursor-pointer"
+              >
+                <option value={64}>64 MB (Micro)</option>
+                <option value={128}>128 MB (Standard Worker)</option>
+                <option value={256}>256 MB (Medium)</option>
+                <option value={512}>512 MB (High)</option>
+                <option value={1024}>1024 MB (Max)</option>
+              </select>
+              <p className="text-[10px] text-zinc-500 mt-1">V8 isolate RAM quota</p>
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-zinc-400 block mb-1 font-sans">
+                CPU Execution Timeout (ms)
+              </label>
+              <input
+                type="number"
+                data-testid="runtime-cpu-timeout-input"
+                min={5}
+                max={30000}
+                value={maxDurationMs}
+                onChange={(e) => setMaxDurationMs(Number(e.target.value))}
+                className="w-full px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-xs text-zinc-200 font-mono focus:outline-none focus:border-emerald-500"
+              />
+              <p className="text-[10px] text-zinc-500 mt-1">Allowed CPU execution time</p>
+            </div>
+          </div>
+
+          <div className="pt-2 flex items-center justify-between border-t border-zinc-800/80">
+            <label className="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                data-testid="runtime-nodejs-compat-checkbox"
+                checked={nodejsCompat}
+                onChange={(e) => setNodejsCompat(e.target.checked)}
+                className="rounded bg-zinc-950 border-zinc-800 text-emerald-500 focus:ring-0 w-4 h-4 cursor-pointer"
+              />
+              <span>Enable Node.js Compatibility (<code className="font-mono text-emerald-400">nodejs_compat</code>)</span>
+            </label>
+
+            <div className="flex items-center gap-2">
+              {runtimeSaveStatus === 'saved' && (
+                <span className="text-xs text-emerald-400 font-semibold flex items-center gap-1">
+                  <Check className="w-3.5 h-3.5" /> Saved!
+                </span>
+              )}
+              {runtimeSaveStatus === 'error' && (
+                <span className="text-xs text-rose-400 font-semibold flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5" /> Failed saving settings
+                </span>
+              )}
+              <button
+                type="submit"
+                data-testid="save-runtime-settings-btn"
+                disabled={isSavingRuntime}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-xs font-semibold text-white transition shadow"
+              >
+                {isSavingRuntime ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Save className="w-3.5 h-3.5" />
+                )}
+                <span>{isSavingRuntime ? 'Saving...' : 'Save Runtime Settings'}</span>
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+
+      {/* Environment Variables & Secrets */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-sm font-bold text-zinc-100 flex items-center gap-2 mb-1">
+              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+              Environment Variables & Secrets
+            </h3>
+            <p className="text-xs text-zinc-400">
+              Injected into worker execution context via <code className="font-mono text-emerald-400">env.*</code>
+            </p>
+          </div>
+          <span className="text-xs font-mono text-zinc-400">
+            {envVars.length} total ({envVars.filter((v) => v.isSecret).length} encrypted)
+          </span>
+        </div>
+
+        {/* Search & Type Filter Bar */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 mb-4">
+          <div className="relative flex-1 max-w-sm">
+            <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              data-testid="var-search-input"
+              value={varSearchTerm}
+              onChange={(e) => setVarSearchTerm(e.target.value)}
+              placeholder="Filter by variable name..."
+              className="w-full pl-8 pr-8 py-1.5 rounded-lg bg-zinc-950 border border-zinc-800 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-emerald-500 font-mono"
+            />
+            {varSearchTerm && (
+              <button
+                type="button"
+                onClick={() => setVarSearchTerm('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-0.5"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1.5 text-xs">
+            <button
+              type="button"
+              data-testid="filter-all-btn"
+              onClick={() => setVarTypeFilter('ALL')}
+              className={`px-3 py-1 rounded-lg font-medium transition ${
+                varTypeFilter === 'ALL'
+                  ? 'bg-zinc-800 text-zinc-100 border border-zinc-700'
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
+              }`}
+            >
+              All ({envVars.length})
+            </button>
+            <button
+              type="button"
+              data-testid="filter-plain-btn"
+              onClick={() => setVarTypeFilter('PLAIN')}
+              className={`px-3 py-1 rounded-lg font-medium transition ${
+                varTypeFilter === 'PLAIN'
+                  ? 'bg-zinc-800 text-zinc-100 border border-zinc-700'
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
+              }`}
+            >
+              Plain Text ({envVars.filter((v) => !v.isSecret).length})
+            </button>
+            <button
+              type="button"
+              data-testid="filter-secret-btn"
+              onClick={() => setVarTypeFilter('SECRET')}
+              className={`px-3 py-1 rounded-lg font-medium transition ${
+                varTypeFilter === 'SECRET'
+                  ? 'bg-zinc-800 text-zinc-100 border border-zinc-700'
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
+              }`}
+            >
+              Encrypted Secrets ({envVars.filter((v) => v.isSecret).length})
+            </button>
+          </div>
+        </div>
+
+        {/* Add Variable Form */}
+        <form onSubmit={handleAddEnvVar} className="grid grid-cols-1 sm:grid-cols-12 gap-2 mb-6">
+          <div className="sm:col-span-4">
+            <input
+              type="text"
+              data-testid="env-key-input"
+              placeholder="VARIABLE_NAME"
+              value={envKey}
+              onChange={(e) => setEnvKey(e.target.value)}
+              className="w-full px-3 py-1.5 rounded-lg bg-zinc-950 border border-zinc-800 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500 font-mono"
+            />
+          </div>
+          <div className="sm:col-span-5">
+            <input
+              type={isSecret ? 'password' : 'text'}
+              data-testid="env-value-input"
+              placeholder="Value"
+              value={envValue}
+              onChange={(e) => setEnvValue(e.target.value)}
+              className="w-full px-3 py-1.5 rounded-lg bg-zinc-950 border border-zinc-800 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500 font-mono"
+            />
+          </div>
+          <div className="sm:col-span-3 flex items-center gap-2">
+            <label className="flex items-center gap-1.5 text-xs text-zinc-400 select-none cursor-pointer">
+              <input
+                type="checkbox"
+                data-testid="env-secret-checkbox"
+                checked={isSecret}
+                onChange={(e) => setIsSecret(e.target.checked)}
+                className="rounded bg-zinc-950 border-zinc-800 text-emerald-500 focus:ring-0"
+              />
+              Secret
+            </label>
+            <button
+              type="submit"
+              data-testid="add-env-btn"
+              className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold text-white transition"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Add
+            </button>
+          </div>
+        </form>
+
+        {validationError && (
+          <p className="text-xs text-rose-400 -mt-4 mb-4">{validationError}</p>
+        )}
+
+        {filteredEnvVars.length === 0 ? (
+          <div className="p-4 rounded-lg bg-zinc-950/60 border border-zinc-800/60 text-xs text-zinc-500">
+            {envVars.length === 0
+              ? 'No environment variables configured.'
+              : 'No variables match current filter criteria.'}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {filteredEnvVars.map((env) => (
+              <EnvVarRow
+                key={env.key}
+                env={env}
+                onToggleVisibility={toggleSecretVisibility}
+                onDelete={handleDeleteEnvVar}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Worker Specification Preview */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+        <h3 className="text-sm font-bold text-zinc-100 flex items-center gap-2 mb-1">
+          <FileCode className="w-4 h-4 text-blue-400" />
+          Worker Specification Preview
+        </h3>
+        <p className="text-xs text-zinc-400 mb-4">
+          Generated Celld runtime manifest derived from active configuration
+        </p>
+
         <pre className="p-4 rounded-lg bg-zinc-950 border border-zinc-800 font-mono text-xs text-zinc-300 overflow-x-auto">
 {JSON.stringify(
   {
     name: app.name,
     compatibility_date: app.compatibilityDate || '2024-04-03',
     compatibility_flags: app.compatibilityFlags && app.compatibilityFlags.length > 0 ? app.compatibilityFlags : ['nodejs_compat'],
+    memory_limit_mb: app.memoryLimitMb || 128,
+    max_duration_ms: app.maxDurationMs || 50,
     vars: (app.envVars || []).reduce<Record<string, string>>((acc, v) => {
       acc[v.key] = v.isSecret ? '[REDACTED SECRET]' : v.value;
       return acc;
@@ -326,6 +621,8 @@ export function SettingsTab({ app, onDeleteApp }: SettingsTabProps) {
         </p>
 
         <button
+          type="button"
+          data-testid="delete-application-btn"
           onClick={handleDeleteApplication}
           disabled={isDeleting}
           className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-xs font-semibold text-white transition disabled:opacity-50"
@@ -448,18 +745,16 @@ export function SettingsTab({ app, onDeleteApp }: SettingsTabProps) {
                 <button
                   type="button"
                   onClick={() => setShowImportWranglerModal(false)}
-                  disabled={isImportingWrangler}
-                  className="px-4 py-2 rounded-lg text-sm text-zinc-400 hover:text-white transition disabled:opacity-50"
+                  className="px-4 py-2 rounded-lg border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-300 transition"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  disabled={isImportingWrangler || !rawWranglerConfig.trim()}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-zinc-950 text-sm font-semibold transition"
+                  disabled={isImportingWrangler}
+                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-xs font-semibold text-white transition shadow"
                 >
-                  <Upload className={`w-4 h-4 ${isImportingWrangler ? 'animate-spin' : ''}`} />
-                  {isImportingWrangler ? 'Syncing...' : 'Sync Configuration'}
+                  {isImportingWrangler ? 'Sanitizing & Syncing...' : 'Sanitize & Sync Config'}
                 </button>
               </div>
             </form>
@@ -467,13 +762,14 @@ export function SettingsTab({ app, onDeleteApp }: SettingsTabProps) {
         </div>
       )}
 
-      {/* Celld Compatibility Report Modal */}
-      <CompatibilityReportModal
-        isOpen={showCompatModal}
-        onClose={() => setShowCompatModal(false)}
-        report={appCompatReport}
-        title={`Celld Compatibility Report • ${app.name}`}
-      />
+      {/* Compatibility Report Modal */}
+      {showCompatModal && (
+        <CompatibilityReportModal
+          isOpen={showCompatModal}
+          report={appCompatReport}
+          onClose={() => setShowCompatModal(false)}
+        />
+      )}
     </div>
   );
 }
@@ -488,32 +784,38 @@ function EnvVarRow({
   onDelete: (key: string) => void;
 }) {
   const isVisible = useSecretVisibility(env.key);
-  const displayValue = env.isSecret && !isVisible ? '••••••••••••••••' : env.value;
 
   return (
-    <div className="flex items-center justify-between p-3 rounded-lg bg-zinc-950/60 border border-zinc-800/60">
-      <div className="flex items-center gap-3">
-        <span className="text-xs font-mono font-bold text-zinc-200">{env.key}</span>
-        <span className="text-xs font-mono text-zinc-400">= {displayValue}</span>
-        {env.isSecret && (
-          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-zinc-800 text-amber-400 border border-zinc-700">
-            SECRET
-          </span>
-        )}
+    <div
+      data-testid={`env-row-${env.key}`}
+      className="flex items-center justify-between p-3 rounded-lg bg-zinc-950/60 border border-zinc-800/60 font-mono text-xs"
+    >
+      <div className="flex items-center gap-3 overflow-hidden">
+        <span className="font-semibold text-zinc-200 shrink-0">{env.key}</span>
+        <span className="text-zinc-600 shrink-0">=</span>
+        <span className="text-zinc-400 truncate">
+          {env.isSecret && !isVisible ? '••••••••••••••••' : env.value}
+        </span>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 shrink-0 ml-4">
         {env.isSecret && (
           <button
+            type="button"
+            data-testid={`toggle-secret-${env.key}`}
             onClick={() => onToggleVisibility(env.key)}
-            className="p-1 rounded text-zinc-500 hover:text-zinc-300 transition"
+            className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition"
+            title={isVisible ? 'Hide secret' : 'Reveal secret'}
           >
             {isVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
           </button>
         )}
         <button
+          type="button"
+          data-testid={`delete-env-${env.key}`}
           onClick={() => onDelete(env.key)}
-          className="p-1 rounded text-zinc-500 hover:text-rose-400 transition"
+          className="p-1 rounded hover:bg-zinc-800 text-zinc-500 hover:text-rose-400 transition"
+          title="Delete variable"
         >
           <Trash2 className="w-3.5 h-3.5" />
         </button>

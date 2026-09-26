@@ -49,6 +49,8 @@ function ApplicationWorkbenchContent({
   onTestApp,
   onTabChange,
   onDeleteApp,
+  onRefreshApps,
+  onNavigateToService,
 }: ApplicationWorkbenchProps) {
   const activeTab = useActiveTab();
 
@@ -64,13 +66,45 @@ function ApplicationWorkbenchContent({
       />
 
       <div className="flex-1 overflow-y-auto">
-        {activeTab === 'overview' && <OverviewTab app={app} onTestApp={onTestApp} />}
-        {activeTab === 'code' && <CodeEditorTab app={app} />}
-        {activeTab === 'builds' && <BuildsTab app={app} onTestApp={onTestApp} />}
-        {activeTab === 'triggers' && <TriggersTab app={app} />}
-        {activeTab === 'bindings' && <BindingsTab app={app} />}
+        {activeTab === 'overview' && (
+          <OverviewTab
+            app={app}
+            onTestApp={onTestApp}
+            onNavigateToService={onNavigateToService}
+          />
+        )}
+        {activeTab === 'code' && (
+          <CodeEditorTab
+            app={app}
+            onDeploy={onDeploy}
+            isDeploying={isDeploying}
+            onRefreshApps={onRefreshApps}
+          />
+        )}
+        {activeTab === 'builds' && (
+          <BuildsTab
+            app={app}
+            onTestApp={onTestApp}
+          />
+        )}
+        {activeTab === 'triggers' && (
+          <TriggersTab
+            app={app}
+            onNavigateToService={onNavigateToService}
+          />
+        )}
+        {activeTab === 'bindings' && (
+          <BindingsTab
+            app={app}
+            onNavigateToService={onNavigateToService}
+          />
+        )}
         {activeTab === 'settings' && (
-          <SettingsTab app={app} onDeleteApp={onDeleteApp} />
+          <SettingsTab
+            app={app}
+            onDeleteApp={onDeleteApp}
+            onRefreshApps={onRefreshApps}
+          />
         )}
       </div>
     </div>

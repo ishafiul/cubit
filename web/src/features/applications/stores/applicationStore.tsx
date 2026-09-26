@@ -16,6 +16,7 @@ export interface ApplicationState {
   logLevelFilter: string;
   buildsViewMode: 'history' | 'tail';
   expandedLogId: string | null;
+  selectedDeploymentId: string | null;
 }
 
 export interface ApplicationActions {
@@ -29,6 +30,7 @@ export interface ApplicationActions {
   setLogLevelFilter: (level: string) => void;
   setBuildsViewMode: (mode: 'history' | 'tail') => void;
   setExpandedLogId: (id: string | null) => void;
+  setSelectedDeploymentId: (id: string | null) => void;
 }
 
 export interface ApplicationStoreProps {
@@ -86,6 +88,8 @@ export const {
       setBuildsViewMode: (buildsViewMode) => set({ buildsViewMode }),
 
       setExpandedLogId: (expandedLogId) => set({ expandedLogId }),
+
+      setSelectedDeploymentId: (selectedDeploymentId) => set({ selectedDeploymentId }),
     };
 
     return {
@@ -100,6 +104,7 @@ export const {
       logLevelFilter: 'all',
       buildsViewMode: 'history',
       expandedLogId: null,
+      selectedDeploymentId: null,
       actions,
     };
   },
@@ -141,4 +146,8 @@ export function useBuildsViewMode(): 'history' | 'tail' {
 
 export function useExpandedLogId(): string | null {
   return useApplicationSelector((state) => state.expandedLogId);
+}
+
+export function useSelectedDeploymentId(): string | null {
+  return useApplicationSelector((state) => state.selectedDeploymentId);
 }
