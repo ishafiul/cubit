@@ -146,4 +146,22 @@ describe('compatibility-linter', () => {
     expect(report.canDeploy).toBe(true);
     expect(report.supportedFeatures.some((f) => f.name.includes('Ed25519'))).toBe(true);
   });
+
+  it('emits a warning when compatibility_date is missing from configuration', () => {
+    const configWithoutDate = JSON.stringify({
+      name: 'undated-worker',
+      kv_namespaces: [{ binding: 'KV', id: 'kv-1' }],
+    });
+
+    const report = analyzeCompatibility(configWithoutDate);
+    expect(report.level).toBe('warning');
+    expect(report.canDeploy).toBe(true);
+    expect(report.warningCount).toBeGreaterThanOrEqual(1);
+
+    const dateWarning = report.warnings.find((w) => w.name === 'Missing Compatibility Date');
+    expect(dateWarning).toBeDefined();
+    expect(dateWarning?.status).toBe('warning');
+    expect(dateWarning?.details).toContain('defaults to 2024-09-23');
+    expect(dateWarning?.remediation).toContain('celld v0.6.0');
+  });
 });

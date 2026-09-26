@@ -297,6 +297,18 @@ export function analyzeCompatibility(rawConfigOrCode?: string, sourceCode?: stri
       });
     }
 
+    // Compatibility Date Warning
+    if (!parsedConfig.compatibility_date) {
+      warnings.push({
+        name: 'Missing Compatibility Date',
+        category: 'config',
+        status: 'warning',
+        details: 'No compatibility_date specified in configuration; defaults to 2024-09-23.',
+        remediation:
+          'celld v0.6.0 strictly enforces workerd compatibilityDate parity. Add "compatibility_date = \\"YYYY-MM-DD\\"" to wrangler.toml or "\\"compatibility_date\\": \\"YYYY-MM-DD\\"" to wrangler.jsonc.',
+      });
+    }
+
     // Unsupported Cloudflare features in config
     if (parsedConfig.ai) {
       unsupported.push({

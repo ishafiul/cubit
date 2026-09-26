@@ -32,7 +32,8 @@ export default {
 		}
 
 		cfg := &wrangler.WranglerConfig{
-			Name: "my-worker",
+			Name:              "my-worker",
+			CompatibilityDate: "2024-09-23",
 			KVNamespaces: []wrangler.KVNamespaceBinding{
 				{Binding: "CACHE", ID: "kv-123"},
 			},
@@ -303,6 +304,29 @@ export default {
 			}
 			if !foundCrypto {
 				t.Errorf("expected Web Crypto (Ed25519 / X25519) in supported features, got: %+v", report.SupportedFeatures)
+			}
+		})
+	})
+
+	t.Run("Given a project configuration with missing compatibility_date", func(t *testing.T) {
+		cfg := &wrangler.WranglerConfig{
+			Name: "undated-worker",
+		}
+
+		t.Run("When validating compatibility", func(t *testing.T) {
+			report, err := wrangler.ValidateCompatibility(cfg, "")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			foundWarning := false
+			for _, w := range report.Warnings {
+				if w.Name == "Missing Compatibility Date" {
+					foundWarning = true
+					break
+				}
+			}
+			if !foundWarning {
+				t.Errorf("expected Missing Compatibility Date warning for celld v0.6.0 parity, got warnings: %+v", report.Warnings)
 			}
 		})
 	})
