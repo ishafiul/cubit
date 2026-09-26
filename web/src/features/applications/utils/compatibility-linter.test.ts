@@ -123,4 +123,27 @@ describe('compatibility-linter', () => {
     expect(report.supportedCount).toBeGreaterThanOrEqual(3);
     expect(report.summary).toContain('1 warning');
   });
+
+  it('detects Web Crypto Ed25519 and X25519 as supported in celld v0.6.0', () => {
+    const code = `
+      export default {
+        async fetch(req) {
+          const key = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
+          const xKey = await crypto.subtle.generateKey({ name: "X25519" }, true, ["deriveKey"]);
+          return new Response("OK");
+        }
+      }
+    `;
+
+    const findings = analyzeSourceCode(code);
+    const cryptoFinding = findings.find((f) => f.name === 'Web Crypto (Ed25519 / X25519)');
+    expect(cryptoFinding).toBeDefined();
+    expect(cryptoFinding?.status).toBe('supported');
+    expect(cryptoFinding?.details).toContain('celld v0.6.0');
+
+    const report = analyzeCompatibility(undefined, code);
+    expect(report.level).toBe('compatible');
+    expect(report.canDeploy).toBe(true);
+    expect(report.supportedFeatures.some((f) => f.name.includes('Ed25519'))).toBe(true);
+  });
 });

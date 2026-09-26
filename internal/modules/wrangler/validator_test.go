@@ -264,4 +264,46 @@ export default {
 			}
 		})
 	})
+
+	t.Run("Given a project using Ed25519 and X25519 Web Crypto", func(t *testing.T) {
+		tmpDir, err := os.MkdirTemp("", "scan-crypto-*")
+		if err != nil {
+			t.Fatalf("failed to create temp dir: %v", err)
+		}
+		defer os.RemoveAll(tmpDir)
+
+		workerCode := `
+export default {
+    async fetch(req) {
+        const key = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
+        const xKey = await crypto.subtle.generateKey({ name: "X25519" }, true, ["deriveKey"]);
+        return new Response("ok");
+    }
+};`
+		if err := os.WriteFile(filepath.Join(tmpDir, "index.js"), []byte(workerCode), 0644); err != nil {
+			t.Fatalf("failed to write index.js: %v", err)
+		}
+
+		cfg := &wrangler.WranglerConfig{
+			Name:              "crypto-worker",
+			CompatibilityDate: "2024-09-23",
+		}
+
+		t.Run("When validating compatibility", func(t *testing.T) {
+			report, err := wrangler.ValidateCompatibility(cfg, tmpDir)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			foundCrypto := false
+			for _, feat := range report.SupportedFeatures {
+				if feat.Name == "Web Crypto (Ed25519 / X25519)" {
+					foundCrypto = true
+					break
+				}
+			}
+			if !foundCrypto {
+				t.Errorf("expected Web Crypto (Ed25519 / X25519) in supported features, got: %+v", report.SupportedFeatures)
+			}
+		})
+	})
 }

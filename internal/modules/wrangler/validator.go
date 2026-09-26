@@ -135,6 +135,13 @@ var sourceRules = []patternRule{
 		status:   StatusSupported,
 		details:  "Asynchronous background task lifecycle fully supported.",
 	},
+	{
+		regex:    regexp.MustCompile(`(?i)["'](?:Ed25519|NODE-ED25519|X25519)["']`),
+		name:     "Web Crypto (Ed25519 / X25519)",
+		category: "api_usage",
+		status:   StatusSupported,
+		details:  "Ed25519 and X25519 algorithms natively supported with raw import/export in celld v0.6.0.",
+	},
 }
 
 // ValidateCompatibility scans a parsed Wrangler configuration and repository source files,
