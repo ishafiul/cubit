@@ -207,9 +207,15 @@ func BuildCelldManifest(
 
 	// Assemble raw metadata
 	rawMetadata := make(map[string]interface{})
-	if app.CompatibilityDate != "" {
-		rawMetadata["compatibility_date"] = app.CompatibilityDate
+	compatDate := app.CompatibilityDate
+	if compatDate == "" && sanitizedConfig != nil {
+		compatDate = sanitizedConfig.CompatibilityDate
 	}
+	if compatDate == "" {
+		compatDate = "2024-09-23" // Fallback required for celld v0.6.0 workerd parity
+	}
+	rawMetadata["compatibility_date"] = compatDate
+
 	if len(app.CompatibilityFlags) > 0 {
 		rawMetadata["compatibility_flags"] = app.CompatibilityFlags
 	}

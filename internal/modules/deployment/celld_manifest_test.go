@@ -197,6 +197,25 @@ func TestBuildCelldManifest(t *testing.T) {
 	})
 
 	t.Run("Given nil application or deployment", func(t *testing.T) {
+		t.Run("When app has empty compatibility_date and config is nil", func(t *testing.T) {
+			emptyApp := &domain.Application{
+				ID:   "app-no-compat",
+				Name: "worker-compat",
+			}
+			testDep, _ := domain.NewDeploymentWithVersion("dep-compat-1", emptyApp.ID, "hash", "msg", 1)
+			testBundle := []byte("export default { fetch() { return new Response('ok'); } };")
+			m, err := deployment.BuildCelldManifest(emptyApp, testDep, testBundle, nil)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if m.RawMetadata == nil {
+				t.Fatalf("expected raw metadata to be present")
+			}
+			if m.RawMetadata["compatibility_date"] != "2024-09-23" {
+				t.Errorf("expected fallback compatibility_date 2024-09-23 for celld v0.6.0 parity, got %v", m.RawMetadata["compatibility_date"])
+			}
+		})
+
 		t.Run("When building manifest with nil app", func(t *testing.T) {
 			_, err := deployment.BuildCelldManifest(nil, nil, []byte("code"), nil)
 			t.Run("Then returns validation error", func(t *testing.T) {
