@@ -41,6 +41,12 @@ const DefaultHelloWorldWorker = `export default {
   },
 };`
 
+// DefaultPythonWorker is the initial standard template for inline Python Workers in celld v0.6.1.
+const DefaultPythonWorker = `from js import Response
+
+async def fetch(request, env):
+    return Response.new("Hello from Python Worker on Cubit celld v0.6.1!")`
+
 // BindingType identifies Cloudflare Worker resource bindings.
 type BindingType string
 

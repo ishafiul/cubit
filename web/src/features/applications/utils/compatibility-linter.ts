@@ -120,6 +120,13 @@ const sourceRules: PatternRule[] = [
     status: 'supported',
     details: 'Ed25519 and X25519 algorithms natively supported with raw import/export in celld v0.6.0.',
   },
+  {
+    regex: /(?:from\s+js\s+import\s+Response|async\s+def\s+fetch\s*\()/,
+    name: 'Python Worker (celld v0.6.1)',
+    category: 'api_usage',
+    status: 'supported',
+    details: 'Native Python worker execution supported via celld v0.6.1.',
+  },
 ];
 
 export function analyzeSourceCode(code: string, fileName = 'src/index.ts'): FeatureFinding[] {

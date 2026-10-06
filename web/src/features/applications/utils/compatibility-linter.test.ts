@@ -164,4 +164,24 @@ describe('compatibility-linter', () => {
     expect(dateWarning?.details).toContain('defaults to 2024-09-23');
     expect(dateWarning?.remediation).toContain('celld v0.6.0');
   });
+
+  it('detects Python Worker syntax as supported in celld v0.6.1', () => {
+    const code = `
+from js import Response
+
+async def fetch(request, env):
+    return Response.new("Hello from Python Worker on Cubit celld v0.6.1!")
+    `;
+
+    const findings = analyzeSourceCode(code);
+    const pyFinding = findings.find((f) => f.name.includes('Python Worker'));
+    expect(pyFinding).toBeDefined();
+    expect(pyFinding?.status).toBe('supported');
+    expect(pyFinding?.details).toContain('celld v0.6.1');
+
+    const report = analyzeCompatibility(undefined, code);
+    expect(report.level).toBe('compatible');
+    expect(report.canDeploy).toBe(true);
+    expect(report.unsupportedCount).toBe(0);
+  });
 });

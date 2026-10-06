@@ -75,6 +75,46 @@ func TestBuildCelldDeployment(t *testing.T) {
 			})
 		})
 	})
+
+	t.Run("Given an application with inline Python worker code", func(t *testing.T) {
+		app := &domain.Application{
+			ID:         "app-py-1",
+			Name:       "worker-py",
+			SourceType: domain.SourceTypeInline,
+			InlineCode: domain.DefaultPythonWorker,
+		}
+		dep, err := domain.NewDeploymentWithVersion("dep-py-1", app.ID, "hash", "python test", 1)
+		if err != nil {
+			t.Fatalf("failed to create deployment: %v", err)
+		}
+
+		t.Run("When calling BuildCelldDeployment", func(t *testing.T) {
+			data, err := deployment.BuildCelldDeployment(context.Background(), app, dep)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			var m deployment.CelldManifest
+			if err := json.Unmarshal(data, &m); err != nil {
+				t.Fatalf("failed to parse manifest: %v", err)
+			}
+			if m.MainModule != "worker.py" {
+				t.Errorf("expected MainModule worker.py, got %s", m.MainModule)
+			}
+			if len(m.Modules) != 1 || m.Modules[0].Type != "python" {
+				t.Errorf("expected module type python, got %+v", m.Modules)
+			}
+			hasPython := false
+			for _, feat := range m.RequiredFeatures {
+				if feat == "python" {
+					hasPython = true
+					break
+				}
+			}
+			if !hasPython {
+				t.Errorf("expected python in RequiredFeatures, got %+v", m.RequiredFeatures)
+			}
+		})
+	})
 }
 
 func TestBuildCelldManifest(t *testing.T) {

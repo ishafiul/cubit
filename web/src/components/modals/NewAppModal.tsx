@@ -28,6 +28,19 @@ interface GitHubFolderItem {
   hasPackageJson: boolean;
 }
 
+const JS_WORKER_TEMPLATE = `export default {
+  async fetch(request, env, ctx) {
+    return new Response("Hello World from Cubit Worker!", {
+      headers: { "content-type": "text/plain; charset=utf-8" },
+    });
+  },
+};`;
+
+const PYTHON_WORKER_TEMPLATE = `from js import Response
+
+async def fetch(request, env):
+    return Response.new("Hello from Python Worker on Cubit celld v0.6.1!")`;
+
 export function NewAppModal() {
   const navigate = useNavigate();
   const showNewAppModal = useModalStore((state) => state.showNewAppModal);
@@ -40,19 +53,12 @@ export function NewAppModal() {
 
   const [appName, setAppName] = useState('');
   const [sourceType, setSourceType] = useState<'inline' | 'github' | 'git'>('inline');
+  const [inlineLanguage, setInlineLanguage] = useState<'javascript' | 'python'>('javascript');
   const [gitRepo, setGitRepo] = useState('');
   const [gitBranch, setGitBranch] = useState('main');
   const [rootDir, setRootDir] = useState('');
   const [autoDeploy, setAutoDeploy] = useState(true);
-  const [inlineCode, setInlineCode] = useState(
-`export default {
-  async fetch(request, env, ctx) {
-    return new Response("Hello World from Cubit Worker!", {
-      headers: { "content-type": "text/plain; charset=utf-8" },
-    });
-  },
-};`
-  );
+  const [inlineCode, setInlineCode] = useState(JS_WORKER_TEMPLATE);
 
   // GitHub App integration states
   const [isGitHubConfigured, setIsGitHubConfigured] = useState(false);
@@ -299,9 +305,50 @@ export function NewAppModal() {
           {sourceType === 'inline' && (
             <>
               <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-xs font-medium text-zinc-400">Worker Source Code (ES Module)</label>
-                  <span className="text-[10px] text-zinc-500 font-mono">Cloudflare Worker API</span>
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-medium text-zinc-400">Worker Source Code</label>
+                    <div className="inline-flex rounded bg-zinc-900 border border-zinc-800 p-0.5 text-[11px]">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setInlineLanguage('javascript');
+                          if (!inlineCode || inlineCode === PYTHON_WORKER_TEMPLATE) {
+                            setInlineCode(JS_WORKER_TEMPLATE);
+                          }
+                        }}
+                        className={`px-2 py-0.5 rounded transition-colors ${
+                          inlineLanguage === 'javascript'
+                            ? 'bg-zinc-800 text-emerald-400 font-medium shadow-sm'
+                            : 'text-zinc-400 hover:text-zinc-200'
+                        }`}
+                      >
+                        JavaScript (ESM)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setInlineLanguage('python');
+                          if (!inlineCode || inlineCode === JS_WORKER_TEMPLATE) {
+                            setInlineCode(PYTHON_WORKER_TEMPLATE);
+                          }
+                        }}
+                        className={`px-2 py-0.5 rounded transition-colors flex items-center gap-1 ${
+                          inlineLanguage === 'python'
+                            ? 'bg-zinc-800 text-emerald-400 font-medium shadow-sm'
+                            : 'text-zinc-400 hover:text-zinc-200'
+                        }`}
+                      >
+                        Python
+                        <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-1 rounded border border-emerald-500/30 font-mono">
+                          v0.6.1
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+                  <span className="text-[10px] text-zinc-500 font-mono">
+                    {inlineLanguage === 'python' ? 'celld v0.6.1 Python API' : 'Cloudflare Worker API'}
+                  </span>
                 </div>
                 <textarea
                   rows={6}

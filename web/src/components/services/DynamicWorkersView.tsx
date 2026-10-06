@@ -9,11 +9,20 @@ const TEMPLATES: Record<string, { name: string; code: string; method: string; pa
     path: '/',
     code: `export default {
   async fetch(request, env, ctx) {
-    return new Response("Hello World from Dynamic Celld 0.6.0 Worker!", {
+    return new Response("Hello World from Dynamic Celld 0.6.1 Worker!", {
       headers: { "content-type": "text/plain; charset=utf-8" },
     });
   },
 };`,
+  },
+  python: {
+    name: 'Python Worker (v0.6.1)',
+    method: 'GET',
+    path: '/py',
+    code: `from js import Response
+
+async def fetch(request, env):
+    return Response.new("Hello World from Python Worker on Celld v0.6.1!")`,
   },
   json: {
     name: 'JSON API Endpoint',
@@ -24,7 +33,7 @@ const TEMPLATES: Record<string, { name: string; code: string; method: string; pa
     const url = new URL(request.url);
     return Response.json({
       status: "online",
-      celld_runtime: "v0.6.0",
+      celld_runtime: "v0.6.1",
       timestamp: new Date().toISOString(),
       path: url.pathname,
     });
@@ -188,9 +197,9 @@ export function DynamicWorkersView() {
             <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
               <div className="flex items-center gap-2 text-xs font-semibold text-zinc-400 uppercase tracking-wider">
                 <Code className="w-4 h-4 text-emerald-400" />
-                <span>Worker Script (ES Modules)</span>
+                <span>{activeTemplate === 'python' ? 'Python Worker Script' : 'Worker Script (ES Modules)'}</span>
               </div>
-              <span className="text-[11px] font-mono text-zinc-500">celld 0.6.0 Runtime</span>
+              <span className="text-[11px] font-mono text-zinc-500">celld 0.6.1 Runtime</span>
             </div>
 
             <div className="rounded-xl overflow-hidden border border-zinc-800">
@@ -204,7 +213,7 @@ export function DynamicWorkersView() {
 
           <div className="pt-4 flex items-center justify-between border-t border-zinc-800">
             <span className="text-xs text-zinc-500">
-              Supports <span className="text-zinc-400 font-mono">export default &#123; fetch &#125;</span> standard Workers API
+              Supports <span className="text-zinc-400 font-mono">{activeTemplate === 'python' ? 'async def fetch(request, env)' : 'export default { fetch }'}</span> standard Workers API
             </span>
             <button
               onClick={handleExecute}

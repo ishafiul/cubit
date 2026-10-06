@@ -74,6 +74,14 @@ func ComputeSHA256(data []byte) string {
 	return "sha256:" + hex.EncodeToString(h[:])
 }
 
+func isPythonSource(code string) bool {
+	trimmed := strings.TrimSpace(code)
+	return strings.Contains(code, "async def fetch") ||
+		strings.Contains(code, "def fetch(") ||
+		strings.HasPrefix(trimmed, "from js import") ||
+		strings.HasPrefix(trimmed, "import js")
+}
+
 // BuildCelldManifest constructs a normalized celld deployment manifest for an application and deployment.
 func BuildCelldManifest(
 	app *domain.Application,
@@ -95,10 +103,21 @@ func BuildCelldManifest(
 	}
 
 	mainModule := "worker.js"
+	moduleType := "esm"
+	if sanitizedConfig != nil && sanitizedConfig.Main != "" {
+		mainModule = sanitizedConfig.Main
+		if strings.HasSuffix(mainModule, ".py") {
+			moduleType = "python"
+		}
+	} else if isPythonSource(app.InlineCode) {
+		mainModule = "worker.py"
+		moduleType = "python"
+	}
+
 	modules := []CelldModule{
 		{
 			Name:   mainModule,
-			Type:   "esm",
+			Type:   moduleType,
 			Digest: digest,
 			Size:   int64(len(bundle)),
 		},
@@ -204,6 +223,9 @@ func BuildCelldManifest(
 	}
 	if len(doClasses) > 0 {
 		addFeature("durable-objects")
+	}
+	if moduleType == "python" {
+		addFeature("python")
 	}
 	sort.Strings(requiredFeatures)
 
