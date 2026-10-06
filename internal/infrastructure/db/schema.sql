@@ -220,3 +220,56 @@ CREATE TABLE IF NOT EXISTS r2_buckets (
     created_at TIMESTAMP NOT NULL
 );
 
+-- Authentication & Role-Based Access Control (RBAC) Tables
+CREATE TABLE IF NOT EXISTS roles (
+    id TEXT PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    is_system INTEGER NOT NULL DEFAULT 0,
+    permissions TEXT NOT NULL, -- JSON array of strings, e.g. ["apps:*", "nodes:read"]
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    role_id TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    FOREIGN KEY(role_id) REFERENCES roles(id)
+);
+
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    token_hash TEXT UNIQUE NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    revoked_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    token_hash TEXT UNIQUE NOT NULL,
+    role_id TEXT NOT NULL,
+    expires_at TIMESTAMP,
+    last_used_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY(role_id) REFERENCES roles(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_role_id ON users(role_id);
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_hash ON refresh_tokens(token_hash);
+CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash);
+
