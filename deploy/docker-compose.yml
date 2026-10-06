@@ -18,7 +18,7 @@ services:
       - CUBIT_TRAEFIK_DYNAMIC_PATH=/etc/traefik/dynamic/cubit.yaml
       - CUBIT_STORAGE_BACKEND=garage_s3
       - CUBIT_STORAGE_DIR=/var/lib/cubit/storage
-      - CUBIT_CELLD_IMAGE=ghcr.io/denoland/celld:latest
+      - CUBIT_CELLD_IMAGE=ghcr.io/denoland/celld:0.6.1
       - DOCKER_HOST=unix:///var/run/docker.sock
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -73,7 +73,7 @@ services:
   # High-performance V8 isolate runtime powered by Deno Land
   # ============================================================================
   celld:
-    image: ghcr.io/denoland/celld:latest
+    image: ghcr.io/denoland/celld:0.6.1
     container_name: celld
     restart: unless-stopped
     ports:
@@ -82,6 +82,10 @@ services:
       - CELLD_STORAGE_ENDPOINT=http://garage:3900
       - CELLD_STORAGE_BUCKET=cubit-fleet
       - CELLD_STORAGE_REGION=cubit-local
+      # celld v0.6.1 epoch retention & memory limit configurations:
+      - CELLD_LTX_RETENTION_SECS=86400 # 24h retention before epoch GC
+      - CELLD_MAX_ASSET_FILE_BYTES=26214400 # 25 MiB asset limit
+      - CELLD_MAX_DYNAMIC_WORKER_CODE_BYTES=67108864 # 64 MiB dynamic worker code limit
     networks:
       - cubit_net
 

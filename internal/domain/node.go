@@ -16,7 +16,7 @@ const (
 )
 
 // DefaultCelldVersion represents the current stable release of the celld runtime.
-const DefaultCelldVersion = "0.6.0"
+const DefaultCelldVersion = "0.6.1"
 
 // NodeSpecs stores telemetry and capacity specifications for a node.
 type NodeSpecs struct {
