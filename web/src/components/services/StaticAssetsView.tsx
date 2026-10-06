@@ -81,6 +81,9 @@ export function StaticAssetsView() {
             <span className="text-xs bg-emerald-950 text-emerald-400 border border-emerald-800 px-2.5 py-0.5 rounded-full font-mono font-medium">
               celld service: Yes
             </span>
+            <span className="text-xs bg-zinc-900 text-zinc-400 border border-zinc-800 px-2.5 py-0.5 rounded-full font-mono">
+              Max file: 25 MiB
+            </span>
           </div>
           <p className="text-sm text-zinc-400 mt-1">
             Serve SPAs, HTML, client JS, CSS, and media directly from fast R2 edge cache storage with automatic asset hashing.

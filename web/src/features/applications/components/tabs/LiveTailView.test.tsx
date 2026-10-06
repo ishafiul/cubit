@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, act, cleanup } from '@testing-library/react';
 import { ApplicationStoreProvider } from '../../stores/applicationStore';
-import { LiveTailView } from './LiveTailView';
+import { LiveTailView, getOtelSeverity } from './LiveTailView';
 import type { Application, RequestLogEvent } from '../../../../api/model';
 
 afterEach(() => {
@@ -140,6 +140,27 @@ describe('Given LiveTailView component', () => {
 
       expect(screen.getByTestId('log-inspector-drawer')).toBeDefined();
       delete (globalThis as any).EventSource;
+    });
+  });
+
+  describe('When evaluating OpenTelemetry log severities', () => {
+    it('Then correctly maps log levels to OTel standard severity badges', () => {
+      expect(getOtelSeverity('debug').label).toBe('DEBUG');
+      expect(getOtelSeverity('trace').label).toBe('DEBUG');
+      expect(getOtelSeverity('log').label).toBe('INFO');
+      expect(getOtelSeverity('info').label).toBe('INFO');
+      expect(getOtelSeverity(undefined).label).toBe('INFO');
+      expect(getOtelSeverity('warn').label).toBe('WARN');
+      expect(getOtelSeverity('warning').label).toBe('WARN');
+      expect(getOtelSeverity('error').label).toBe('ERROR');
+      expect(getOtelSeverity('fatal').label).toBe('ERROR');
+    });
+
+    it('Then applies distinct color styling classes per severity', () => {
+      expect(getOtelSeverity('debug').className).toContain('text-sky-400');
+      expect(getOtelSeverity('info').className).toContain('text-emerald-400');
+      expect(getOtelSeverity('warn').className).toContain('text-amber-400');
+      expect(getOtelSeverity('error').className).toContain('text-rose-400');
     });
   });
 });

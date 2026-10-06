@@ -32,6 +32,39 @@ export interface CfTelemetry {
   tlsVersion?: string;
 }
 
+export type OtelSeverity = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
+
+export interface OtelSeverityBadge {
+  label: OtelSeverity;
+  className: string;
+}
+
+export function getOtelSeverity(level?: string): OtelSeverityBadge {
+  const norm = (level || 'info').toLowerCase();
+  if (norm === 'error' || norm === 'fatal') {
+    return {
+      label: 'ERROR',
+      className: 'bg-rose-950 text-rose-400 border border-rose-800',
+    };
+  }
+  if (norm === 'warn' || norm === 'warning') {
+    return {
+      label: 'WARN',
+      className: 'bg-amber-950 text-amber-400 border border-amber-800',
+    };
+  }
+  if (norm === 'debug' || norm === 'trace') {
+    return {
+      label: 'DEBUG',
+      className: 'bg-sky-950 text-sky-400 border border-sky-800',
+    };
+  }
+  return {
+    label: 'INFO',
+    className: 'bg-emerald-950 text-emerald-400 border border-emerald-800',
+  };
+}
+
 export interface LiveTailViewProps {
   app: Application;
   onTestApp?: (app: Application) => void;
@@ -814,17 +847,17 @@ function LogInspectorDrawer({
                   <span className="text-zinc-500 text-[10px] shrink-0">
                     {new Date(log.timestamp).toLocaleTimeString()}
                   </span>
-                  <span
-                    className={`text-[9px] px-1 py-0.2 rounded font-bold uppercase shrink-0 ${
-                      log.level === 'error'
-                        ? 'bg-rose-950 text-rose-400 border border-rose-800'
-                        : log.level === 'warn'
-                        ? 'bg-amber-950 text-amber-400 border border-amber-800'
-                        : 'bg-zinc-800 text-zinc-300 border border-zinc-700'
-                    }`}
-                  >
-                    {log.level}
-                  </span>
+                  {(() => {
+                    const otel = getOtelSeverity(log.level);
+                    return (
+                      <span
+                        data-testid="otel-severity-badge"
+                        className={`text-[9px] px-1.5 py-0.5 rounded font-mono font-bold uppercase shrink-0 ${otel.className}`}
+                      >
+                        {otel.label}
+                      </span>
+                    );
+                  })()}
                   <span className="text-zinc-200 break-all">{log.message}</span>
                 </div>
               ))}

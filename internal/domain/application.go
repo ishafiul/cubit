@@ -47,6 +47,14 @@ const DefaultPythonWorker = `from js import Response
 async def fetch(request, env):
     return Response.new("Hello from Python Worker on Cubit celld v0.6.1!")`
 
+const (
+	// DefaultMaxAssetFileBytes represents the celld v0.6.1 default maximum asset file size (25 MiB).
+	DefaultMaxAssetFileBytes int64 = 25 * 1024 * 1024 // 26214400 bytes
+
+	// DefaultMaxDynamicWorkerCodeBytes represents the celld v0.6.1 default maximum dynamic worker code size (64 MiB).
+	DefaultMaxDynamicWorkerCodeBytes int64 = 64 * 1024 * 1024 // 67108864 bytes
+)
+
 // BindingType identifies Cloudflare Worker resource bindings.
 type BindingType string
 

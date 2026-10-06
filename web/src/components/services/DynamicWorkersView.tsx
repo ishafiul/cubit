@@ -199,7 +199,12 @@ export function DynamicWorkersView() {
                 <Code className="w-4 h-4 text-emerald-400" />
                 <span>{activeTemplate === 'python' ? 'Python Worker Script' : 'Worker Script (ES Modules)'}</span>
               </div>
-              <span className="text-[11px] font-mono text-zinc-500">celld 0.6.1 Runtime</span>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-mono text-zinc-500">celld 0.6.1 Runtime</span>
+                <span className="text-[10px] font-mono bg-zinc-950 text-zinc-500 border border-zinc-800 px-1.5 py-0.5 rounded">
+                  Max code: 64 MiB
+                </span>
+              </div>
             </div>
 
             <div className="rounded-xl overflow-hidden border border-zinc-800">
