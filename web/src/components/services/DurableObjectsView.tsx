@@ -293,6 +293,16 @@ export function DurableObjectsView({ initialSelectedId }: { initialSelectedId?: 
                     No explicit RPC facets declared on this DO class. Default fetch() method applies.
                   </div>
                 )}
+
+                {/* celld v0.6.1 DO Facets & Named IDs guidance */}
+                <div className="p-3 rounded-xl border border-sky-900/50 bg-sky-950/20 text-xs space-y-1">
+                  <div className="flex items-center gap-1.5 font-semibold text-sky-400">
+                    <span>celld v0.6.1 Facet Startup Props & Named IDs</span>
+                  </div>
+                  <p className="text-[11px] text-zinc-400 leading-relaxed">
+                    Exported facets can accept startup properties via <code className="text-sky-300 font-mono">ctx.exports.App(&#123; props &#125;)</code>. Actor named IDs are preserved via <code className="text-sky-300 font-mono">ctx.id</code> across the cluster.
+                  </p>
+                </div>
               </div>
 
               {/* Active Instances List */}
