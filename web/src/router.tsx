@@ -24,6 +24,7 @@ import { WorkflowsView } from './components/services/WorkflowsView';
 import { DurableObjectsView } from './components/services/DurableObjectsView';
 import { ContainersView } from './components/services/ContainersView';
 import { GitHubSettingsView } from './components/views/GitHubSettingsView';
+import { AccessManagementView } from './components/views/AccessManagementView';
 import { LoginPage } from './components/auth/LoginPage';
 import { SetupPage } from './components/auth/SetupPage';
 import { customInstance } from './api/custom-instance';
@@ -328,6 +329,13 @@ export const githubRoute = createRoute({
   component: GitHubSettingsView,
 });
 
+export const accessManagementRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/access',
+  beforeLoad: requireAuthGuard,
+  component: AccessManagementView,
+});
+
 // 8. Route Tree & Router
 export const routeTree = rootRoute.addChildren([
   indexRoute,
@@ -349,6 +357,7 @@ export const routeTree = rootRoute.addChildren([
   domainsRoute,
   logsRoute,
   githubRoute,
+  accessManagementRoute,
 ]);
 
 export const router = createRouter({

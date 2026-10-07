@@ -17,6 +17,7 @@ import {
   FileCode,
   GitBranch,
   LogOut,
+  Key,
 } from 'lucide-react';
 import { useListNodes } from './api/generated/nodes/nodes';
 import { useListApplications } from './api/generated/applications/applications';
@@ -65,6 +66,7 @@ function getHeaderTitle(pathname: string): string {
   if (pathname.startsWith('/domains')) return 'Traefik Routing';
   if (pathname.startsWith('/logs')) return 'Build Logs';
   if (pathname.startsWith('/github')) return 'GitHub Integration';
+  if (pathname.startsWith('/access')) return 'Access Management';
   return 'Workers';
 }
 
@@ -295,6 +297,14 @@ function DashboardLayout() {
               >
                 <GitBranch className="w-3.5 h-3.5 text-purple-400" />
                 <span>GitHub App</span>
+              </Link>
+
+              <Link
+                to="/access"
+                className={navItemClass(pathname === '/access')}
+              >
+                <Key className="w-3.5 h-3.5 text-amber-400" />
+                <span>Access & Tokens</span>
               </Link>
             </div>
           </nav>
