@@ -18,11 +18,18 @@ const (
 )
 
 var (
-	ErrInvalidRefreshToken = errors.New("invalid or expired refresh token")
-	ErrTokenRevoked        = errors.New("refresh token has been revoked")
-	ErrUserInactive        = errors.New("user account is inactive")
-	ErrInvalidCredentials  = errors.New("invalid email or password")
+	ErrInvalidRefreshToken   = errors.New("invalid or expired refresh token")
+	ErrTokenRevoked          = errors.New("refresh token has been revoked")
+	ErrUserInactive          = errors.New("user account is inactive")
+	ErrInvalidCredentials    = errors.New("invalid email or password")
+	ErrSetupAlreadyCompleted = errors.New("setup has already been completed")
 )
+
+// StatusResponse contains the cluster initialization state and current release version.
+type StatusResponse struct {
+	Initialized bool   `json:"initialized"`
+	Version     string `json:"version"`
+}
 
 // TokenPair encapsulates the dual token response returned upon authentication or rotation.
 type TokenPair struct {
@@ -36,6 +43,8 @@ type Service interface {
 	Login(ctx context.Context, email, password string) (*TokenPair, *domain.User, error)
 	Refresh(ctx context.Context, refreshTokenPlain string) (*TokenPair, *domain.User, error)
 	Logout(ctx context.Context, refreshTokenPlain string) error
+	GetStatus(ctx context.Context) (*StatusResponse, error)
+	Setup(ctx context.Context, name, email, password string) (*TokenPair, *domain.User, error)
 	IssueTokenPair(ctx context.Context, user *domain.User) (*TokenPair, error)
 	RotateRefreshToken(ctx context.Context, refreshTokenPlain string) (*TokenPair, *domain.User, error)
 	RevokeToken(ctx context.Context, refreshTokenPlain string) error
@@ -216,4 +225,77 @@ func (s *authService) Refresh(ctx context.Context, refreshTokenPlain string) (*T
 // Logout revokes the provided refresh token session.
 func (s *authService) Logout(ctx context.Context, refreshTokenPlain string) error {
 	return s.RevokeToken(ctx, refreshTokenPlain)
+}
+
+// GetStatus checks whether the cluster has been initialized.
+func (s *authService) GetStatus(ctx context.Context) (*StatusResponse, error) {
+	count, err := s.repo.CountUsers(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count users for status probe: %w", err)
+	}
+	return &StatusResponse{
+		Initialized: count > 0,
+		Version:     domain.CubitVersion,
+	}, nil
+}
+
+// Setup performs one-time initialization of the root administrator account.
+func (s *authService) Setup(ctx context.Context, name, email, password string) (*TokenPair, *domain.User, error) {
+	cleanName := strings.TrimSpace(name)
+	cleanEmail := strings.ToLower(strings.TrimSpace(email))
+	if cleanName == "" || cleanEmail == "" || password == "" {
+		return nil, nil, errors.New("name, email, and password cannot be empty")
+	}
+
+	count, err := s.repo.CountUsers(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to check existing user count: %w", err)
+	}
+	if count > 0 {
+		return nil, nil, ErrSetupAlreadyCompleted
+	}
+
+	// Ensure built-in admin role exists
+	adminRole, err := s.repo.GetRoleByID(ctx, domain.SystemRoleAdminID)
+	if err != nil {
+		if errors.Is(err, ErrRoleNotFound) {
+			now := time.Now().UTC()
+			adminRole = &domain.Role{
+				ID:          domain.SystemRoleAdminID,
+				Name:        domain.SystemRoleAdminName,
+				Description: "Root administrator with unrestricted permissions",
+				IsSystem:    true,
+				Permissions: []string{"*"},
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			}
+			if err := s.repo.CreateRole(ctx, adminRole); err != nil {
+				return nil, nil, fmt.Errorf("failed to create admin role: %w", err)
+			}
+		} else {
+			return nil, nil, fmt.Errorf("failed to query admin role: %w", err)
+		}
+	}
+
+	passHash, err := domain.HashPassword(password)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to hash password: %w", err)
+	}
+
+	userID := uuid.New().String()
+	user, err := domain.NewUser(userID, cleanName, cleanEmail, passHash, adminRole.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to initialize admin user: %w", err)
+	}
+
+	if err := s.repo.CreateUser(ctx, user); err != nil {
+		return nil, nil, fmt.Errorf("failed to persist admin user: %w", err)
+	}
+
+	pair, err := s.IssueTokenPair(ctx, user)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to issue tokens for setup: %w", err)
+	}
+
+	return pair, user, nil
 }

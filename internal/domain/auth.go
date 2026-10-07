@@ -12,6 +12,13 @@ import (
 const (
 	// BcryptDefaultCost represents the work factor for password hashing in Cubit.
 	BcryptDefaultCost = 12
+
+	// CubitVersion defines the current control plane release version.
+	CubitVersion = "1.3.0"
+
+	// Built-in system role IDs and names.
+	SystemRoleAdminID   = "admin"
+	SystemRoleAdminName = "Admin"
 )
 
 var (

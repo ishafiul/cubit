@@ -2,6 +2,7 @@ package auth_test
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -138,3 +139,124 @@ func TestAuthService_TokenEngine(t *testing.T) {
 		})
 	})
 }
+
+func TestAuthService_StatusProbe(t *testing.T) {
+	ctx := context.Background()
+	service, repo := setupTestService(t)
+
+	t.Run("Given an empty database with no users", func(t *testing.T) {
+		t.Run("When GetStatus is called then it returns initialized: false and current version", func(t *testing.T) {
+			status, err := service.GetStatus(ctx)
+			if err != nil {
+				t.Fatalf("expected no error from GetStatus, got %v", err)
+			}
+			if status.Initialized {
+				t.Errorf("expected initialized to be false on empty database, got true")
+			}
+			if status.Version != domain.CubitVersion {
+				t.Errorf("expected version %s, got %s", domain.CubitVersion, status.Version)
+			}
+		})
+	})
+
+	t.Run("Given a database with an existing user", func(t *testing.T) {
+		role := &domain.Role{
+			ID:          "role-test",
+			Name:        "TestRole",
+			IsSystem:    false,
+			Permissions: []string{"apps:read"},
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
+		}
+		if err := repo.CreateRole(ctx, role); err != nil {
+			t.Fatalf("failed to create test role: %v", err)
+		}
+		user, _ := domain.NewUser("usr-1", "Test", "test@cubit.local", "hash", role.ID)
+		if err := repo.CreateUser(ctx, user); err != nil {
+			t.Fatalf("failed to create test user: %v", err)
+		}
+
+		t.Run("When GetStatus is called then it returns initialized: true", func(t *testing.T) {
+			status, err := service.GetStatus(ctx)
+			if err != nil {
+				t.Fatalf("expected no error from GetStatus, got %v", err)
+			}
+			if !status.Initialized {
+				t.Errorf("expected initialized to be true, got false")
+			}
+			if status.Version != domain.CubitVersion {
+				t.Errorf("expected version %s, got %s", domain.CubitVersion, status.Version)
+			}
+		})
+	})
+}
+
+func TestAuthService_SetupAndLockout(t *testing.T) {
+	ctx := context.Background()
+	service, _ := setupTestService(t)
+
+	t.Run("Given a clean cluster with 0 users", func(t *testing.T) {
+		t.Run("When Setup is called with valid admin credentials then it creates root admin and returns active tokens", func(t *testing.T) {
+			pair, user, err := service.Setup(ctx, "Root Admin", "admin@cubit.local", "SuperSecurePassword123!")
+			if err != nil {
+				t.Fatalf("expected successful setup, got %v", err)
+			}
+			if user == nil || user.Email != "admin@cubit.local" {
+				t.Fatalf("expected admin user, got %+v", user)
+			}
+			if user.RoleID != domain.SystemRoleAdminID {
+				t.Errorf("expected role ID %s, got %s", domain.SystemRoleAdminID, user.RoleID)
+			}
+			if pair.AccessToken == "" || pair.RefreshToken == "" {
+				t.Fatalf("expected non-empty tokens in pair: %+v", pair)
+			}
+
+			// Verify JWT contains admin wildcard permissions
+			claims, err := service.ValidateAccessToken(pair.AccessToken)
+			if err != nil {
+				t.Fatalf("failed to validate setup access token: %v", err)
+			}
+			if len(claims.Permissions) != 1 || claims.Permissions[0] != "*" {
+				t.Errorf("expected superuser wildcard permissions ['*'], got %v", claims.Permissions)
+			}
+
+			// Verify cluster status is now initialized
+			status, err := service.GetStatus(ctx)
+			if err != nil {
+				t.Fatalf("failed to get status: %v", err)
+			}
+			if !status.Initialized {
+				t.Errorf("expected cluster to be initialized after setup")
+			}
+		})
+
+		t.Run("When Setup is called again then it locks out with ErrSetupAlreadyCompleted", func(t *testing.T) {
+			_, _, err := service.Setup(ctx, "Attacker", "attacker@evil.local", "AttackerPass123!")
+			if err == nil {
+				t.Fatal("expected second setup call to fail, got nil")
+			}
+			if !errors.Is(err, authModule.ErrSetupAlreadyCompleted) {
+				t.Fatalf("expected ErrSetupAlreadyCompleted, got %v", err)
+			}
+		})
+	})
+
+	t.Run("Given invalid setup parameters", func(t *testing.T) {
+		freshService, _ := setupTestService(t)
+
+		t.Run("When email is empty then it returns validation error", func(t *testing.T) {
+			_, _, err := freshService.Setup(ctx, "Admin", "", "Password123!")
+			if err == nil {
+				t.Fatal("expected error with empty email, got nil")
+			}
+		})
+
+		t.Run("When password is empty then it returns validation error", func(t *testing.T) {
+			_, _, err := freshService.Setup(ctx, "Admin", "admin@cubit.local", "")
+			if err == nil {
+				t.Fatal("expected error with empty password, got nil")
+			}
+		})
+	})
+}
+

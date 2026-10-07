@@ -107,3 +107,54 @@ func (h *Handler) Logout(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"status": "logged_out"})
 }
+
+type setupRequest struct {
+	Name     string `json:"name" binding:"required"`
+	Email    string `json:"email" binding:"required"`
+	Password string `json:"password" binding:"required"`
+}
+
+// Status returns whether the cluster has completed initial setup.
+// GET /api/v1/auth/status
+func (h *Handler) Status(c *gin.Context) {
+	status, err := h.service.GetStatus(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check setup status"})
+		return
+	}
+	c.JSON(http.StatusOK, status)
+}
+
+// Setup provisions the root administrator and initializes the cluster.
+// POST /api/v1/auth/setup
+func (h *Handler) Setup(c *gin.Context) {
+	var req setupRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: name, email, and password are required"})
+		return
+	}
+
+	cleanName := strings.TrimSpace(req.Name)
+	cleanEmail := strings.TrimSpace(req.Email)
+	if cleanName == "" || cleanEmail == "" || req.Password == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "name, email, and password cannot be empty"})
+		return
+	}
+
+	pair, user, err := h.service.Setup(c.Request.Context(), cleanName, cleanEmail, req.Password)
+	if err != nil {
+		if errors.Is(err, ErrSetupAlreadyCompleted) {
+			c.JSON(http.StatusConflict, gin.H{"error": "setup has already been completed"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error during setup"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"accessToken":  pair.AccessToken,
+		"refreshToken": pair.RefreshToken,
+		"expiresIn":    pair.ExpiresIn,
+		"user":         user,
+	})
+}

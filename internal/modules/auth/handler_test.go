@@ -242,3 +242,152 @@ func TestAuthHandler_LoginRefreshLogout(t *testing.T) {
 		})
 	})
 }
+
+func TestAuthHandler_StatusProbe(t *testing.T) {
+	router, _, repo := setupTestHandler(t)
+
+	t.Run("Given an empty database", func(t *testing.T) {
+		t.Run("When calling GET /api/v1/auth/status then it returns 200 with initialized: false", func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(http.MethodGet, "/api/v1/auth/status", nil)
+			router.ServeHTTP(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200 OK, got %d: %s", w.Code, w.Body.String())
+			}
+
+			var resp map[string]interface{}
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("failed to parse json response: %v", err)
+			}
+			if resp["initialized"] != false {
+				t.Errorf("expected initialized: false, got %v", resp["initialized"])
+			}
+			if resp["version"] != domain.CubitVersion {
+				t.Errorf("expected version %s, got %v", domain.CubitVersion, resp["version"])
+			}
+		})
+	})
+
+	t.Run("Given a database with users", func(t *testing.T) {
+		ctx := context.Background()
+		role := &domain.Role{
+			ID:          "role-admin",
+			Name:        "Admin",
+			IsSystem:    true,
+			Permissions: []string{"*"},
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
+		}
+		_ = repo.CreateRole(ctx, role)
+		user, _ := domain.NewUser("usr-1", "Admin", "admin@cubit.local", "hash", role.ID)
+		_ = repo.CreateUser(ctx, user)
+
+		t.Run("When calling GET /api/v1/auth/status then it returns 200 with initialized: true", func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(http.MethodGet, "/api/v1/auth/status", nil)
+			router.ServeHTTP(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200 OK, got %d: %s", w.Code, w.Body.String())
+			}
+
+			var resp map[string]interface{}
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("failed to parse json response: %v", err)
+			}
+			if resp["initialized"] != true {
+				t.Errorf("expected initialized: true, got %v", resp["initialized"])
+			}
+			if resp["version"] != domain.CubitVersion {
+				t.Errorf("expected version %s, got %v", domain.CubitVersion, resp["version"])
+			}
+		})
+	})
+}
+
+func TestAuthHandler_Setup(t *testing.T) {
+	router, _, _ := setupTestHandler(t)
+
+	t.Run("Given an uninitialized cluster", func(t *testing.T) {
+		t.Run("When calling POST /api/v1/auth/setup with valid credentials then it returns 201 Created and active tokens", func(t *testing.T) {
+			payload := map[string]string{
+				"name":     "Super Admin",
+				"email":    "superadmin@cubit.local",
+				"password": "SuperSecretPass123!",
+			}
+			bodyBytes, _ := json.Marshal(payload)
+
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(http.MethodPost, "/api/v1/auth/setup", bytes.NewReader(bodyBytes))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(w, req)
+
+			if w.Code != http.StatusCreated {
+				t.Fatalf("expected 201 Created, got %d: %s", w.Code, w.Body.String())
+			}
+
+			var resp map[string]interface{}
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("failed to parse json response: %v", err)
+			}
+
+			if resp["accessToken"] == "" || resp["accessToken"] == nil {
+				t.Errorf("expected non-empty accessToken")
+			}
+			if resp["refreshToken"] == "" || resp["refreshToken"] == nil {
+				t.Errorf("expected non-empty refreshToken")
+			}
+			userMap, ok := resp["user"].(map[string]interface{})
+			if !ok || userMap["email"] != "superadmin@cubit.local" {
+				t.Errorf("expected user with email superadmin@cubit.local, got %v", userMap)
+			}
+		})
+
+		t.Run("When calling POST /api/v1/auth/setup again then it returns 409 Conflict with error message", func(t *testing.T) {
+			payload := map[string]string{
+				"name":     "Another Admin",
+				"email":    "another@cubit.local",
+				"password": "AnotherPass123!",
+			}
+			bodyBytes, _ := json.Marshal(payload)
+
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(http.MethodPost, "/api/v1/auth/setup", bytes.NewReader(bodyBytes))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(w, req)
+
+			if w.Code != http.StatusConflict {
+				t.Fatalf("expected 409 Conflict, got %d: %s", w.Code, w.Body.String())
+			}
+
+			var resp map[string]interface{}
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("failed to parse json response: %v", err)
+			}
+			if resp["error"] != "setup has already been completed" {
+				t.Errorf("expected error 'setup has already been completed', got '%v'", resp["error"])
+			}
+		})
+	})
+
+	t.Run("Given invalid setup payloads", func(t *testing.T) {
+		cleanRouter, _, _ := setupTestHandler(t)
+
+		t.Run("When name or email or password is missing then it returns 400 Bad Request", func(t *testing.T) {
+			payload := map[string]string{
+				"email": "onlyemail@cubit.local",
+			}
+			bodyBytes, _ := json.Marshal(payload)
+
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(http.MethodPost, "/api/v1/auth/setup", bytes.NewReader(bodyBytes))
+			req.Header.Set("Content-Type", "application/json")
+			cleanRouter.ServeHTTP(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400 Bad Request, got %d: %s", w.Code, w.Body.String())
+			}
+		})
+	})
+}
