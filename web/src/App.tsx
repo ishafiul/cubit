@@ -16,12 +16,14 @@ import {
   GitMerge,
   FileCode,
   GitBranch,
+  LogOut,
 } from 'lucide-react';
 import { useListNodes } from './api/generated/nodes/nodes';
 import { useListApplications } from './api/generated/applications/applications';
 import { useListDomains } from './api/generated/domains/domains';
 import { useGetRuntimeStatus } from './api/generated/runtime/runtime';
 import { useModalStore, useModalActions } from './shared/stores/useModalStore';
+import { useAuthStore } from './shared/stores/useAuthStore';
 import { ToastContainer } from './shared/components/ToastContainer';
 import { NewAppModal } from './components/modals/NewAppModal';
 import { AddNodeModal } from './components/modals/AddNodeModal';
@@ -68,6 +70,20 @@ function getHeaderTitle(pathname: string): string {
 
 function DashboardLayout() {
   const location = useLocation();
+  const pathname = location.pathname;
+
+  if (pathname === '/login' || pathname === '/setup') {
+    return (
+      <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans antialiased">
+        <Outlet />
+        <ToastContainer />
+      </div>
+    );
+  }
+
+  const currentUser = useAuthStore((state) => state.user);
+  const { clearAuth } = useAuthStore((state) => state.actions);
+
   const { data: nodesData } = useListNodes();
   const { data: appsData } = useListApplications();
   const { data: domainsData } = useListDomains();
@@ -90,7 +106,6 @@ function DashboardLayout() {
     setHistoryApp,
   } = useModalActions();
 
-  const pathname = location.pathname;
   const isAppDetailPage = pathname.startsWith('/apps/') && pathname !== '/apps';
   const headerTitle = getHeaderTitle(pathname);
 
@@ -285,8 +300,30 @@ function DashboardLayout() {
           </nav>
         </div>
 
+        {/* Current Operator Profile */}
+        {currentUser && (
+          <div className="p-2.5 rounded-xl border border-zinc-800/80 bg-zinc-900/60 flex items-center justify-between text-xs mt-auto mb-2">
+            <div className="overflow-hidden mr-2">
+              <div className="font-semibold text-zinc-200 truncate">{currentUser.name}</div>
+              <div className="text-[10px] text-zinc-500 truncate">{currentUser.email}</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                clearAuth();
+                window.location.href = '/login';
+              }}
+              title="Sign Out"
+              aria-label="Sign Out"
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-zinc-800/80 transition"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
         {/* Fleet Status Badge */}
-        <div className="p-3.5 rounded-xl border border-zinc-800 bg-zinc-900/60 text-xs space-y-2 mt-2">
+        <div className="p-3.5 rounded-xl border border-zinc-800 bg-zinc-900/60 text-xs space-y-2">
           <div className="flex items-center justify-between text-zinc-400">
             <span className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
