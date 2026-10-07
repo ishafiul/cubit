@@ -231,6 +231,13 @@ CREATE TABLE IF NOT EXISTS roles (
     updated_at TIMESTAMP NOT NULL
 );
 
+-- Built-in system roles seeding
+INSERT OR IGNORE INTO roles (id, name, description, is_system, permissions, created_at, updated_at)
+VALUES
+    ('admin', 'Admin', 'Root administrator with unrestricted permissions', 1, '["*"]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+    ('developer', 'Developer', 'Developer role with application, deployment, service, domain, and node inspection permissions', 1, '["apps:*","services:*","deployments:*","domains:*","nodes:read"]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+    ('viewer', 'Viewer', 'Read-only viewer with inspection access across platform resources', 1, '["*:read","apps:read","services:read","nodes:read","domains:read"]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,

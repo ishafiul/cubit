@@ -17,8 +17,59 @@ const (
 	CubitVersion = "1.3.0"
 
 	// Built-in system role IDs and names.
-	SystemRoleAdminID   = "admin"
-	SystemRoleAdminName = "Admin"
+	SystemRoleAdminID       = "admin"
+	SystemRoleAdminName     = "Admin"
+	SystemRoleDeveloperID   = "developer"
+	SystemRoleDeveloperName = "Developer"
+	SystemRoleViewerID      = "viewer"
+	SystemRoleViewerName    = "Viewer"
+
+	// Standard permissions catalog vocabulary.
+	PermissionSuperuser = "*"
+
+	// Applications
+	PermissionAppsWildcard = "apps:*"
+	PermissionAppsRead     = "apps:read"
+	PermissionAppsCreate   = "apps:create"
+	PermissionAppsUpdate   = "apps:update"
+	PermissionAppsDelete   = "apps:delete"
+	PermissionAppsDeploy   = "apps:deploy"
+
+	// Services
+	PermissionServicesWildcard  = "services:*"
+	PermissionServicesKV        = "services:kv:*"
+	PermissionServicesD1        = "services:d1:*"
+	PermissionServicesR2        = "services:r2:*"
+	PermissionServicesCron      = "services:cron:*"
+	PermissionServicesQueues    = "services:queues:*"
+	PermissionServicesWorkflows = "services:workflows:*"
+	PermissionServicesDO        = "services:do:*"
+
+	// Deployments
+	PermissionDeploymentsWildcard = "deployments:*"
+	PermissionDeploymentsRead     = "deployments:read"
+	PermissionDeploymentsRollback = "deployments:rollback"
+
+	// Domains
+	PermissionDomainsWildcard = "domains:*"
+	PermissionDomainsRead     = "domains:read"
+	PermissionDomainsWrite    = "domains:write"
+
+	// Nodes
+	PermissionNodesWildcard = "nodes:*"
+	PermissionNodesRead     = "nodes:read"
+	PermissionNodesWrite    = "nodes:write"
+
+	// Users, Roles, Tokens
+	PermissionUsersWildcard  = "users:*"
+	PermissionUsersRead      = "users:read"
+	PermissionUsersManage    = "users:manage"
+	PermissionRolesWildcard  = "roles:*"
+	PermissionRolesRead      = "roles:read"
+	PermissionRolesManage    = "roles:manage"
+	PermissionTokensWildcard = "tokens:*"
+	PermissionTokensRead     = "tokens:read"
+	PermissionTokensManage   = "tokens:manage"
 )
 
 var (
@@ -122,4 +173,85 @@ func CheckPassword(password, hash string) bool {
 	}
 	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
 	return err == nil
+}
+
+// MatchPermission checks if a granted permission pattern satisfies a required permission.
+//
+// Evaluation rules:
+//   - "*" satisfies any required permission.
+//   - An exact match (e.g. "apps:deploy" == "apps:deploy") satisfies the requirement.
+//   - A prefix wildcard ending with ":*" (e.g. "apps:*" or "services:*") satisfies any permission
+//     sharing the same prefix (e.g. "apps:read", "services:kv:read").
+//   - A suffix wildcard starting with "*:" (e.g. "*:read") satisfies any permission
+//     sharing the same suffix (e.g. "apps:read", "nodes:read", "services:kv:read").
+func MatchPermission(pattern, required string) bool {
+	if pattern == "" || required == "" {
+		return false
+	}
+	if pattern == "*" {
+		return true
+	}
+	if pattern == required {
+		return true
+	}
+	if strings.HasSuffix(pattern, ":*") {
+		prefix := pattern[:len(pattern)-2]
+		if required == prefix || strings.HasPrefix(required, prefix+":") {
+			return true
+		}
+	}
+	if strings.HasPrefix(pattern, "*:") {
+		suffix := pattern[2:]
+		if required == suffix || strings.HasSuffix(required, ":"+suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+// HasPermission checks whether any of the user's granted permissions satisfies the required permission.
+func HasPermission(userPerms []string, required string) bool {
+	if required == "" {
+		return false
+	}
+	for _, perm := range userPerms {
+		if MatchPermission(perm, required) {
+			return true
+		}
+	}
+	return false
+}
+
+// DefaultSystemRoles returns the initial pre-seeded system roles (Admin, Developer, Viewer).
+func DefaultSystemRoles() []*Role {
+	now := time.Now().UTC()
+	return []*Role{
+		{
+			ID:          SystemRoleAdminID,
+			Name:        SystemRoleAdminName,
+			Description: "Root administrator with unrestricted permissions",
+			IsSystem:    true,
+			Permissions: []string{"*"},
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		},
+		{
+			ID:          SystemRoleDeveloperID,
+			Name:        SystemRoleDeveloperName,
+			Description: "Developer role with application, deployment, service, domain, and node inspection permissions",
+			IsSystem:    true,
+			Permissions: []string{"apps:*", "services:*", "deployments:*", "domains:*", "nodes:read"},
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		},
+		{
+			ID:          SystemRoleViewerID,
+			Name:        SystemRoleViewerName,
+			Description: "Read-only viewer with inspection access across platform resources",
+			IsSystem:    true,
+			Permissions: []string{"*:read", "apps:read", "services:read", "nodes:read", "domains:read"},
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		},
+	}
 }

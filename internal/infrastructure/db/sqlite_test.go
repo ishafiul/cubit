@@ -63,3 +63,36 @@ func TestOpenSQLite_AuthSchema(t *testing.T) {
 		})
 	})
 }
+
+func TestOpenSQLite_SystemRolesSeeded(t *testing.T) {
+	t.Run("Given a freshly initialized SQLite database", func(t *testing.T) {
+		tempDir := t.TempDir()
+		dbPath := filepath.Join(tempDir, "test_roles_seed.db")
+		dsn := "file:" + dbPath + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)"
+
+		t.Run("When OpenSQLite completes then system roles admin, developer, and viewer are pre-seeded", func(t *testing.T) {
+			database, err := db.OpenSQLite(dsn)
+			if err != nil {
+				t.Fatalf("OpenSQLite failed: %v", err)
+			}
+			defer database.Close()
+
+			expectedRoles := []string{"admin", "developer", "viewer"}
+			for _, roleID := range expectedRoles {
+				var isSystem int
+				var name, perms string
+				err := database.QueryRowContext(context.Background(),
+					"SELECT name, is_system, permissions FROM roles WHERE id = ?", roleID).Scan(&name, &isSystem, &perms)
+				if err != nil {
+					t.Fatalf("expected pre-seeded role %s to exist: %v", roleID, err)
+				}
+				if isSystem != 1 {
+					t.Errorf("expected role %s to have is_system = 1, got %d", roleID, isSystem)
+				}
+				if perms == "" || perms == "[]" {
+					t.Errorf("expected role %s to have non-empty permissions, got %s", roleID, perms)
+				}
+			}
+		})
+	})
+}
