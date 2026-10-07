@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -20,6 +21,7 @@ var (
 	ErrInvalidRefreshToken = errors.New("invalid or expired refresh token")
 	ErrTokenRevoked        = errors.New("refresh token has been revoked")
 	ErrUserInactive        = errors.New("user account is inactive")
+	ErrInvalidCredentials  = errors.New("invalid email or password")
 )
 
 // TokenPair encapsulates the dual token response returned upon authentication or rotation.
@@ -31,6 +33,9 @@ type TokenPair struct {
 
 // Service defines business logic operations for the authentication & session engine.
 type Service interface {
+	Login(ctx context.Context, email, password string) (*TokenPair, *domain.User, error)
+	Refresh(ctx context.Context, refreshTokenPlain string) (*TokenPair, *domain.User, error)
+	Logout(ctx context.Context, refreshTokenPlain string) error
 	IssueTokenPair(ctx context.Context, user *domain.User) (*TokenPair, error)
 	RotateRefreshToken(ctx context.Context, refreshTokenPlain string) (*TokenPair, *domain.User, error)
 	RevokeToken(ctx context.Context, refreshTokenPlain string) error
@@ -170,4 +175,45 @@ func (s *authService) RevokeToken(ctx context.Context, refreshTokenPlain string)
 // ValidateAccessToken validates the HMAC-SHA256 signature and expiration of an access token.
 func (s *authService) ValidateAccessToken(tokenStr string) (*domain.JWTClaims, error) {
 	return domain.ValidateJWT(tokenStr, s.jwtSecret)
+}
+
+// Login verifies user credentials and issues an active token pair.
+func (s *authService) Login(ctx context.Context, email, password string) (*TokenPair, *domain.User, error) {
+	cleanEmail := strings.ToLower(strings.TrimSpace(email))
+	if cleanEmail == "" || password == "" {
+		return nil, nil, ErrInvalidCredentials
+	}
+
+	user, err := s.repo.GetUserByEmail(ctx, cleanEmail)
+	if err != nil {
+		if errors.Is(err, ErrUserNotFound) {
+			return nil, nil, ErrInvalidCredentials
+		}
+		return nil, nil, fmt.Errorf("failed to query user for login: %w", err)
+	}
+
+	if !user.IsActive {
+		return nil, nil, ErrUserInactive
+	}
+
+	if !domain.CheckPassword(password, user.PasswordHash) {
+		return nil, nil, ErrInvalidCredentials
+	}
+
+	pair, err := s.IssueTokenPair(ctx, user)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to issue tokens: %w", err)
+	}
+
+	return pair, user, nil
+}
+
+// Refresh rotates the refresh token and returns a fresh token pair.
+func (s *authService) Refresh(ctx context.Context, refreshTokenPlain string) (*TokenPair, *domain.User, error) {
+	return s.RotateRefreshToken(ctx, refreshTokenPlain)
+}
+
+// Logout revokes the provided refresh token session.
+func (s *authService) Logout(ctx context.Context, refreshTokenPlain string) error {
+	return s.RevokeToken(ctx, refreshTokenPlain)
 }
