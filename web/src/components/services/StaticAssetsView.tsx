@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, RefreshCw, AlertCircle, FileCode, ExternalLink } from 'lucide-react';
+import { getSubdomainUrl } from '../../shared/utils/subdomain';
 
 interface StaticSite {
   id: string;
@@ -149,12 +150,12 @@ export function StaticAssetsView() {
                   <div className="flex items-center justify-between p-2.5 rounded-xl bg-zinc-950/60 border border-zinc-800/60">
                     <span className="text-zinc-500">Live URL:</span>
                     <a
-                      href={`http://${s.subdomain}.localhost:8000`}
+                      href={getSubdomainUrl(s.subdomain)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="font-mono text-emerald-400 hover:underline flex items-center gap-1.5"
                     >
-                      <span>http://{s.subdomain}.localhost:8000</span>
+                      <span>{getSubdomainUrl(s.subdomain)}</span>
                       <ExternalLink className="w-3 h-3" />
                     </a>
                   </div>
@@ -210,7 +211,7 @@ export function StaticAssetsView() {
                   onChange={(e) => setSubdomain(e.target.value)}
                   className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 font-mono text-xs focus:outline-none focus:border-emerald-500"
                 />
-                <p className="text-[11px] text-zinc-500 mt-1">Accessible at: <span className="text-emerald-400 font-mono">{subdomain || 'name'}.localhost:8000</span></p>
+                <p className="text-[11px] text-zinc-500 mt-1">Accessible at: <span className="text-emerald-400 font-mono">{getSubdomainUrl(subdomain || 'name')}</span></p>
               </div>
               <div className="flex justify-end gap-3 pt-2">
                 <button

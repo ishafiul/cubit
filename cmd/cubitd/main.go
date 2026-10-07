@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -30,7 +31,13 @@ import (
 )
 
 func main() {
-	port := flag.Int("port", 8000, "Port to listen on")
+	defaultPort := 9400
+	if envPort := os.Getenv("CUBIT_PORT"); envPort != "" {
+		if p, err := strconv.Atoi(envPort); err == nil {
+			defaultPort = p
+		}
+	}
+	port := flag.Int("port", defaultPort, "Port to listen on")
 	dbPath := flag.String("db", "cubit.db", "SQLite database path")
 	traefikOut := flag.String("traefik-config", "/etc/traefik/dynamic/cubit.yaml", "Traefik dynamic configuration output path")
 	storageDir := flag.String("storage-dir", ".data/storage", "Storage directory for local S3 / Garage")
@@ -104,6 +111,7 @@ func main() {
 	}
 	nodeService := nodeModule.NewService(nodeRepo, dockerSupervisor, routeSyncer, fmt.Sprintf("s3://%s", *bucketName))
 	appService := appModule.NewService(appRepo, storageAdapter, routeSyncer, *bucketName)
+	appService.SetPort(*port)
 	depService := depModule.NewService(depRepo, appService, storageAdapter, routeSyncer, *bucketName)
 	depService.WithFleetReloader(depModule.NewCelldFleetReloader(nodeRepo, nil))
 	domainService := domModule.NewService(domRepo, appRepo, routeSyncer)
@@ -116,6 +124,7 @@ func main() {
 	authHandler := authModule.NewHandler(authService)
 	nodeHandler := nodeModule.NewHandler(nodeService)
 	appHandler := appModule.NewHandler(appService)
+	appHandler.SetPort(*port)
 	depHandler := depModule.NewHandler(depService)
 	domHandler := domModule.NewHandler(domainService)
 	runtimeHandler := runtimeModule.NewHandler(runtimeService)

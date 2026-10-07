@@ -22,6 +22,7 @@ import {
   useExpandedLogId,
   useApplicationActions,
 } from '../../stores/applicationStore';
+import { getSubdomainUrl } from '../../../../shared/utils/subdomain';
 
 export interface CfTelemetry {
   country?: string;
@@ -83,7 +84,7 @@ export function LiveTailView({ app, onTestApp }: LiveTailViewProps) {
   const [activeLogDetailTab, setActiveLogDetailTab] = useState<'headers' | 'payload' | 'logs' | 'cf' | 'json'>('headers');
   const [copiedLogSection, setCopiedLogSection] = useState<string | null>(null);
 
-  const testUrl = app.testUrl || `http://${app.subdomain || app.name}.localhost:8000`;
+  const testUrl = getSubdomainUrl(app.subdomain || app.name, app.testUrl);
 
   const handleCopyLogSection = (text: string, sectionKey: string) => {
     navigator.clipboard.writeText(text);

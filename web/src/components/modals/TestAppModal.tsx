@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Send, RefreshCw, Copy, Check, X } from 'lucide-react';
 import type { Application } from '../../api/model';
 import { useTestApplication } from '../../api/generated/applications/applications';
+import { getSubdomainUrl } from '../../shared/utils/subdomain';
 
 export interface TestAppModalProps {
   app: Application;
@@ -23,8 +24,11 @@ export function TestAppModal({ app, onClose }: TestAppModalProps) {
 
   const testAppMutation = useTestApplication();
   const subdomain = app.subdomain || app.name;
-  const testUrl = app.testUrl || `http://${subdomain}.localhost:8000`;
-  const curlCommand = `curl -i -X ${method} -H "Host: ${subdomain}.localhost:8000" http://localhost:8000${path}${
+  const testUrl = getSubdomainUrl(subdomain, app.testUrl);
+  const currentHost = typeof window !== 'undefined' && window.location?.host ? window.location.host : 'localhost:8000';
+  const currentOrigin = typeof window !== 'undefined' && window.location?.origin ? window.location.origin : 'http://localhost:8000';
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  const curlCommand = `curl -i -X ${method} -H "Host: ${subdomain}.${currentHost}" ${currentOrigin}${normalizedPath}${
     method !== 'GET' && body ? ` -d '${body}'` : ''
   }`;
 

@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -14,11 +16,19 @@ import (
 // Handler handles HTTP requests for applications using Gin.
 type Handler struct {
 	service Service
+	port    int
 }
 
 // NewHandler creates a new Application Handler.
 func NewHandler(s Service) *Handler {
-	return &Handler{service: s}
+	return &Handler{service: s, port: 8000}
+}
+
+// SetPort configures the default listen port for test URL generation.
+func (h *Handler) SetPort(port int) {
+	if port > 0 {
+		h.port = port
+	}
 }
 
 type envVarReq struct {
@@ -110,6 +120,10 @@ type applicationResponse struct {
 }
 
 func toResponse(app *domain.Application) applicationResponse {
+	return (&Handler{port: 8000}).toResponse(nil, app)
+}
+
+func (h *Handler) toResponse(c *gin.Context, app *domain.Application) applicationResponse {
 	var gitRepo *string
 	if app.GitRepo != "" {
 		gitRepo = &app.GitRepo
@@ -154,12 +168,54 @@ func toResponse(app *domain.Application) applicationResponse {
 		bindings = []domain.ResourceBinding{}
 	}
 
+	basePort := 8000
+	if h != nil && h.port > 0 {
+		basePort = h.port
+	}
+	hostName := "localhost"
+
+	if c != nil && c.Request != nil {
+		reqHost := c.Request.Host
+		if xfh := c.GetHeader("X-Forwarded-Host"); xfh != "" {
+			reqHost = xfh
+		}
+
+		if host, portStr, err := net.SplitHostPort(reqHost); err == nil {
+			if p, err := strconv.Atoi(portStr); err == nil && p > 0 {
+				basePort = p
+			}
+			hostName = host
+		} else if reqHost != "" {
+			hostName = reqHost
+			if c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https" {
+				basePort = 443
+			} else {
+				basePort = 80
+			}
+		}
+	}
+
+	var testURL string
+	if hostName == "localhost" || strings.HasSuffix(hostName, ".localhost") || hostName == "127.0.0.1" {
+		if basePort == 80 || basePort == 443 {
+			testURL = fmt.Sprintf("http://%s.localhost", subdomain)
+		} else {
+			testURL = fmt.Sprintf("http://%s.localhost:%d", subdomain, basePort)
+		}
+	} else {
+		if basePort == 80 || basePort == 443 {
+			testURL = fmt.Sprintf("http://%s.%s", subdomain, hostName)
+		} else {
+			testURL = fmt.Sprintf("http://%s.%s:%d", subdomain, hostName, basePort)
+		}
+	}
+
 	return applicationResponse{
 		ID:                 app.ID,
 		Name:               app.Name,
 		SourceType:         string(app.SourceType),
 		Subdomain:          subdomain,
-		TestURL:            app.DefaultTestURL(8000),
+		TestURL:            testURL,
 		GitRepo:            gitRepo,
 		Branch:             app.Branch,
 		RootDir:            app.RootDir,
@@ -188,7 +244,7 @@ func (h *Handler) List(c *gin.Context) {
 
 	result := make([]applicationResponse, 0, len(apps))
 	for _, app := range apps {
-		result = append(result, toResponse(app))
+		result = append(result, h.toResponse(c, app))
 	}
 	c.JSON(http.StatusOK, result)
 }
@@ -263,7 +319,7 @@ func (h *Handler) Create(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, toResponse(app))
+	c.JSON(http.StatusCreated, h.toResponse(c, app))
 }
 
 // GetByID retrieves a single application.
@@ -274,7 +330,7 @@ func (h *Handler) GetByID(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, toResponse(app))
+	c.JSON(http.StatusOK, h.toResponse(c, app))
 }
 
 // Update updates an application configuration.
@@ -348,7 +404,7 @@ func (h *Handler) Update(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, toResponse(app))
+	c.JSON(http.StatusOK, h.toResponse(c, app))
 }
 
 // GetMetrics returns real-time execution telemetry for an application.
@@ -511,7 +567,7 @@ func (h *Handler) ImportWranglerConfig(c *gin.Context) {
 		ImportedBindingsCount: summary.ImportedBindingsCount,
 		CronsCount:            summary.CronsCount,
 		DetectedFormat:        summary.DetectedFormat,
-		Application:           toResponse(app),
+		Application:           h.toResponse(c, app),
 	})
 }
 

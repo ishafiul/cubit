@@ -9,10 +9,12 @@ import (
 	"fmt"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -216,6 +218,7 @@ type ApplicationService struct {
 	routeSyncer     RouteSyncer
 	fleetBucket     string
 	controlPlaneURL string
+	port            int
 	registrarMu     sync.RWMutex
 	domainRegistrar DomainRouteRegistrar
 
@@ -234,8 +237,27 @@ func NewService(repo Repository, storage StorageDownloader, routeSyncer RouteSyn
 		routeSyncer:     routeSyncer,
 		fleetBucket:     fleetBucket,
 		controlPlaneURL: "http://localhost:8000",
+		port:            8000,
 		metrics:         make(map[string]*appMetricsTracker),
 		subscribers:     make(map[string]map[chan domain.RequestLogEvent]struct{}),
+	}
+}
+
+// SetPort configures the listen port and updates the default control plane URL accordingly.
+func (s *ApplicationService) SetPort(port int) {
+	if port > 0 {
+		s.port = port
+		s.controlPlaneURL = fmt.Sprintf("http://localhost:%d", port)
+	}
+}
+
+// SetControlPlaneURL sets the control plane base URL.
+func (s *ApplicationService) SetControlPlaneURL(urlStr string) {
+	s.controlPlaneURL = urlStr
+	if u, err := url.Parse(urlStr); err == nil && u.Port() != "" {
+		if p, err := strconv.Atoi(u.Port()); err == nil && p > 0 {
+			s.port = p
+		}
 	}
 }
 
@@ -250,13 +272,6 @@ func (s *ApplicationService) getDomainRegistrar() DomainRouteRegistrar {
 	s.registrarMu.RLock()
 	defer s.registrarMu.RUnlock()
 	return s.domainRegistrar
-}
-
-// SetControlPlaneURL sets the loopback base URL for in-isolate resource binding calls.
-func (s *ApplicationService) SetControlPlaneURL(url string) {
-	if url != "" {
-		s.controlPlaneURL = url
-	}
 }
 
 // Create validates and saves a new application.
@@ -549,7 +564,15 @@ func (s *ApplicationService) Invoke(ctx context.Context, appID string, method, p
 
 	host := headers["Host"]
 	if host == "" {
-		host = fmt.Sprintf("%s.localhost:8000", app.Subdomain)
+		port := s.port
+		if port <= 0 {
+			port = 8000
+		}
+		if port == 80 || port == 443 {
+			host = fmt.Sprintf("%s.localhost", app.Subdomain)
+		} else {
+			host = fmt.Sprintf("%s.localhost:%d", app.Subdomain, port)
+		}
 	}
 	urlStr := fmt.Sprintf("http://%s%s", host, path)
 
@@ -1140,7 +1163,11 @@ function createServiceBinding(targetSubdomain, apiBase) {
                 }
             }
             if (!url.startsWith("/")) url = "/" + url;
-            reqHeaders["Host"] = ` + "`" + `${targetSubdomain}.localhost:8000` + "`" + `;
+            var apiPort = "";
+            try {
+                apiPort = new URL(apiBase).port;
+            } catch (_) {}
+            reqHeaders["Host"] = ` + "`" + `${targetSubdomain}.localhost${apiPort ? ':' + apiPort : ''}` + "`" + `;
             return fetch(` + "`" + `${apiBase}${url}` + "`" + `, {
                 method: reqMethod,
                 headers: reqHeaders,

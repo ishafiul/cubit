@@ -79,6 +79,28 @@ func TestApplicationHandler(t *testing.T) {
 			})
 		})
 
+		t.Run("When listing applications with a dynamic port in request Host header", func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(http.MethodGet, "/api/v1/applications", nil)
+			req.Host = "localhost:9400"
+			router.ServeHTTP(w, req)
+
+			t.Run("Then testUrl dynamically uses port 9400", func(t *testing.T) {
+				if w.Code != http.StatusOK {
+					t.Fatalf("expected status 200, got %d", w.Code)
+				}
+				var list []map[string]interface{}
+				_ = json.Unmarshal(w.Body.Bytes(), &list)
+				if len(list) != 1 {
+					t.Fatalf("expected 1 application, got %d", len(list))
+				}
+				expectedURL := "http://api-worker.localhost:9400"
+				if list[0]["testUrl"] != expectedURL {
+					t.Fatalf("expected testUrl %s, got %v", expectedURL, list[0]["testUrl"])
+				}
+			})
+		})
+
 		t.Run("When retrieving a non-existent application via GET /api/v1/applications/:id", func(t *testing.T) {
 			w := httptest.NewRecorder()
 			req, _ := http.NewRequest(http.MethodGet, "/api/v1/applications/non-existent-id", nil)

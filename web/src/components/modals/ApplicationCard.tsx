@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import type { Application } from '../../api/model';
 import { useListDeployments } from '../../api/generated/deployments/deployments';
+import { getSubdomainUrl } from '../../shared/utils/subdomain';
 
 export interface ApplicationCardProps {
   app: Application;
@@ -44,7 +45,7 @@ export function ApplicationCard({
   const activeDep = deployments.find(d => d.id === app.activeDeploymentId) || (deployments.length > 0 ? deployments[0] : null);
   const buildVersion = activeDep?.buildVersion;
   const subdomain = app.subdomain || app.name;
-  const testUrl = app.testUrl || `http://${subdomain}.localhost:8000`;
+  const testUrl = getSubdomainUrl(subdomain, app.testUrl);
   const [copied, setCopied] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
