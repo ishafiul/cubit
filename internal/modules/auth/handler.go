@@ -2,10 +2,13 @@ package auth
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/ishaf/cubit/internal/core/middleware"
+	"github.com/ishaf/cubit/internal/domain"
 )
 
 // Handler handles HTTP requests for authentication and session management.
@@ -295,4 +298,111 @@ func (h *Handler) DeleteRole(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"status": "deleted"})
 }
+
+func getCallerIdentity(c *gin.Context) (userID string, isAdmin bool) {
+	if uid, exists := c.Get(middleware.ContextKeyUserID); exists {
+		if s, ok := uid.(string); ok {
+			userID = s
+		}
+	}
+	if userID == "" {
+		userID = c.GetHeader("X-User-ID")
+	}
+
+	if roleID, exists := c.Get(middleware.ContextKeyRoleID); exists {
+		if r, ok := roleID.(string); ok && r == domain.SystemRoleAdminID {
+			isAdmin = true
+		}
+	}
+	if permsVal, exists := c.Get(middleware.ContextKeyPermissions); exists {
+		if perms, ok := permsVal.([]string); ok && domain.HasPermission(perms, "*") {
+			isAdmin = true
+		}
+	}
+	return userID, isAdmin
+}
+
+type createTokenRequest struct {
+	Name          string `json:"name" binding:"required"`
+	RoleID        string `json:"roleId"`
+	ExpiresInDays int    `json:"expiresInDays"`
+	UserID        string `json:"userId"`
+}
+
+// ListTokens returns active personal access tokens.
+// GET /api/v1/tokens
+func (h *Handler) ListTokens(c *gin.Context) {
+	userID, isAdmin := getCallerIdentity(c)
+	tokens, err := h.service.ListAPITokens(c.Request.Context(), userID, isAdmin)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list tokens"})
+		return
+	}
+	c.JSON(http.StatusOK, tokens)
+}
+
+// CreateToken generates a new personal access token.
+// POST /api/v1/tokens
+func (h *Handler) CreateToken(c *gin.Context) {
+	var req createTokenRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: token name is required"})
+		return
+	}
+
+	cleanName := strings.TrimSpace(req.Name)
+	if cleanName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "token name cannot be empty"})
+		return
+	}
+
+	callerID, isAdmin := getCallerIdentity(c)
+	targetUserID := callerID
+	if isAdmin && req.UserID != "" {
+		targetUserID = req.UserID
+	}
+	if targetUserID == "" {
+		targetUserID = req.UserID
+	}
+	if targetUserID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "caller user identity required"})
+		return
+	}
+
+	resp, err := h.service.CreateAPIToken(c.Request.Context(), targetUserID, cleanName, req.RoleID, req.ExpiresInDays)
+	if err != nil {
+		if errors.Is(err, ErrInvalidTokenName) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "token name cannot be empty"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to create token: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusCreated, resp)
+}
+
+// DeleteToken revokes a personal access token.
+// DELETE /api/v1/tokens/:id
+func (h *Handler) DeleteToken(c *gin.Context) {
+	id := c.Param("id")
+	callerID, isAdmin := getCallerIdentity(c)
+
+	err := h.service.DeleteAPIToken(c.Request.Context(), id, callerID, isAdmin)
+	if err != nil {
+		if errors.Is(err, ErrAPITokenNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "api token not found"})
+			return
+		}
+		if errors.Is(err, ErrUnauthorizedToken) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete token"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "deleted"})
+}
+
 

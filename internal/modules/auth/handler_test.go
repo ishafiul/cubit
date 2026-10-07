@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -578,4 +579,108 @@ func TestAuthHandler_RolesAndPermissions(t *testing.T) {
 		})
 	})
 }
+
+func TestAuthHandler_APITokens(t *testing.T) {
+	ctx := context.Background()
+	router, _, repo := setupTestHandler(t)
+
+	// Create user
+	user, err := domain.NewUser("usr-tok-test", "Token Tester", "tok@cubit.local", "hash", domain.SystemRoleDeveloperID)
+	if err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+	_ = repo.CreateUser(ctx, user)
+
+	t.Run("Given token management endpoints", func(t *testing.T) {
+		var createdTokenID string
+		var plainSecret string
+
+		t.Run("When POST /api/v1/tokens creates a new token then it returns 201 Created with secret", func(t *testing.T) {
+			body := map[string]any{
+				"name":          "Automation Pipeline",
+				"expiresInDays": 14,
+			}
+			bodyBytes, _ := json.Marshal(body)
+
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(http.MethodPost, "/api/v1/tokens", bytes.NewReader(bodyBytes))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-User-ID", user.ID)
+			router.ServeHTTP(w, req)
+
+			if w.Code != http.StatusCreated {
+				t.Fatalf("expected 201 Created, got %d: %s", w.Code, w.Body.String())
+			}
+
+			var resp struct {
+				Token    string          `json:"token"`
+				APIToken domain.APIToken `json:"apiToken"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("failed to decode response: %v", err)
+			}
+
+			if !strings.HasPrefix(resp.Token, "cbt_") {
+				t.Errorf("expected token to start with cbt_, got %s", resp.Token)
+			}
+			if resp.APIToken.ID == "" || resp.APIToken.Name != "Automation Pipeline" {
+				t.Errorf("unexpected api token payload: %+v", resp.APIToken)
+			}
+
+			createdTokenID = resp.APIToken.ID
+			plainSecret = resp.Token
+		})
+
+		t.Run("When GET /api/v1/tokens is called then it returns active tokens without leaking hash", func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(http.MethodGet, "/api/v1/tokens", nil)
+			req.Header.Set("X-User-ID", user.ID)
+			router.ServeHTTP(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200 OK, got %d: %s", w.Code, w.Body.String())
+			}
+
+			var tokens []map[string]any
+			if err := json.Unmarshal(w.Body.Bytes(), &tokens); err != nil {
+				t.Fatalf("failed to decode tokens: %v", err)
+			}
+
+			if len(tokens) != 1 {
+				t.Fatalf("expected 1 token, got %d", len(tokens))
+			}
+			if tokens[0]["name"] != "Automation Pipeline" {
+				t.Errorf("expected token name 'Automation Pipeline', got %v", tokens[0]["name"])
+			}
+			if _, hasHash := tokens[0]["token_hash"]; hasHash {
+				t.Error("token_hash must not be exposed in serialized JSON")
+			}
+		})
+
+		t.Run("When DELETE /api/v1/tokens/:id deletes the token then it is revoked", func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(http.MethodDelete, "/api/v1/tokens/"+createdTokenID, nil)
+			req.Header.Set("X-User-ID", user.ID)
+			router.ServeHTTP(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200 OK, got %d: %s", w.Code, w.Body.String())
+			}
+
+			// Verify empty tokens list
+			wList := httptest.NewRecorder()
+			reqList, _ := http.NewRequest(http.MethodGet, "/api/v1/tokens", nil)
+			reqList.Header.Set("X-User-ID", user.ID)
+			router.ServeHTTP(wList, reqList)
+
+			var tokens []domain.APIToken
+			_ = json.Unmarshal(wList.Body.Bytes(), &tokens)
+			if len(tokens) != 0 {
+				t.Errorf("expected 0 tokens after deletion, got %d", len(tokens))
+			}
+			_ = plainSecret
+		})
+	})
+}
+
 

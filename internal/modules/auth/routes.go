@@ -48,8 +48,33 @@ func (h *Handler) RegisterRoleRoutes(rg *gin.RouterGroup, rbacMW ...func(string)
 	}
 }
 
-// RegisterRoutes mounts all authentication and role endpoints under the provided Gin RouterGroup.
+// RegisterTokenRoutes mounts personal access token management endpoints with optional RBAC middlewares.
+func (h *Handler) RegisterTokenRoutes(rg *gin.RouterGroup, rbacMW ...func(string) gin.HandlerFunc) {
+	var readMW, manageMW gin.HandlerFunc
+	if len(rbacMW) > 0 && rbacMW[0] != nil {
+		readMW = rbacMW[0]("tokens:read")
+		manageMW = rbacMW[0]("tokens:manage")
+	}
+
+	tokens := rg.Group("/tokens")
+	if readMW != nil {
+		tokens.GET("", readMW, h.ListTokens)
+	} else {
+		tokens.GET("", h.ListTokens)
+	}
+
+	if manageMW != nil {
+		tokens.POST("", manageMW, h.CreateToken)
+		tokens.DELETE("/:id", manageMW, h.DeleteToken)
+	} else {
+		tokens.POST("", h.CreateToken)
+		tokens.DELETE("/:id", h.DeleteToken)
+	}
+}
+
+// RegisterRoutes mounts all authentication, role, and token endpoints under the provided Gin RouterGroup.
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	h.RegisterPublicRoutes(rg)
 	h.RegisterRoleRoutes(rg)
+	h.RegisterTokenRoutes(rg)
 }

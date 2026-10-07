@@ -2,6 +2,7 @@ package auth_test
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -202,4 +203,113 @@ func TestAuthRepository_Roles(t *testing.T) {
 		})
 	})
 }
+
+func TestAuthRepository_APITokens(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestDB(t)
+
+	// Pre-seed role & user
+	role := &domain.Role{
+		ID:          "role-deployer",
+		Name:        "Deployer",
+		Description: "Deployment role",
+		Permissions: []string{"apps:deploy"},
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	_ = repo.CreateRole(ctx, role)
+
+	user, _ := domain.NewUser("usr-ci", "CI Agent", "ci@cubit.local", "hash", role.ID)
+	_ = repo.CreateUser(ctx, user)
+
+	t.Run("Given a new API token", func(t *testing.T) {
+		plainToken, err := domain.GenerateSecureToken("cbt_")
+		if err != nil {
+			t.Fatalf("failed to generate token: %v", err)
+		}
+		tokenHash := domain.HashToken(plainToken)
+		now := time.Now().UTC()
+		expiresAt := now.Add(30 * 24 * time.Hour)
+
+		apiToken := &domain.APIToken{
+			ID:        "tok-1",
+			UserID:    user.ID,
+			Name:      "GitHub Actions Deployer",
+			TokenHash: tokenHash,
+			RoleID:    role.ID,
+			ExpiresAt: &expiresAt,
+			CreatedAt: now,
+		}
+
+		t.Run("When saving the API token then it can be retrieved by ID and by Hash", func(t *testing.T) {
+			err := repo.CreateAPIToken(ctx, apiToken)
+			if err != nil {
+				t.Fatalf("failed to create api token: %v", err)
+			}
+
+			byID, err := repo.GetAPITokenByID(ctx, "tok-1")
+			if err != nil {
+				t.Fatalf("failed to get api token by ID: %v", err)
+			}
+			if byID.Name != "GitHub Actions Deployer" || byID.RoleID != role.ID {
+				t.Errorf("token data mismatch: %+v", byID)
+			}
+
+			byHash, err := repo.GetAPITokenByHash(ctx, tokenHash)
+			if err != nil {
+				t.Fatalf("failed to get api token by hash: %v", err)
+			}
+			if byHash.ID != "tok-1" {
+				t.Errorf("expected token ID tok-1, got %s", byHash.ID)
+			}
+		})
+
+		t.Run("When listing tokens then it returns user tokens", func(t *testing.T) {
+			userTokens, err := repo.ListAPITokensByUser(ctx, user.ID)
+			if err != nil {
+				t.Fatalf("failed to list user tokens: %v", err)
+			}
+			if len(userTokens) != 1 {
+				t.Errorf("expected 1 token, got %d", len(userTokens))
+			}
+
+			allTokens, err := repo.ListAllAPITokens(ctx)
+			if err != nil {
+				t.Fatalf("failed to list all tokens: %v", err)
+			}
+			if len(allTokens) != 1 {
+				t.Errorf("expected 1 token, got %d", len(allTokens))
+			}
+		})
+
+		t.Run("When updating last_used_at then timestamp is updated", func(t *testing.T) {
+			usedAt := time.Now().UTC().Add(time.Hour)
+			err := repo.UpdateAPITokenLastUsed(ctx, "tok-1", usedAt)
+			if err != nil {
+				t.Fatalf("failed to update last used: %v", err)
+			}
+
+			got, err := repo.GetAPITokenByID(ctx, "tok-1")
+			if err != nil {
+				t.Fatalf("failed to get token: %v", err)
+			}
+			if got.LastUsedAt == nil {
+				t.Fatalf("expected non-nil last_used_at")
+			}
+		})
+
+		t.Run("When deleting token then it is removed", func(t *testing.T) {
+			err := repo.DeleteAPIToken(ctx, "tok-1")
+			if err != nil {
+				t.Fatalf("failed to delete token: %v", err)
+			}
+
+			_, err = repo.GetAPITokenByID(ctx, "tok-1")
+			if !errors.Is(err, authModule.ErrAPITokenNotFound) {
+				t.Fatalf("expected ErrAPITokenNotFound, got %v", err)
+			}
+		})
+	})
+}
+
 
