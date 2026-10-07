@@ -11,7 +11,7 @@ services:
     container_name: cubitd
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "${CUBIT_PORT:-9400}:8000"
     environment:
       - CUBIT_PORT=8000
       - CUBIT_DB_PATH=/var/lib/cubit/cubit.db
@@ -41,7 +41,7 @@ services:
     ports:
       - "80:80"
       - "443:443"
-      - "8081:8080" # Traefik Dashboard
+      - "${TRAEFIK_DASHBOARD_PORT:-9481}:8080" # Traefik Dashboard
     volumes:
       - ./traefik.yaml:/etc/traefik/traefik.yaml:ro
       - traefik_dynamic:/etc/traefik/dynamic
@@ -77,11 +77,27 @@ services:
     container_name: celld
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "${CELLD_PORT:-9480}:8080"
+    command:
+      - "--bucket"
+      - "s3://cubit-fleet"
+      - "--endpoint"
+      - "http://garage:3900"
+      - "--region"
+      - "cubit-local"
+      - "--listen"
+      - "0.0.0.0:8080"
+      - "--internal-listen"
+      - "0.0.0.0:8081"
+      - "--advertise"
+      - "celld:8081"
     environment:
-      - CELLD_STORAGE_ENDPOINT=http://garage:3900
-      - CELLD_STORAGE_BUCKET=cubit-fleet
-      - CELLD_STORAGE_REGION=cubit-local
+      - S3_ENDPOINT=http://garage:3900
+      - CELLD_BUCKET=s3://cubit-fleet
+      - AWS_REGION=cubit-local
+      - AWS_ACCESS_KEY_ID=${GARAGE_ACCESS_KEY:-GKe68794adce2c6d38351d96ef}
+      - AWS_SECRET_ACCESS_KEY=${GARAGE_SECRET_KEY:-d52b4fcda143ed470b456cd1148b35d4ec57022928ba37af0818560b34c54a47}
+      - AWS_ALLOW_HTTP=true
       # celld v0.6.1 epoch retention & memory limit configurations:
       - CELLD_LTX_RETENTION_SECS=86400 # 24h retention before epoch GC
       - CELLD_MAX_ASSET_FILE_BYTES=26214400 # 25 MiB asset limit

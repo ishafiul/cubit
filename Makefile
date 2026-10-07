@@ -1,4 +1,6 @@
-.PHONY: all help dev dev-ui build build-web build-bin test test-go test-web infra-up infra-down infra-logs clean
+.PHONY: all help dev dev-docker dev-ui build build-web build-bin test test-go test-web infra-up infra-down infra-logs clean
+
+CUBIT_PORT ?= 9400
 
 # Default target
 all: help
@@ -30,15 +32,18 @@ build-bin: ## Compile cubitd Go binary into bin/cubitd
 
 build: build-web build-bin ## Build both web frontend and cubitd Go binary
 
-dev: infra-up ## Single command: start infra, build web assets (if needed), and run cubitd at :8000
+dev: infra-up ## Single command: start infra, build web assets (if needed), and run cubitd at :$(CUBIT_PORT)
 	@if [ ! -d "web/dist" ]; then \
 		echo "==> Building web frontend..."; \
 		$(MAKE) build-web; \
 	fi
-	@echo "==> Starting cubitd control plane at http://localhost:8000..."
-	go run cmd/cubitd/main.go
+	@echo "==> Starting cubitd control plane at http://localhost:$(CUBIT_PORT)..."
+	go run cmd/cubitd/main.go -port $(CUBIT_PORT)
 
-dev-ui: ## Run Vite dev server with Hot Module Replacement (HMR) at :5173
+dev-docker: ## Run the entire Cubit stack (cubitd, celld, traefik, garage) inside Docker
+	docker compose -f deploy/docker-compose.yml up --build
+
+dev-ui: ## Run Vite dev server with Hot Module Replacement (HMR) at :3000
 	cd web && npm run dev
 
 test-go: ## Run all Go unit and integration tests with race detector
