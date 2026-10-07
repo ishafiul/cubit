@@ -37,6 +37,8 @@ func main() {
 	bucketName := flag.String("bucket", "cubit-fleet", "Default fleet bucket name")
 	webDir := flag.String("web-dir", "", "Directory containing compiled frontend SPA assets (defaults to CUBIT_WEB_DIR or ./web/dist)")
 	jwtSecret := flag.String("jwt-secret", "", "HMAC-SHA256 signing secret for JWT access tokens (defaults to CUBIT_JWT_SECRET)")
+	adminEmail := flag.String("admin-email", "", "Initial admin email for headless auto-provisioning (defaults to CUBIT_ADMIN_EMAIL)")
+	adminPassword := flag.String("admin-password", "", "Initial admin password for headless auto-provisioning (defaults to CUBIT_ADMIN_PASSWORD)")
 	flag.Parse()
 
 	log.Printf("Starting Cubit Control Plane on port %d...", *port)
@@ -78,6 +80,28 @@ func main() {
 	}
 
 	authService := authModule.NewService(authRepo, actualSecret)
+
+	// 4a. Headless root administrator auto-provisioning
+	actualAdminEmail := *adminEmail
+	if actualAdminEmail == "" {
+		actualAdminEmail = os.Getenv("CUBIT_ADMIN_EMAIL")
+	}
+	actualAdminPassword := *adminPassword
+	if actualAdminPassword == "" {
+		actualAdminPassword = os.Getenv("CUBIT_ADMIN_PASSWORD")
+	}
+
+	if actualAdminEmail != "" && actualAdminPassword != "" {
+		adminUser, err := authService.AutoProvisionAdmin(context.Background(), actualAdminEmail, actualAdminPassword)
+		if err != nil {
+			log.Fatalf("Fatal: Headless admin auto-provisioning failed: %v", err)
+		}
+		if adminUser != nil {
+			log.Printf("Headless root administrator auto-provisioned: %s (ID: %s)", adminUser.Email, adminUser.ID)
+		} else {
+			log.Println("Cluster already initialized; skipped headless admin auto-provisioning.")
+		}
+	}
 	nodeService := nodeModule.NewService(nodeRepo, dockerSupervisor, routeSyncer, fmt.Sprintf("s3://%s", *bucketName))
 	appService := appModule.NewService(appRepo, storageAdapter, routeSyncer, *bucketName)
 	depService := depModule.NewService(depRepo, appService, storageAdapter, routeSyncer, *bucketName)

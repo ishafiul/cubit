@@ -45,6 +45,7 @@ type Service interface {
 	Logout(ctx context.Context, refreshTokenPlain string) error
 	GetStatus(ctx context.Context) (*StatusResponse, error)
 	Setup(ctx context.Context, name, email, password string) (*TokenPair, *domain.User, error)
+	AutoProvisionAdmin(ctx context.Context, email, password string) (*domain.User, error)
 	IssueTokenPair(ctx context.Context, user *domain.User) (*TokenPair, error)
 	RotateRefreshToken(ctx context.Context, refreshTokenPlain string) (*TokenPair, *domain.User, error)
 	RevokeToken(ctx context.Context, refreshTokenPlain string) error
@@ -298,4 +299,32 @@ func (s *authService) Setup(ctx context.Context, name, email, password string) (
 	}
 
 	return pair, user, nil
+}
+
+// AutoProvisionAdmin automatically creates the root administrator account if the cluster is uninitialized.
+// If either email or password is empty, or if the cluster already has users, it safely returns nil without error.
+func (s *authService) AutoProvisionAdmin(ctx context.Context, email, password string) (*domain.User, error) {
+	cleanEmail := strings.ToLower(strings.TrimSpace(email))
+	cleanPassword := strings.TrimSpace(password)
+	if cleanEmail == "" || cleanPassword == "" {
+		return nil, nil
+	}
+
+	count, err := s.repo.CountUsers(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count users for auto-provisioning: %w", err)
+	}
+	if count > 0 {
+		return nil, nil
+	}
+
+	_, user, err := s.Setup(ctx, "Administrator", cleanEmail, cleanPassword)
+	if err != nil {
+		if errors.Is(err, ErrSetupAlreadyCompleted) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to auto-provision root admin: %w", err)
+	}
+
+	return user, nil
 }

@@ -260,3 +260,95 @@ func TestAuthService_SetupAndLockout(t *testing.T) {
 	})
 }
 
+func TestAuthService_AutoProvisionAdmin(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("Given an empty database and valid headless credentials", func(t *testing.T) {
+		service, _ := setupTestService(t)
+
+		t.Run("When AutoProvisionAdmin is invoked then it creates root admin and enables login", func(t *testing.T) {
+			admin, err := service.AutoProvisionAdmin(ctx, "headless@cubit.local", "HeadlessAdminSecret123!")
+			if err != nil {
+				t.Fatalf("expected successful auto-provisioning, got %v", err)
+			}
+			if admin == nil || admin.Email != "headless@cubit.local" {
+				t.Fatalf("expected admin user, got %+v", admin)
+			}
+			if admin.RoleID != domain.SystemRoleAdminID {
+				t.Errorf("expected role ID %s, got %s", domain.SystemRoleAdminID, admin.RoleID)
+			}
+
+			// Verify status is now initialized
+			status, err := service.GetStatus(ctx)
+			if err != nil || !status.Initialized {
+				t.Fatalf("expected cluster to be initialized, got %v (status: %+v)", err, status)
+			}
+
+			// Verify user can log in with provisioned credentials
+			pair, loggedInUser, err := service.Login(ctx, "headless@cubit.local", "HeadlessAdminSecret123!")
+			if err != nil {
+				t.Fatalf("expected successful login with provisioned credentials, got %v", err)
+			}
+			if loggedInUser.ID != admin.ID {
+				t.Errorf("expected user ID %s, got %s", admin.ID, loggedInUser.ID)
+			}
+			if pair.AccessToken == "" {
+				t.Error("expected non-empty access token")
+			}
+		})
+	})
+
+	t.Run("Given a database with existing users", func(t *testing.T) {
+		service, repo := setupTestService(t)
+
+		// Seed existing role and user
+		role := &domain.Role{
+			ID:          "role-existing",
+			Name:        "ExistingRole",
+			IsSystem:    false,
+			Permissions: []string{"apps:read"},
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
+		}
+		_ = repo.CreateRole(ctx, role)
+		existingUser, _ := domain.NewUser("usr-orig", "Original User", "original@cubit.local", "hash", role.ID)
+		_ = repo.CreateUser(ctx, existingUser)
+
+		t.Run("When AutoProvisionAdmin is invoked then it safely returns nil without error or modifications", func(t *testing.T) {
+			user, err := service.AutoProvisionAdmin(ctx, "ignored@cubit.local", "IgnoredPass123!")
+			if err != nil {
+				t.Fatalf("expected no error when users already exist, got %v", err)
+			}
+			if user != nil {
+				t.Errorf("expected nil user returned when users already exist, got %+v", user)
+			}
+
+			count, _ := repo.CountUsers(ctx)
+			if count != 1 {
+				t.Errorf("expected user count to remain 1, got %d", count)
+			}
+		})
+	})
+
+	t.Run("Given empty or blank credentials", func(t *testing.T) {
+		service, _ := setupTestService(t)
+
+		t.Run("When email or password is empty then it safely returns nil without error", func(t *testing.T) {
+			user, err := service.AutoProvisionAdmin(ctx, "", "SomePass123!")
+			if err != nil || user != nil {
+				t.Fatalf("expected nil user and nil error for empty email, got %v, %v", user, err)
+			}
+
+			user, err = service.AutoProvisionAdmin(ctx, "admin@cubit.local", "")
+			if err != nil || user != nil {
+				t.Fatalf("expected nil user and nil error for empty password, got %v, %v", user, err)
+			}
+
+			user, err = service.AutoProvisionAdmin(ctx, "", "")
+			if err != nil || user != nil {
+				t.Fatalf("expected nil user and nil error for empty credentials, got %v, %v", user, err)
+			}
+		})
+	})
+}
+
