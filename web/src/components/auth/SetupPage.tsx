@@ -4,6 +4,7 @@ import { Shield, User, Mail, Lock, ArrowRight, AlertCircle, Loader2 } from 'luci
 import { customInstance } from '../../api/custom-instance';
 import { useAuthStore } from '../../shared/stores/useAuthStore';
 import { useToastActions } from '../../shared/stores/useToastStore';
+import { setCachedClusterStatus } from '../../shared/utils/clusterStatus';
 
 interface SetupResponse {
   accessToken: string;
@@ -87,15 +88,26 @@ export function SetupPage() {
         permissions: ['*'],
       });
 
+      // Crucial: Mark cluster as initialized so requireAuthGuard allows immediate access to /apps
+      setCachedClusterStatus({ initialized: true, version: '1.3.0' });
+
       addToast({
         title: 'Root administrator account created successfully',
         variant: 'success',
       });
 
       navigate({ to: '/apps' });
+      if (typeof window !== 'undefined' && window.location.pathname === '/setup') {
+        window.location.href = '/apps';
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to initialize cluster';
-      setError(msg);
+      if (msg.toLowerCase().includes('already initialized')) {
+        setCachedClusterStatus({ initialized: true, version: '1.3.0' });
+        setError('Cluster is already initialized. Please sign in with your administrator credentials.');
+      } else {
+        setError(msg);
+      }
     } finally {
       setIsSubmitting(false);
     }

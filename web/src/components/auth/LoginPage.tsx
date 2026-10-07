@@ -4,6 +4,7 @@ import { Layers, Lock, Mail, ArrowRight, AlertCircle, Loader2 } from 'lucide-rea
 import { customInstance } from '../../api/custom-instance';
 import { useAuthStore } from '../../shared/stores/useAuthStore';
 import { useToastActions } from '../../shared/stores/useToastStore';
+import { setCachedClusterStatus } from '../../shared/utils/clusterStatus';
 
 interface LoginResponse {
   accessToken: string;
@@ -73,6 +74,8 @@ export function LoginPage() {
         title: `Welcome back, ${resp.user.name}`,
         variant: 'success',
       });
+
+      setCachedClusterStatus({ initialized: true, version: '1.3.0' });
 
       navigate({ to: '/apps' });
     } catch (err) {

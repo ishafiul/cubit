@@ -27,37 +27,21 @@ import { GitHubSettingsView } from './components/views/GitHubSettingsView';
 import { AccessManagementView } from './components/views/AccessManagementView';
 import { LoginPage } from './components/auth/LoginPage';
 import { SetupPage } from './components/auth/SetupPage';
-import { customInstance } from './api/custom-instance';
-import { useAuthStore } from './shared/stores/useAuthStore';
 import type { DetailTab } from './components/ApplicationDetailPage';
+import { useAuthStore } from './shared/stores/useAuthStore';
+import {
+  type ClusterStatus,
+  setCachedClusterStatus,
+  fetchClusterStatus,
+  getClusterStatus,
+} from './shared/utils/clusterStatus';
 
-export interface ClusterStatus {
-  initialized: boolean;
-  version: string;
-}
-
-let cachedClusterStatus: ClusterStatus | null = null;
-
-export function setCachedClusterStatus(status: ClusterStatus | null) {
-  cachedClusterStatus = status;
-}
-
-export async function fetchClusterStatus(): Promise<ClusterStatus> {
-  try {
-    return await customInstance<ClusterStatus>({ url: '/auth/status' });
-  } catch {
-    return { initialized: true, version: '1.3.0' };
-  }
-}
-
-export async function getClusterStatus(): Promise<ClusterStatus> {
-  if (cachedClusterStatus !== null) {
-    return cachedClusterStatus;
-  }
-  const status = await fetchClusterStatus();
-  cachedClusterStatus = status;
-  return status;
-}
+export {
+  type ClusterStatus,
+  setCachedClusterStatus,
+  fetchClusterStatus,
+  getClusterStatus,
+};
 
 // Route guards
 export async function requireAuthGuard() {
