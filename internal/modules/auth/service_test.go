@@ -344,3 +344,108 @@ func TestAuthService_AutoProvisionAdmin(t *testing.T) {
 	})
 }
 
+func TestAuthService_RolesAndPermissions(t *testing.T) {
+	ctx := context.Background()
+	service, _ := setupTestService(t)
+
+	t.Run("Given permissions catalog query", func(t *testing.T) {
+		t.Run("When listing permissions then it returns all system permissions", func(t *testing.T) {
+			perms := service.ListPermissions()
+			if len(perms) == 0 {
+				t.Fatal("expected non-empty permissions list")
+			}
+			foundAdmin := false
+			for _, p := range perms {
+				if p == "*" {
+					foundAdmin = true
+					break
+				}
+			}
+			if !foundAdmin {
+				t.Error("expected '*' in permissions list")
+			}
+		})
+	})
+
+	t.Run("Given pre-seeded system roles", func(t *testing.T) {
+		t.Run("When listing roles then it includes Admin, Developer, Viewer", func(t *testing.T) {
+			roles, err := service.ListRoles(ctx)
+			if err != nil {
+				t.Fatalf("failed to list roles: %v", err)
+			}
+			if len(roles) < 3 {
+				t.Fatalf("expected at least 3 system roles, got %d", len(roles))
+			}
+
+			admin, err := service.GetRole(ctx, domain.SystemRoleAdminID)
+			if err != nil {
+				t.Fatalf("failed to get admin role: %v", err)
+			}
+			if !admin.IsSystem {
+				t.Errorf("admin role must have IsSystem = true")
+			}
+		})
+
+		t.Run("When attempting to update a system role then it rejects with ErrCannotModifySystemRole", func(t *testing.T) {
+			_, err := service.UpdateRole(ctx, domain.SystemRoleAdminID, "SuperAdmin", "Modified", []string{"*"})
+			if !errors.Is(err, authModule.ErrCannotModifySystemRole) {
+				t.Fatalf("expected ErrCannotModifySystemRole, got %v", err)
+			}
+		})
+
+		t.Run("When attempting to delete a system role then it rejects with ErrCannotDeleteSystemRole", func(t *testing.T) {
+			err := service.DeleteRole(ctx, domain.SystemRoleDeveloperID)
+			if !errors.Is(err, authModule.ErrCannotDeleteSystemRole) {
+				t.Fatalf("expected ErrCannotDeleteSystemRole, got %v", err)
+			}
+		})
+	})
+
+	t.Run("Given a custom role creation request", func(t *testing.T) {
+		t.Run("When name is empty then it returns ErrInvalidRoleName", func(t *testing.T) {
+			_, err := service.CreateRole(ctx, "   ", "Desc", []string{"apps:read"})
+			if !errors.Is(err, authModule.ErrInvalidRoleName) {
+				t.Fatalf("expected ErrInvalidRoleName, got %v", err)
+			}
+		})
+
+		t.Run("When creating a valid custom role then it succeeds with IsSystem = false", func(t *testing.T) {
+			role, err := service.CreateRole(ctx, "QA Tester", "Quality Assurance team", []string{"apps:read", "deployments:read"})
+			if err != nil {
+				t.Fatalf("expected no error creating role, got %v", err)
+			}
+			if role.ID == "" || role.Name != "QA Tester" || role.IsSystem {
+				t.Errorf("unexpected role fields: %+v", role)
+			}
+
+			// Duplicate name check
+			_, err = service.CreateRole(ctx, "QA Tester", "Duplicate", nil)
+			if !errors.Is(err, authModule.ErrRoleAlreadyExists) {
+				t.Fatalf("expected ErrRoleAlreadyExists, got %v", err)
+			}
+
+			// Update custom role
+			updated, err := service.UpdateRole(ctx, role.ID, "Lead QA", "Updated description", []string{"apps:read", "deployments:*"})
+			if err != nil {
+				t.Fatalf("failed to update custom role: %v", err)
+			}
+			if updated.Name != "Lead QA" || updated.Description != "Updated description" {
+				t.Errorf("unexpected updated role fields: %+v", updated)
+			}
+
+			// Delete custom role
+			err = service.DeleteRole(ctx, role.ID)
+			if err != nil {
+				t.Fatalf("failed to delete custom role: %v", err)
+			}
+
+			// Verify gone
+			_, err = service.GetRole(ctx, role.ID)
+			if !errors.Is(err, authModule.ErrRoleNotFound) {
+				t.Fatalf("expected ErrRoleNotFound, got %v", err)
+			}
+		})
+	})
+}
+
+

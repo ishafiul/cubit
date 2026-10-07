@@ -158,3 +158,141 @@ func (h *Handler) Setup(c *gin.Context) {
 		"user":         user,
 	})
 }
+
+type createRoleRequest struct {
+	Name        string   `json:"name" binding:"required"`
+	Description string   `json:"description"`
+	Permissions []string `json:"permissions"`
+}
+
+type updateRoleRequest struct {
+	Name        string   `json:"name" binding:"required"`
+	Description string   `json:"description"`
+	Permissions []string `json:"permissions"`
+}
+
+// Permissions returns the list of all platform permissions.
+// GET /api/v1/permissions
+func (h *Handler) Permissions(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"permissions": h.service.ListPermissions(),
+	})
+}
+
+// ListRoles returns all roles.
+// GET /api/v1/roles
+func (h *Handler) ListRoles(c *gin.Context) {
+	roles, err := h.service.ListRoles(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list roles"})
+		return
+	}
+	c.JSON(http.StatusOK, roles)
+}
+
+// GetRole returns a role by ID.
+// GET /api/v1/roles/:id
+func (h *Handler) GetRole(c *gin.Context) {
+	id := c.Param("id")
+	role, err := h.service.GetRole(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, ErrRoleNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "role not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get role"})
+		return
+	}
+	c.JSON(http.StatusOK, role)
+}
+
+// CreateRole creates a new custom role.
+// POST /api/v1/roles
+func (h *Handler) CreateRole(c *gin.Context) {
+	var req createRoleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: role name is required"})
+		return
+	}
+
+	cleanName := strings.TrimSpace(req.Name)
+	if cleanName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "role name cannot be empty"})
+		return
+	}
+
+	role, err := h.service.CreateRole(c.Request.Context(), cleanName, req.Description, req.Permissions)
+	if err != nil {
+		if errors.Is(err, ErrRoleAlreadyExists) {
+			c.JSON(http.StatusConflict, gin.H{"error": "role with this name already exists"})
+			return
+		}
+		if errors.Is(err, ErrInvalidRoleName) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "role name cannot be empty"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create role"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, role)
+}
+
+// UpdateRole updates an existing custom role.
+// PUT /api/v1/roles/:id
+func (h *Handler) UpdateRole(c *gin.Context) {
+	id := c.Param("id")
+	var req updateRoleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: role name is required"})
+		return
+	}
+
+	cleanName := strings.TrimSpace(req.Name)
+	if cleanName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "role name cannot be empty"})
+		return
+	}
+
+	role, err := h.service.UpdateRole(c.Request.Context(), id, cleanName, req.Description, req.Permissions)
+	if err != nil {
+		if errors.Is(err, ErrCannotModifySystemRole) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "cannot modify system roles"})
+			return
+		}
+		if errors.Is(err, ErrRoleNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "role not found"})
+			return
+		}
+		if errors.Is(err, ErrRoleAlreadyExists) {
+			c.JSON(http.StatusConflict, gin.H{"error": "role with this name already exists"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update role"})
+		return
+	}
+
+	c.JSON(http.StatusOK, role)
+}
+
+// DeleteRole removes an existing custom role.
+// DELETE /api/v1/roles/:id
+func (h *Handler) DeleteRole(c *gin.Context) {
+	id := c.Param("id")
+	err := h.service.DeleteRole(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, ErrCannotDeleteSystemRole) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "cannot delete system roles"})
+			return
+		}
+		if errors.Is(err, ErrRoleNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "role not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete role"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "deleted"})
+}
+

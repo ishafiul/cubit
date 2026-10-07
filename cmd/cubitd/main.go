@@ -136,16 +136,25 @@ func main() {
 	})
 
 	// 7. Mount Module Routes under /api/v1
-	api := r.Group("/api/v1")
+	// 7a. Public unauthenticated API endpoints
+	publicAPI := r.Group("/api/v1")
 	{
-		authHandler.RegisterRoutes(api)
-		nodeHandler.RegisterRoutes(api)
-		appHandler.RegisterRoutes(api)
-		depHandler.RegisterRoutes(api)
-		domHandler.RegisterRoutes(api)
-		runtimeHandler.RegisterRoutes(api)
-		servicesHandler.RegisterRoutes(api)
-		githubHandler.RegisterRoutes(api)
+		authHandler.RegisterPublicRoutes(publicAPI)
+		githubHandler.RegisterPublicRoutes(publicAPI)
+	}
+
+	// 7b. Protected API endpoints (requiring valid Bearer token & verified RBAC permissions)
+	protectedAPI := r.Group("/api/v1")
+	protectedAPI.Use(middleware.Authenticate(authService))
+	{
+		authHandler.RegisterRoleRoutes(protectedAPI, middleware.RequirePermission)
+		nodeHandler.RegisterRoutes(protectedAPI, middleware.RequirePermission)
+		appHandler.RegisterRoutes(protectedAPI, middleware.RequirePermission)
+		depHandler.RegisterRoutes(protectedAPI, middleware.RequirePermission)
+		domHandler.RegisterRoutes(protectedAPI, middleware.RequirePermission)
+		runtimeHandler.RegisterRoutes(protectedAPI, middleware.RequirePermission)
+		servicesHandler.RegisterRoutes(protectedAPI, middleware.RequirePermission)
+		githubHandler.RegisterRoutes(protectedAPI, middleware.RequirePermission)
 	}
 
 	// 8. Static SPA file server
