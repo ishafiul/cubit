@@ -37,18 +37,10 @@ func TestAuthService_TokenEngine(t *testing.T) {
 	ctx := context.Background()
 	service, repo := setupTestService(t)
 
-	// Seed role and user
-	role := &domain.Role{
-		ID:          "role-developer",
-		Name:        "Developer",
-		Description: "Developer role",
-		IsSystem:    true,
-		Permissions: []string{"apps:*", "services:*"},
-		CreatedAt:   time.Now().UTC(),
-		UpdatedAt:   time.Now().UTC(),
-	}
-	if err := repo.CreateRole(ctx, role); err != nil {
-		t.Fatalf("failed to seed role: %v", err)
+	// Retrieve pre-seeded developer role
+	role, err := repo.GetRoleByID(ctx, domain.SystemRoleDeveloperID)
+	if err != nil {
+		t.Fatalf("failed to retrieve pre-seeded developer role: %v", err)
 	}
 
 	user, err := domain.NewUser("usr-dev", "Alice Dev", "alice@cubit.local", "$2a$12$hash", role.ID)
@@ -80,8 +72,8 @@ func TestAuthService_TokenEngine(t *testing.T) {
 			if claims.UserID != user.ID || claims.Email != user.Email {
 				t.Errorf("claims mismatch: %+v", claims)
 			}
-			if len(claims.Permissions) != 2 || claims.Permissions[0] != "apps:*" {
-				t.Errorf("permissions mismatch: %v", claims.Permissions)
+			if len(claims.Permissions) != len(role.Permissions) || claims.Permissions[0] != role.Permissions[0] {
+				t.Errorf("permissions mismatch: %v (expected %v)", claims.Permissions, role.Permissions)
 			}
 		})
 	})

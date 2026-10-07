@@ -271,15 +271,10 @@ func TestAuthHandler_StatusProbe(t *testing.T) {
 
 	t.Run("Given a database with users", func(t *testing.T) {
 		ctx := context.Background()
-		role := &domain.Role{
-			ID:          "role-admin",
-			Name:        "Admin",
-			IsSystem:    true,
-			Permissions: []string{"*"},
-			CreatedAt:   time.Now().UTC(),
-			UpdatedAt:   time.Now().UTC(),
+		role, err := repo.GetRoleByID(ctx, domain.SystemRoleAdminID)
+		if err != nil {
+			t.Fatalf("failed to retrieve pre-seeded admin role: %v", err)
 		}
-		_ = repo.CreateRole(ctx, role)
 		user, _ := domain.NewUser("usr-1", "Admin", "admin@cubit.local", "hash", role.ID)
 		_ = repo.CreateUser(ctx, user)
 
