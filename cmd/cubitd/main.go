@@ -20,6 +20,7 @@ import (
 	"github.com/ishaf/cubit/internal/domain"
 	"github.com/ishaf/cubit/internal/infrastructure/db"
 	appModule "github.com/ishaf/cubit/internal/modules/application"
+	authModule "github.com/ishaf/cubit/internal/modules/auth"
 	depModule "github.com/ishaf/cubit/internal/modules/deployment"
 	domModule "github.com/ishaf/cubit/internal/modules/domain"
 	ghModule "github.com/ishaf/cubit/internal/modules/github"
@@ -35,6 +36,7 @@ func main() {
 	storageDir := flag.String("storage-dir", ".data/storage", "Storage directory for local S3 / Garage")
 	bucketName := flag.String("bucket", "cubit-fleet", "Default fleet bucket name")
 	webDir := flag.String("web-dir", "", "Directory containing compiled frontend SPA assets (defaults to CUBIT_WEB_DIR or ./web/dist)")
+	jwtSecret := flag.String("jwt-secret", "", "HMAC-SHA256 signing secret for JWT access tokens (defaults to CUBIT_JWT_SECRET)")
 	flag.Parse()
 
 	log.Printf("Starting Cubit Control Plane on port %d...", *port)
@@ -55,6 +57,7 @@ func main() {
 	domRepo := domModule.NewRepository(database)
 	servicesRepo := srvModule.NewRepository(database, filepath.Join(*storageDir, "d1"))
 	githubRepo := ghModule.NewRepository(database)
+	authRepo := authModule.NewRepository(database)
 
 	// 3. Initialize Outbound Infrastructure Adapters
 	proxyProvider := traefik.NewFileProvider(*traefikOut, "letsencrypt")
@@ -66,6 +69,15 @@ func main() {
 	dockerSupervisor := docker.NewCelldSupervisor("ghcr.io/denoland/celld")
 
 	// 4. Initialize Modular Domain Services
+	actualSecret := *jwtSecret
+	if actualSecret == "" {
+		actualSecret = os.Getenv("CUBIT_JWT_SECRET")
+	}
+	if actualSecret == "" {
+		actualSecret = "cubit-default-cluster-jwt-secret-replace-in-prod"
+	}
+
+	authService := authModule.NewService(authRepo, actualSecret)
 	nodeService := nodeModule.NewService(nodeRepo, dockerSupervisor, routeSyncer, fmt.Sprintf("s3://%s", *bucketName))
 	appService := appModule.NewService(appRepo, storageAdapter, routeSyncer, *bucketName)
 	depService := depModule.NewService(depRepo, appService, storageAdapter, routeSyncer, *bucketName)
@@ -77,6 +89,7 @@ func main() {
 	githubService := ghModule.NewService(githubRepo, appRepo, depService)
 
 	// 5. Initialize Modular HTTP Handlers
+	authHandler := authModule.NewHandler(authService)
 	nodeHandler := nodeModule.NewHandler(nodeService)
 	appHandler := appModule.NewHandler(appService)
 	depHandler := depModule.NewHandler(depService)
@@ -101,6 +114,7 @@ func main() {
 	// 7. Mount Module Routes under /api/v1
 	api := r.Group("/api/v1")
 	{
+		authHandler.RegisterRoutes(api)
 		nodeHandler.RegisterRoutes(api)
 		appHandler.RegisterRoutes(api)
 		depHandler.RegisterRoutes(api)
