@@ -222,6 +222,45 @@ func HasPermission(userPerms []string, required string) bool {
 	return false
 }
 
+// AllPermissions returns the comprehensive catalog of platform permissions.
+func AllPermissions() []string {
+	return []string{
+		PermissionSuperuser,
+		PermissionAppsWildcard,
+		PermissionAppsRead,
+		PermissionAppsCreate,
+		PermissionAppsUpdate,
+		PermissionAppsDelete,
+		PermissionAppsDeploy,
+		PermissionServicesWildcard,
+		PermissionServicesKV,
+		PermissionServicesD1,
+		PermissionServicesR2,
+		PermissionServicesCron,
+		PermissionServicesQueues,
+		PermissionServicesWorkflows,
+		PermissionServicesDO,
+		PermissionDeploymentsWildcard,
+		PermissionDeploymentsRead,
+		PermissionDeploymentsRollback,
+		PermissionDomainsWildcard,
+		PermissionDomainsRead,
+		PermissionDomainsWrite,
+		PermissionNodesWildcard,
+		PermissionNodesRead,
+		PermissionNodesWrite,
+		PermissionUsersWildcard,
+		PermissionUsersRead,
+		PermissionUsersManage,
+		PermissionRolesWildcard,
+		PermissionRolesRead,
+		PermissionRolesManage,
+		PermissionTokensWildcard,
+		PermissionTokensRead,
+		PermissionTokensManage,
+	}
+}
+
 // DefaultSystemRoles returns the initial pre-seeded system roles (Admin, Developer, Viewer).
 func DefaultSystemRoles() []*Role {
 	now := time.Now().UTC()

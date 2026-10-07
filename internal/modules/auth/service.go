@@ -23,6 +23,10 @@ var (
 	ErrUserInactive          = errors.New("user account is inactive")
 	ErrInvalidCredentials    = errors.New("invalid email or password")
 	ErrSetupAlreadyCompleted = errors.New("setup has already been completed")
+	ErrRoleAlreadyExists     = errors.New("role with this name already exists")
+	ErrCannotModifySystemRole = errors.New("cannot modify system roles")
+	ErrCannotDeleteSystemRole = errors.New("cannot delete system roles")
+	ErrInvalidRoleName       = errors.New("role name cannot be empty")
 )
 
 // StatusResponse contains the cluster initialization state and current release version.
@@ -50,6 +54,13 @@ type Service interface {
 	RotateRefreshToken(ctx context.Context, refreshTokenPlain string) (*TokenPair, *domain.User, error)
 	RevokeToken(ctx context.Context, refreshTokenPlain string) error
 	ValidateAccessToken(tokenStr string) (*domain.JWTClaims, error)
+
+	ListPermissions() []string
+	ListRoles(ctx context.Context) ([]*domain.Role, error)
+	GetRole(ctx context.Context, id string) (*domain.Role, error)
+	CreateRole(ctx context.Context, name, description string, permissions []string) (*domain.Role, error)
+	UpdateRole(ctx context.Context, id, name, description string, permissions []string) (*domain.Role, error)
+	DeleteRole(ctx context.Context, id string) error
 }
 
 type authService struct {
@@ -328,3 +339,124 @@ func (s *authService) AutoProvisionAdmin(ctx context.Context, email, password st
 
 	return user, nil
 }
+
+// ListPermissions returns the comprehensive catalog of platform permissions.
+func (s *authService) ListPermissions() []string {
+	return domain.AllPermissions()
+}
+
+// ListRoles retrieves all configured roles (both system and custom).
+func (s *authService) ListRoles(ctx context.Context) ([]*domain.Role, error) {
+	return s.repo.ListRoles(ctx)
+}
+
+// GetRole retrieves a single role by its unique identifier.
+func (s *authService) GetRole(ctx context.Context, id string) (*domain.Role, error) {
+	if strings.TrimSpace(id) == "" {
+		return nil, ErrRoleNotFound
+	}
+	return s.repo.GetRoleByID(ctx, strings.TrimSpace(id))
+}
+
+// CreateRole creates a new custom role.
+func (s *authService) CreateRole(ctx context.Context, name, description string, permissions []string) (*domain.Role, error) {
+	cleanName := strings.TrimSpace(name)
+	if cleanName == "" {
+		return nil, ErrInvalidRoleName
+	}
+
+	existing, err := s.repo.GetRoleByName(ctx, cleanName)
+	if err == nil && existing != nil {
+		return nil, ErrRoleAlreadyExists
+	}
+	if err != nil && !errors.Is(err, ErrRoleNotFound) {
+		return nil, fmt.Errorf("failed to check existing role: %w", err)
+	}
+
+	if permissions == nil {
+		permissions = []string{}
+	}
+
+	now := time.Now().UTC()
+	role := &domain.Role{
+		ID:          uuid.New().String(),
+		Name:        cleanName,
+		Description: strings.TrimSpace(description),
+		IsSystem:    false,
+		Permissions: permissions,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+
+	if err := s.repo.CreateRole(ctx, role); err != nil {
+		return nil, fmt.Errorf("failed to persist role: %w", err)
+	}
+
+	return role, nil
+}
+
+// UpdateRole updates a custom role. Built-in system roles cannot be modified.
+func (s *authService) UpdateRole(ctx context.Context, id, name, description string, permissions []string) (*domain.Role, error) {
+	cleanID := strings.TrimSpace(id)
+	cleanName := strings.TrimSpace(name)
+	if cleanID == "" {
+		return nil, ErrRoleNotFound
+	}
+	if cleanName == "" {
+		return nil, ErrInvalidRoleName
+	}
+
+	role, err := s.repo.GetRoleByID(ctx, cleanID)
+	if err != nil {
+		return nil, err
+	}
+
+	if role.IsSystem {
+		return nil, ErrCannotModifySystemRole
+	}
+
+	if !strings.EqualFold(role.Name, cleanName) {
+		existing, err := s.repo.GetRoleByName(ctx, cleanName)
+		if err == nil && existing != nil && existing.ID != cleanID {
+			return nil, ErrRoleAlreadyExists
+		}
+		if err != nil && !errors.Is(err, ErrRoleNotFound) {
+			return nil, fmt.Errorf("failed to check existing role: %w", err)
+		}
+	}
+
+	if permissions == nil {
+		permissions = []string{}
+	}
+
+	role.Name = cleanName
+	role.Description = strings.TrimSpace(description)
+	role.Permissions = permissions
+	role.UpdatedAt = time.Now().UTC()
+
+	if err := s.repo.UpdateRole(ctx, role); err != nil {
+		return nil, fmt.Errorf("failed to update role: %w", err)
+	}
+
+	return role, nil
+}
+
+// DeleteRole removes a custom role. Built-in system roles cannot be deleted.
+func (s *authService) DeleteRole(ctx context.Context, id string) error {
+	cleanID := strings.TrimSpace(id)
+	if cleanID == "" {
+		return ErrRoleNotFound
+	}
+
+	role, err := s.repo.GetRoleByID(ctx, cleanID)
+	if err != nil {
+		return err
+	}
+
+	if role.IsSystem {
+		return ErrCannotDeleteSystemRole
+	}
+
+	return s.repo.DeleteRole(ctx, cleanID)
+}
+

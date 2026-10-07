@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ishaf/cubit/internal/domain"
@@ -26,6 +27,10 @@ type Repository interface {
 
 	CreateRole(ctx context.Context, role *domain.Role) error
 	GetRoleByID(ctx context.Context, id string) (*domain.Role, error)
+	GetRoleByName(ctx context.Context, name string) (*domain.Role, error)
+	ListRoles(ctx context.Context) ([]*domain.Role, error)
+	UpdateRole(ctx context.Context, role *domain.Role) error
+	DeleteRole(ctx context.Context, id string) error
 
 	CreateRefreshToken(ctx context.Context, token *domain.RefreshToken) error
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (*domain.RefreshToken, error)
@@ -197,6 +202,126 @@ func (r *sqliteRepository) GetRoleByID(ctx context.Context, id string) (*domain.
 		return nil, fmt.Errorf("failed to parse role permissions json: %w", err)
 	}
 	return &role, nil
+}
+
+func (r *sqliteRepository) GetRoleByName(ctx context.Context, name string) (*domain.Role, error) {
+	query := `
+		SELECT id, name, description, is_system, permissions, created_at, updated_at
+		FROM roles
+		WHERE LOWER(name) = LOWER(?)
+	`
+	var role domain.Role
+	var isSysInt int
+	var permsStr string
+
+	err := r.db.QueryRowContext(ctx, query, strings.TrimSpace(name)).Scan(
+		&role.ID,
+		&role.Name,
+		&role.Description,
+		&isSysInt,
+		&permsStr,
+		&role.CreatedAt,
+		&role.UpdatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrRoleNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to query role by name: %w", err)
+	}
+
+	role.IsSystem = (isSysInt == 1)
+	if err := json.Unmarshal([]byte(permsStr), &role.Permissions); err != nil {
+		return nil, fmt.Errorf("failed to parse role permissions json: %w", err)
+	}
+	return &role, nil
+}
+
+func (r *sqliteRepository) ListRoles(ctx context.Context) ([]*domain.Role, error) {
+	query := `
+		SELECT id, name, description, is_system, permissions, created_at, updated_at
+		FROM roles
+		ORDER BY is_system DESC, name ASC
+	`
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list roles: %w", err)
+	}
+	defer rows.Close()
+
+	var roles []*domain.Role
+	for rows.Next() {
+		var role domain.Role
+		var isSysInt int
+		var permsStr string
+		if err := rows.Scan(
+			&role.ID,
+			&role.Name,
+			&role.Description,
+			&isSysInt,
+			&permsStr,
+			&role.CreatedAt,
+			&role.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan role: %w", err)
+		}
+		role.IsSystem = (isSysInt == 1)
+		if err := json.Unmarshal([]byte(permsStr), &role.Permissions); err != nil {
+			return nil, fmt.Errorf("failed to parse role permissions json: %w", err)
+		}
+		roles = append(roles, &role)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating roles: %w", err)
+	}
+	return roles, nil
+}
+
+func (r *sqliteRepository) UpdateRole(ctx context.Context, role *domain.Role) error {
+	permsJSON, err := json.Marshal(role.Permissions)
+	if err != nil {
+		return fmt.Errorf("failed to marshal permissions: %w", err)
+	}
+
+	query := `
+		UPDATE roles
+		SET name = ?, description = ?, permissions = ?, updated_at = ?
+		WHERE id = ?
+	`
+	res, err := r.db.ExecContext(ctx, query,
+		role.Name,
+		role.Description,
+		string(permsJSON),
+		role.UpdatedAt,
+		role.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update role: %w", err)
+	}
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to check rows affected: %w", err)
+	}
+	if rowsAffected == 0 {
+		return ErrRoleNotFound
+	}
+	return nil
+}
+
+func (r *sqliteRepository) DeleteRole(ctx context.Context, id string) error {
+	query := `DELETE FROM roles WHERE id = ?`
+	res, err := r.db.ExecContext(ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete role: %w", err)
+	}
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to check rows affected: %w", err)
+	}
+	if rowsAffected == 0 {
+		return ErrRoleNotFound
+	}
+	return nil
 }
 
 func (r *sqliteRepository) CreateRefreshToken(ctx context.Context, token *domain.RefreshToken) error {

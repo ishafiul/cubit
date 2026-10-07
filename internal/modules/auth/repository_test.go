@@ -128,3 +128,78 @@ func TestAuthRepository_UsersAndTokens(t *testing.T) {
 		})
 	})
 }
+
+func TestAuthRepository_Roles(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestDB(t)
+
+	t.Run("Given a custom role", func(t *testing.T) {
+		customRole := &domain.Role{
+			ID:          "role-operator",
+			Name:        "Operator",
+			Description: "Platform operations engineer",
+			IsSystem:    false,
+			Permissions: []string{"apps:read", "nodes:*"},
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
+		}
+
+		t.Run("When creating and querying by name then it returns the role", func(t *testing.T) {
+			err := repo.CreateRole(ctx, customRole)
+			if err != nil {
+				t.Fatalf("failed to create custom role: %v", err)
+			}
+
+			byName, err := repo.GetRoleByName(ctx, "operator")
+			if err != nil {
+				t.Fatalf("failed to get role by name: %v", err)
+			}
+			if byName.ID != "role-operator" || byName.Name != "Operator" || byName.IsSystem {
+				t.Errorf("role data mismatch: %+v", byName)
+			}
+
+			roles, err := repo.ListRoles(ctx)
+			if err != nil {
+				t.Fatalf("failed to list roles: %v", err)
+			}
+			if len(roles) == 0 {
+				t.Fatal("expected non-empty roles list")
+			}
+		})
+
+		t.Run("When updating the role then changes are persisted", func(t *testing.T) {
+			customRole.Description = "Updated operations description"
+			customRole.Permissions = []string{"apps:read", "apps:deploy", "nodes:*"}
+			customRole.UpdatedAt = time.Now().UTC()
+
+			err := repo.UpdateRole(ctx, customRole)
+			if err != nil {
+				t.Fatalf("failed to update role: %v", err)
+			}
+
+			updated, err := repo.GetRoleByID(ctx, "role-operator")
+			if err != nil {
+				t.Fatalf("failed to fetch updated role: %v", err)
+			}
+			if updated.Description != "Updated operations description" {
+				t.Errorf("expected updated description, got %s", updated.Description)
+			}
+			if len(updated.Permissions) != 3 {
+				t.Errorf("expected 3 permissions, got %d", len(updated.Permissions))
+			}
+		})
+
+		t.Run("When deleting the role then it is removed", func(t *testing.T) {
+			err := repo.DeleteRole(ctx, "role-operator")
+			if err != nil {
+				t.Fatalf("failed to delete role: %v", err)
+			}
+
+			_, err = repo.GetRoleByID(ctx, "role-operator")
+			if err == nil {
+				t.Fatal("expected error getting deleted role, got nil")
+			}
+		})
+	})
+}
+

@@ -239,3 +239,26 @@ func TestDefaultSystemRoles(t *testing.T) {
 		t.Errorf("viewer role misconfigured: %+v", viewer)
 	}
 }
+
+func TestAllPermissions(t *testing.T) {
+	perms := domain.AllPermissions()
+	if len(perms) == 0 {
+		t.Fatal("expected non-empty list of permissions")
+	}
+
+	seen := make(map[string]bool)
+	for _, p := range perms {
+		if p == "" {
+			t.Error("expected non-empty permission string")
+		}
+		if seen[p] {
+			t.Errorf("duplicate permission in catalog: %s", p)
+		}
+		seen[p] = true
+	}
+
+	if !seen["*"] || !seen["apps:read"] || !seen["roles:manage"] {
+		t.Error("expected catalog to contain essential permissions")
+	}
+}
+

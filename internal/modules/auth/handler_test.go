@@ -386,3 +386,196 @@ func TestAuthHandler_Setup(t *testing.T) {
 		})
 	})
 }
+
+func TestAuthHandler_RolesAndPermissions(t *testing.T) {
+	router, _, _ := setupTestHandler(t)
+
+	t.Run("Given permissions catalog endpoint", func(t *testing.T) {
+		t.Run("When GET /api/v1/permissions is called then it returns 200 with permissions list", func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(http.MethodGet, "/api/v1/permissions", nil)
+			router.ServeHTTP(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200 OK, got %d: %s", w.Code, w.Body.String())
+			}
+
+			var resp map[string][]string
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("failed to decode response: %v", err)
+			}
+			if len(resp["permissions"]) == 0 {
+				t.Error("expected non-empty permissions list")
+			}
+		})
+	})
+
+	t.Run("Given role management CRUD endpoints", func(t *testing.T) {
+		t.Run("When GET /api/v1/roles is called then it returns list of roles", func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(http.MethodGet, "/api/v1/roles", nil)
+			router.ServeHTTP(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200 OK, got %d: %s", w.Code, w.Body.String())
+			}
+
+			var roles []domain.Role
+			if err := json.Unmarshal(w.Body.Bytes(), &roles); err != nil {
+				t.Fatalf("failed to decode roles: %v", err)
+			}
+			if len(roles) < 3 {
+				t.Errorf("expected at least 3 roles, got %d", len(roles))
+			}
+		})
+
+		var createdRoleID string
+
+		t.Run("When POST /api/v1/roles creates a custom role then it returns 201 Created", func(t *testing.T) {
+			body := map[string]any{
+				"name":        "Security Auditor",
+				"description": "Compliance and auditing role",
+				"permissions": []string{"*:read"},
+			}
+			bodyBytes, _ := json.Marshal(body)
+
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(http.MethodPost, "/api/v1/roles", bytes.NewReader(bodyBytes))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(w, req)
+
+			if w.Code != http.StatusCreated {
+				t.Fatalf("expected 201 Created, got %d: %s", w.Code, w.Body.String())
+			}
+
+			var created domain.Role
+			if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+				t.Fatalf("failed to decode created role: %v", err)
+			}
+			if created.ID == "" || created.Name != "Security Auditor" || created.IsSystem {
+				t.Errorf("unexpected created role: %+v", created)
+			}
+			createdRoleID = created.ID
+		})
+
+		t.Run("When POST /api/v1/roles has a duplicate name then it returns 409 Conflict", func(t *testing.T) {
+			body := map[string]any{
+				"name":        "Security Auditor",
+				"description": "Duplicate name",
+			}
+			bodyBytes, _ := json.Marshal(body)
+
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(http.MethodPost, "/api/v1/roles", bytes.NewReader(bodyBytes))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(w, req)
+
+			if w.Code != http.StatusConflict {
+				t.Fatalf("expected 409 Conflict, got %d: %s", w.Code, w.Body.String())
+			}
+		})
+
+		t.Run("When GET /api/v1/roles/:id is called with valid ID then it returns 200 OK", func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(http.MethodGet, "/api/v1/roles/"+createdRoleID, nil)
+			router.ServeHTTP(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200 OK, got %d: %s", w.Code, w.Body.String())
+			}
+		})
+
+		t.Run("When GET /api/v1/roles/:id is called with unknown ID then it returns 404 Not Found", func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(http.MethodGet, "/api/v1/roles/non-existent-id", nil)
+			router.ServeHTTP(w, req)
+
+			if w.Code != http.StatusNotFound {
+				t.Fatalf("expected 404 Not Found, got %d: %s", w.Code, w.Body.String())
+			}
+		})
+
+		t.Run("When PUT /api/v1/roles/:id targets a system role then it returns 400 Bad Request", func(t *testing.T) {
+			body := map[string]any{
+				"name":        "New Admin",
+				"description": "Try modifying root admin",
+				"permissions": []string{"*"},
+			}
+			bodyBytes, _ := json.Marshal(body)
+
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(http.MethodPut, "/api/v1/roles/admin", bytes.NewReader(bodyBytes))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400 Bad Request for system role update, got %d: %s", w.Code, w.Body.String())
+			}
+
+			var resp map[string]string
+			_ = json.Unmarshal(w.Body.Bytes(), &resp)
+			if resp["error"] != "cannot modify system roles" {
+				t.Errorf("expected error 'cannot modify system roles', got '%s'", resp["error"])
+			}
+		})
+
+		t.Run("When PUT /api/v1/roles/:id updates a custom role then it returns 200 OK", func(t *testing.T) {
+			body := map[string]any{
+				"name":        "Lead Security Auditor",
+				"description": "Updated auditing description",
+				"permissions": []string{"*:read", "nodes:read"},
+			}
+			bodyBytes, _ := json.Marshal(body)
+
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(http.MethodPut, "/api/v1/roles/"+createdRoleID, bytes.NewReader(bodyBytes))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200 OK, got %d: %s", w.Code, w.Body.String())
+			}
+
+			var updated domain.Role
+			_ = json.Unmarshal(w.Body.Bytes(), &updated)
+			if updated.Name != "Lead Security Auditor" {
+				t.Errorf("expected updated name, got %s", updated.Name)
+			}
+		})
+
+		t.Run("When DELETE /api/v1/roles/:id targets a system role then it returns 400 Bad Request", func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(http.MethodDelete, "/api/v1/roles/developer", nil)
+			router.ServeHTTP(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400 Bad Request for system role deletion, got %d: %s", w.Code, w.Body.String())
+			}
+
+			var resp map[string]string
+			_ = json.Unmarshal(w.Body.Bytes(), &resp)
+			if resp["error"] != "cannot delete system roles" {
+				t.Errorf("expected error 'cannot delete system roles', got '%s'", resp["error"])
+			}
+		})
+
+		t.Run("When DELETE /api/v1/roles/:id deletes a custom role then it returns 200 OK", func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(http.MethodDelete, "/api/v1/roles/"+createdRoleID, nil)
+			router.ServeHTTP(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200 OK, got %d: %s", w.Code, w.Body.String())
+			}
+
+			// Verify 404 subsequent fetch
+			wFetch := httptest.NewRecorder()
+			reqFetch, _ := http.NewRequest(http.MethodGet, "/api/v1/roles/"+createdRoleID, nil)
+			router.ServeHTTP(wFetch, reqFetch)
+			if wFetch.Code != http.StatusNotFound {
+				t.Errorf("expected 404 Not Found after deletion, got %d", wFetch.Code)
+			}
+		})
+	})
+}
+
