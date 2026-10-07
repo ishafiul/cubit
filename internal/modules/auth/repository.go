@@ -16,6 +16,7 @@ var (
 	ErrUserNotFound         = errors.New("user not found")
 	ErrRoleNotFound         = errors.New("role not found")
 	ErrRefreshTokenNotFound = errors.New("refresh token not found")
+	ErrAPITokenNotFound     = errors.New("api token not found")
 )
 
 // Repository defines data access operations for users, roles, and tokens.
@@ -35,6 +36,14 @@ type Repository interface {
 	CreateRefreshToken(ctx context.Context, token *domain.RefreshToken) error
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (*domain.RefreshToken, error)
 	RevokeRefreshToken(ctx context.Context, id string) error
+
+	CreateAPIToken(ctx context.Context, token *domain.APIToken) error
+	GetAPITokenByID(ctx context.Context, id string) (*domain.APIToken, error)
+	GetAPITokenByHash(ctx context.Context, tokenHash string) (*domain.APIToken, error)
+	ListAPITokensByUser(ctx context.Context, userID string) ([]*domain.APIToken, error)
+	ListAllAPITokens(ctx context.Context) ([]*domain.APIToken, error)
+	DeleteAPIToken(ctx context.Context, id string) error
+	UpdateAPITokenLastUsed(ctx context.Context, id string, lastUsed time.Time) error
 }
 
 type sqliteRepository struct {
@@ -387,3 +396,215 @@ func (r *sqliteRepository) RevokeRefreshToken(ctx context.Context, id string) er
 	}
 	return nil
 }
+
+func (r *sqliteRepository) CreateAPIToken(ctx context.Context, token *domain.APIToken) error {
+	query := `
+		INSERT INTO api_tokens (id, user_id, name, token_hash, role_id, expires_at, last_used_at, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`
+	_, err := r.db.ExecContext(ctx, query,
+		token.ID,
+		token.UserID,
+		token.Name,
+		token.TokenHash,
+		token.RoleID,
+		token.ExpiresAt,
+		token.LastUsedAt,
+		token.CreatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to insert api token: %w", err)
+	}
+	return nil
+}
+
+func (r *sqliteRepository) GetAPITokenByID(ctx context.Context, id string) (*domain.APIToken, error) {
+	query := `
+		SELECT id, user_id, name, token_hash, role_id, expires_at, last_used_at, created_at
+		FROM api_tokens
+		WHERE id = ?
+	`
+	row := r.db.QueryRowContext(ctx, query, id)
+	var token domain.APIToken
+	var expiresAt, lastUsedAt sql.NullTime
+
+	err := row.Scan(
+		&token.ID,
+		&token.UserID,
+		&token.Name,
+		&token.TokenHash,
+		&token.RoleID,
+		&expiresAt,
+		&lastUsedAt,
+		&token.CreatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrAPITokenNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to query api token by id: %w", err)
+	}
+
+	if expiresAt.Valid {
+		t := expiresAt.Time
+		token.ExpiresAt = &t
+	}
+	if lastUsedAt.Valid {
+		t := lastUsedAt.Time
+		token.LastUsedAt = &t
+	}
+	return &token, nil
+}
+
+func (r *sqliteRepository) GetAPITokenByHash(ctx context.Context, tokenHash string) (*domain.APIToken, error) {
+	query := `
+		SELECT id, user_id, name, token_hash, role_id, expires_at, last_used_at, created_at
+		FROM api_tokens
+		WHERE token_hash = ?
+	`
+	row := r.db.QueryRowContext(ctx, query, tokenHash)
+	var token domain.APIToken
+	var expiresAt, lastUsedAt sql.NullTime
+
+	err := row.Scan(
+		&token.ID,
+		&token.UserID,
+		&token.Name,
+		&token.TokenHash,
+		&token.RoleID,
+		&expiresAt,
+		&lastUsedAt,
+		&token.CreatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrAPITokenNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to query api token by hash: %w", err)
+	}
+
+	if expiresAt.Valid {
+		t := expiresAt.Time
+		token.ExpiresAt = &t
+	}
+	if lastUsedAt.Valid {
+		t := lastUsedAt.Time
+		token.LastUsedAt = &t
+	}
+	return &token, nil
+}
+
+func (r *sqliteRepository) ListAPITokensByUser(ctx context.Context, userID string) ([]*domain.APIToken, error) {
+	query := `
+		SELECT id, user_id, name, token_hash, role_id, expires_at, last_used_at, created_at
+		FROM api_tokens
+		WHERE user_id = ?
+		ORDER BY created_at DESC
+	`
+	rows, err := r.db.QueryContext(ctx, query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query api tokens by user: %w", err)
+	}
+	defer rows.Close()
+
+	var tokens []*domain.APIToken
+	for rows.Next() {
+		var token domain.APIToken
+		var expiresAt, lastUsedAt sql.NullTime
+		if err := rows.Scan(
+			&token.ID,
+			&token.UserID,
+			&token.Name,
+			&token.TokenHash,
+			&token.RoleID,
+			&expiresAt,
+			&lastUsedAt,
+			&token.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan api token: %w", err)
+		}
+		if expiresAt.Valid {
+			t := expiresAt.Time
+			token.ExpiresAt = &t
+		}
+		if lastUsedAt.Valid {
+			t := lastUsedAt.Time
+			token.LastUsedAt = &t
+		}
+		tokens = append(tokens, &token)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating api tokens: %w", err)
+	}
+	return tokens, nil
+}
+
+func (r *sqliteRepository) ListAllAPITokens(ctx context.Context) ([]*domain.APIToken, error) {
+	query := `
+		SELECT id, user_id, name, token_hash, role_id, expires_at, last_used_at, created_at
+		FROM api_tokens
+		ORDER BY created_at DESC
+	`
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query all api tokens: %w", err)
+	}
+	defer rows.Close()
+
+	var tokens []*domain.APIToken
+	for rows.Next() {
+		var token domain.APIToken
+		var expiresAt, lastUsedAt sql.NullTime
+		if err := rows.Scan(
+			&token.ID,
+			&token.UserID,
+			&token.Name,
+			&token.TokenHash,
+			&token.RoleID,
+			&expiresAt,
+			&lastUsedAt,
+			&token.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan api token: %w", err)
+		}
+		if expiresAt.Valid {
+			t := expiresAt.Time
+			token.ExpiresAt = &t
+		}
+		if lastUsedAt.Valid {
+			t := lastUsedAt.Time
+			token.LastUsedAt = &t
+		}
+		tokens = append(tokens, &token)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating all api tokens: %w", err)
+	}
+	return tokens, nil
+}
+
+func (r *sqliteRepository) DeleteAPIToken(ctx context.Context, id string) error {
+	query := `DELETE FROM api_tokens WHERE id = ?`
+	res, err := r.db.ExecContext(ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete api token: %w", err)
+	}
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to check rows affected: %w", err)
+	}
+	if rowsAffected == 0 {
+		return ErrAPITokenNotFound
+	}
+	return nil
+}
+
+func (r *sqliteRepository) UpdateAPITokenLastUsed(ctx context.Context, id string, lastUsed time.Time) error {
+	query := `UPDATE api_tokens SET last_used_at = ? WHERE id = ?`
+	_, err := r.db.ExecContext(ctx, query, lastUsed, id)
+	if err != nil {
+		return fmt.Errorf("failed to update api token last_used_at: %w", err)
+	}
+	return nil
+}
+

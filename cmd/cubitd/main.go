@@ -148,6 +148,7 @@ func main() {
 	protectedAPI.Use(middleware.Authenticate(authService))
 	{
 		authHandler.RegisterRoleRoutes(protectedAPI, middleware.RequirePermission)
+		authHandler.RegisterTokenRoutes(protectedAPI, middleware.RequirePermission)
 		nodeHandler.RegisterRoutes(protectedAPI, middleware.RequirePermission)
 		appHandler.RegisterRoutes(protectedAPI, middleware.RequirePermission)
 		depHandler.RegisterRoutes(protectedAPI, middleware.RequirePermission)

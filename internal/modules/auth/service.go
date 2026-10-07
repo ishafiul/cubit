@@ -27,7 +27,16 @@ var (
 	ErrCannotModifySystemRole = errors.New("cannot modify system roles")
 	ErrCannotDeleteSystemRole = errors.New("cannot delete system roles")
 	ErrInvalidRoleName       = errors.New("role name cannot be empty")
+	ErrInvalidTokenName      = errors.New("api token name cannot be empty")
+	ErrAPITokenExpired       = errors.New("api token has expired")
+	ErrUnauthorizedToken     = errors.New("unauthorized access to api token")
 )
+
+// CreateAPITokenResponse encapsulates the plaintext API token returned upon creation.
+type CreateAPITokenResponse struct {
+	Token    string           `json:"token"`
+	APIToken *domain.APIToken `json:"apiToken"`
+}
 
 // StatusResponse contains the cluster initialization state and current release version.
 type StatusResponse struct {
@@ -61,6 +70,11 @@ type Service interface {
 	CreateRole(ctx context.Context, name, description string, permissions []string) (*domain.Role, error)
 	UpdateRole(ctx context.Context, id, name, description string, permissions []string) (*domain.Role, error)
 	DeleteRole(ctx context.Context, id string) error
+
+	CreateAPIToken(ctx context.Context, userID, name, roleID string, expiresInDays int) (*CreateAPITokenResponse, error)
+	ListAPITokens(ctx context.Context, userID string, isAdmin bool) ([]*domain.APIToken, error)
+	DeleteAPIToken(ctx context.Context, id, requestingUserID string, isAdmin bool) error
+	ValidateAPIToken(ctx context.Context, tokenPlain string) (*domain.APIToken, *domain.Role, error)
 }
 
 type authService struct {
@@ -459,4 +473,116 @@ func (s *authService) DeleteRole(ctx context.Context, id string) error {
 
 	return s.repo.DeleteRole(ctx, cleanID)
 }
+
+// CreateAPIToken generates a new high-entropy personal access token and persists its SHA-256 hash.
+func (s *authService) CreateAPIToken(ctx context.Context, userID, name, roleID string, expiresInDays int) (*CreateAPITokenResponse, error) {
+	cleanName := strings.TrimSpace(name)
+	if cleanName == "" {
+		return nil, ErrInvalidTokenName
+	}
+
+	user, err := s.repo.GetUserByID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("user not found: %w", err)
+	}
+
+	actualRoleID := strings.TrimSpace(roleID)
+	if actualRoleID == "" {
+		actualRoleID = user.RoleID
+	}
+
+	_, err = s.repo.GetRoleByID(ctx, actualRoleID)
+	if err != nil {
+		return nil, fmt.Errorf("role not found: %w", err)
+	}
+
+	plainToken, err := domain.GenerateSecureToken("cbt_")
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate secure token: %w", err)
+	}
+
+	tokenHash := domain.HashToken(plainToken)
+	now := time.Now().UTC()
+
+	var expiresAt *time.Time
+	if expiresInDays > 0 {
+		exp := now.Add(time.Duration(expiresInDays) * 24 * time.Hour)
+		expiresAt = &exp
+	}
+
+	apiToken := &domain.APIToken{
+		ID:        uuid.New().String(),
+		UserID:    user.ID,
+		Name:      cleanName,
+		TokenHash: tokenHash,
+		RoleID:    actualRoleID,
+		ExpiresAt: expiresAt,
+		CreatedAt: now,
+	}
+
+	if err := s.repo.CreateAPIToken(ctx, apiToken); err != nil {
+		return nil, fmt.Errorf("failed to persist api token: %w", err)
+	}
+
+	return &CreateAPITokenResponse{
+		Token:    plainToken,
+		APIToken: apiToken,
+	}, nil
+}
+
+// ListAPITokens retrieves tokens for a specific user, or all tokens if the requester is an administrator.
+func (s *authService) ListAPITokens(ctx context.Context, userID string, isAdmin bool) ([]*domain.APIToken, error) {
+	if isAdmin {
+		return s.repo.ListAllAPITokens(ctx)
+	}
+	return s.repo.ListAPITokensByUser(ctx, userID)
+}
+
+// DeleteAPIToken deletes/revokes an API token.
+func (s *authService) DeleteAPIToken(ctx context.Context, id, requestingUserID string, isAdmin bool) error {
+	cleanID := strings.TrimSpace(id)
+	if cleanID == "" {
+		return ErrAPITokenNotFound
+	}
+
+	token, err := s.repo.GetAPITokenByID(ctx, cleanID)
+	if err != nil {
+		return err
+	}
+
+	if !isAdmin && token.UserID != requestingUserID {
+		return ErrUnauthorizedToken
+	}
+
+	return s.repo.DeleteAPIToken(ctx, cleanID)
+}
+
+// ValidateAPIToken verifies a plaintext cbt_ personal access token and returns token metadata & role.
+func (s *authService) ValidateAPIToken(ctx context.Context, tokenPlain string) (*domain.APIToken, *domain.Role, error) {
+	clean := strings.TrimSpace(tokenPlain)
+	if !strings.HasPrefix(clean, "cbt_") {
+		return nil, nil, ErrAPITokenNotFound
+	}
+
+	tokenHash := domain.HashToken(clean)
+	token, err := s.repo.GetAPITokenByHash(ctx, tokenHash)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	now := time.Now().UTC()
+	if token.ExpiresAt != nil && now.After(*token.ExpiresAt) {
+		return nil, nil, ErrAPITokenExpired
+	}
+
+	_ = s.repo.UpdateAPITokenLastUsed(ctx, token.ID, now)
+
+	role, err := s.repo.GetRoleByID(ctx, token.RoleID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to query token role: %w", err)
+	}
+
+	return token, role, nil
+}
+
 

@@ -448,4 +448,124 @@ func TestAuthService_RolesAndPermissions(t *testing.T) {
 	})
 }
 
+func TestAuthService_APITokens(t *testing.T) {
+	ctx := context.Background()
+	service, repo := setupTestService(t)
+
+	// Pre-seed role & users
+	role, err := repo.GetRoleByID(ctx, domain.SystemRoleDeveloperID)
+	if err != nil {
+		t.Fatalf("failed to get developer role: %v", err)
+	}
+
+	userA, _ := domain.NewUser("usr-a", "Alice", "alice@cubit.local", "hash", role.ID)
+	_ = repo.CreateUser(ctx, userA)
+
+	userB, _ := domain.NewUser("usr-b", "Bob", "bob@cubit.local", "hash", role.ID)
+	_ = repo.CreateUser(ctx, userB)
+
+	t.Run("Given token creation requests", func(t *testing.T) {
+		t.Run("When token name is empty then it returns ErrInvalidTokenName", func(t *testing.T) {
+			_, err := service.CreateAPIToken(ctx, userA.ID, "   ", "", 30)
+			if !errors.Is(err, authModule.ErrInvalidTokenName) {
+				t.Fatalf("expected ErrInvalidTokenName, got %v", err)
+			}
+		})
+
+		t.Run("When user does not exist then it returns an error", func(t *testing.T) {
+			_, err := service.CreateAPIToken(ctx, "non-existent-user", "My Token", "", 30)
+			if err == nil {
+				t.Fatal("expected error for non-existent user, got nil")
+			}
+		})
+
+		var createdSecret string
+		var tokenID string
+
+		t.Run("When inputs are valid then it returns plaintext token and persists metadata", func(t *testing.T) {
+			resp, err := service.CreateAPIToken(ctx, userA.ID, "Deploy Token", "", 7)
+			if err != nil {
+				t.Fatalf("expected no error creating token, got %v", err)
+			}
+			if !strings.HasPrefix(resp.Token, "cbt_") {
+				t.Errorf("expected token prefix 'cbt_', got %s", resp.Token)
+			}
+			if resp.APIToken.Name != "Deploy Token" || resp.APIToken.UserID != userA.ID || resp.APIToken.RoleID != role.ID {
+				t.Errorf("token metadata mismatch: %+v", resp.APIToken)
+			}
+			if resp.APIToken.ExpiresAt == nil {
+				t.Fatalf("expected expiresAt to be populated")
+			}
+			createdSecret = resp.Token
+			tokenID = resp.APIToken.ID
+		})
+
+		t.Run("When validating a valid token then it returns token and role, updating last_used_at", func(t *testing.T) {
+			tok, r, err := service.ValidateAPIToken(ctx, createdSecret)
+			if err != nil {
+				t.Fatalf("expected valid token, got error: %v", err)
+			}
+			if tok.ID != tokenID || r.ID != role.ID {
+				t.Errorf("unexpected token or role returned: %+v, %+v", tok, r)
+			}
+
+			// Verify last_used_at was updated in repo
+			stored, _ := repo.GetAPITokenByID(ctx, tokenID)
+			if stored.LastUsedAt == nil {
+				t.Errorf("expected last_used_at to be updated")
+			}
+		})
+
+		t.Run("When validating invalid or malformed tokens then it fails", func(t *testing.T) {
+			_, _, err := service.ValidateAPIToken(ctx, "not-a-cbt-token")
+			if !errors.Is(err, authModule.ErrAPITokenNotFound) {
+				t.Fatalf("expected ErrAPITokenNotFound, got %v", err)
+			}
+
+			_, _, err = service.ValidateAPIToken(ctx, "cbt_randomunknownsecret1234567890")
+			if !errors.Is(err, authModule.ErrAPITokenNotFound) {
+				t.Fatalf("expected ErrAPITokenNotFound, got %v", err)
+			}
+		})
+
+		t.Run("When listing tokens then it filters by user or returns all for admin", func(t *testing.T) {
+			tokensUserA, err := service.ListAPITokens(ctx, userA.ID, false)
+			if err != nil || len(tokensUserA) != 1 {
+				t.Fatalf("expected 1 token for userA, got %d, err: %v", len(tokensUserA), err)
+			}
+
+			tokensUserB, err := service.ListAPITokens(ctx, userB.ID, false)
+			if err != nil || len(tokensUserB) != 0 {
+				t.Fatalf("expected 0 tokens for userB, got %d, err: %v", len(tokensUserB), err)
+			}
+
+			allTokens, err := service.ListAPITokens(ctx, userB.ID, true)
+			if err != nil || len(allTokens) != 1 {
+				t.Fatalf("expected 1 token for admin, got %d, err: %v", len(allTokens), err)
+			}
+		})
+
+		t.Run("When deleting token then unauthorized deletion is blocked", func(t *testing.T) {
+			// userB tries to delete userA's token
+			err := service.DeleteAPIToken(ctx, tokenID, userB.ID, false)
+			if !errors.Is(err, authModule.ErrUnauthorizedToken) {
+				t.Fatalf("expected ErrUnauthorizedToken, got %v", err)
+			}
+
+			// owner deletes own token
+			err = service.DeleteAPIToken(ctx, tokenID, userA.ID, false)
+			if err != nil {
+				t.Fatalf("expected successful deletion by owner, got %v", err)
+			}
+
+			// Verify token cannot be validated anymore
+			_, _, err = service.ValidateAPIToken(ctx, createdSecret)
+			if !errors.Is(err, authModule.ErrAPITokenNotFound) {
+				t.Fatalf("expected ErrAPITokenNotFound for revoked token, got %v", err)
+			}
+		})
+	})
+}
+
+
 
