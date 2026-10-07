@@ -12,6 +12,11 @@ const (
 	ContextKeyEmail       = "user_email"
 	ContextKeyRoleID      = "role_id"
 	ContextKeyPermissions = "permissions"
+	ContextKeyTokenID     = "token_id"
+	ContextKeyAuthType    = "auth_type"
+
+	AuthTypeJWT      = "jwt"
+	AuthTypeAPIToken = "api_token"
 )
 
 // RequirePermission verifies that the authenticated caller has the specified permission.
