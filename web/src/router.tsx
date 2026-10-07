@@ -24,34 +24,120 @@ import { WorkflowsView } from './components/services/WorkflowsView';
 import { DurableObjectsView } from './components/services/DurableObjectsView';
 import { ContainersView } from './components/services/ContainersView';
 import { GitHubSettingsView } from './components/views/GitHubSettingsView';
+import { LoginPage } from './components/auth/LoginPage';
+import { SetupPage } from './components/auth/SetupPage';
+import { customInstance } from './api/custom-instance';
+import { useAuthStore } from './shared/stores/useAuthStore';
 import type { DetailTab } from './components/ApplicationDetailPage';
+
+export interface ClusterStatus {
+  initialized: boolean;
+  version: string;
+}
+
+let cachedClusterStatus: ClusterStatus | null = null;
+
+export function setCachedClusterStatus(status: ClusterStatus | null) {
+  cachedClusterStatus = status;
+}
+
+export async function fetchClusterStatus(): Promise<ClusterStatus> {
+  try {
+    return await customInstance<ClusterStatus>({ url: '/auth/status' });
+  } catch {
+    return { initialized: true, version: '1.3.0' };
+  }
+}
+
+export async function getClusterStatus(): Promise<ClusterStatus> {
+  if (cachedClusterStatus !== null) {
+    return cachedClusterStatus;
+  }
+  const status = await fetchClusterStatus();
+  cachedClusterStatus = status;
+  return status;
+}
+
+// Route guards
+export async function requireAuthGuard() {
+  const status = await getClusterStatus();
+  if (!status.initialized) {
+    throw redirect({ to: '/setup' });
+  }
+  if (!useAuthStore.getState().isAuthenticated) {
+    throw redirect({ to: '/login' });
+  }
+}
+
+export async function loginGuard() {
+  const status = await getClusterStatus();
+  if (!status.initialized) {
+    throw redirect({ to: '/setup' });
+  }
+  if (useAuthStore.getState().isAuthenticated) {
+    throw redirect({ to: '/apps' });
+  }
+}
+
+export async function setupGuard() {
+  const status = await getClusterStatus();
+  if (status.initialized) {
+    throw redirect({ to: '/login' });
+  }
+}
+
+export async function indexGuard() {
+  const status = await getClusterStatus();
+  if (!status.initialized) {
+    throw redirect({ to: '/setup' });
+  }
+  if (!useAuthStore.getState().isAuthenticated) {
+    throw redirect({ to: '/login' });
+  }
+  throw redirect({ to: '/apps' });
+}
 
 // 1. Root Route
 export const rootRoute = createRootRoute({
   component: App,
 });
 
-// 2. Index Route (redirects to /apps)
+// 2. Authentication & Onboarding Routes
+export const loginRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/login',
+  beforeLoad: loginGuard,
+  component: LoginPage,
+});
+
+export const setupRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/setup',
+  beforeLoad: setupGuard,
+  component: SetupPage,
+});
+
+// 3. Index Route (redirects to /apps if authenticated, or /login / /setup)
 export const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
-  beforeLoad: () => {
-    throw redirect({ to: '/apps' });
-  },
+  beforeLoad: indexGuard,
   component: () => <Navigate to="/apps" replace />,
 });
 
-// 3. Workers (Apps) Route
+// 4. Workers (Apps) Route
 export const appsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/apps',
+  beforeLoad: requireAuthGuard,
   component: WorkersView,
 });
 
-// 4. Worker Detail Route
+// 5. Worker Detail Route
 export const appDetailRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/apps/$appId',
+  beforeLoad: requireAuthGuard,
   validateSearch: (search: Record<string, unknown>): { tab?: DetailTab } => {
     const rawTab = typeof search.tab === 'string' ? search.tab : undefined;
     if (rawTab === 'domains') {
@@ -66,10 +152,11 @@ export const appDetailRoute = createRoute({
   component: AppDetailRouteView,
 });
 
-// 5. Service Routes
+// 6. Service Routes
 export const dynamicWorkersRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/dynamic-workers',
+  beforeLoad: requireAuthGuard,
   component: DynamicWorkersView,
 });
 
@@ -81,6 +168,7 @@ function DurableObjectsRouteComponent() {
 export const durableObjectsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/durable-objects',
+  beforeLoad: requireAuthGuard,
   validateSearch: (search: Record<string, unknown>): { id?: string } => ({
     id: typeof search.id === 'string' ? search.id : undefined,
   }),
@@ -90,6 +178,7 @@ export const durableObjectsRoute = createRoute({
 export const containersRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/containers',
+  beforeLoad: requireAuthGuard,
   component: ContainersView,
 });
 
@@ -101,6 +190,7 @@ function KVRouteComponent() {
 export const kvRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/kv',
+  beforeLoad: requireAuthGuard,
   validateSearch: (search: Record<string, unknown>): { id?: string } => ({
     id: typeof search.id === 'string' ? search.id : undefined,
   }),
@@ -115,6 +205,7 @@ function D1RouteComponent() {
 export const d1Route = createRoute({
   getParentRoute: () => rootRoute,
   path: '/d1',
+  beforeLoad: requireAuthGuard,
   validateSearch: (search: Record<string, unknown>): { id?: string } => ({
     id: typeof search.id === 'string' ? search.id : undefined,
   }),
@@ -129,6 +220,7 @@ function R2RouteComponent() {
 export const r2Route = createRoute({
   getParentRoute: () => rootRoute,
   path: '/r2',
+  beforeLoad: requireAuthGuard,
   validateSearch: (search: Record<string, unknown>): { id?: string } => ({
     id: typeof search.id === 'string' ? search.id : undefined,
   }),
@@ -138,6 +230,7 @@ export const r2Route = createRoute({
 export const staticAssetsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/static-assets',
+  beforeLoad: requireAuthGuard,
   component: StaticAssetsView,
 });
 
@@ -149,6 +242,7 @@ function CronRouteComponent() {
 export const cronRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/cron',
+  beforeLoad: requireAuthGuard,
   validateSearch: (search: Record<string, unknown>): { id?: string } => ({
     id: typeof search.id === 'string' ? search.id : undefined,
   }),
@@ -163,6 +257,7 @@ function QueuesRouteComponent() {
 export const queuesRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/queues',
+  beforeLoad: requireAuthGuard,
   validateSearch: (search: Record<string, unknown>): { id?: string } => ({
     id: typeof search.id === 'string' ? search.id : undefined,
   }),
@@ -177,22 +272,25 @@ function WorkflowsRouteComponent() {
 export const workflowsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/workflows',
+  beforeLoad: requireAuthGuard,
   validateSearch: (search: Record<string, unknown>): { id?: string } => ({
     id: typeof search.id === 'string' ? search.id : undefined,
   }),
   component: WorkflowsRouteComponent,
 });
 
-// 6. Fleet & Routing
+// 7. Fleet & Routing
 export const nodesRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/nodes',
+  beforeLoad: requireAuthGuard,
   component: NodesView,
 });
 
 export const domainsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/domains',
+  beforeLoad: requireAuthGuard,
   component: DomainsView,
 });
 
@@ -216,6 +314,7 @@ function LogsRouteComponent() {
 export const logsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/logs',
+  beforeLoad: requireAuthGuard,
   validateSearch: (search: Record<string, unknown>): { appId?: string } => ({
     appId: typeof search.appId === 'string' ? search.appId : undefined,
   }),
@@ -225,12 +324,15 @@ export const logsRoute = createRoute({
 export const githubRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/github',
+  beforeLoad: requireAuthGuard,
   component: GitHubSettingsView,
 });
 
-// 7. Route Tree & Router
+// 8. Route Tree & Router
 export const routeTree = rootRoute.addChildren([
   indexRoute,
+  loginRoute,
+  setupRoute,
   appsRoute,
   appDetailRoute,
   dynamicWorkersRoute,

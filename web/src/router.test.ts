@@ -1,8 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   router,
   rootRoute,
   indexRoute,
+  loginRoute,
+  setupRoute,
   appsRoute,
   appDetailRoute,
   dynamicWorkersRoute,
@@ -19,12 +21,31 @@ import {
   domainsRoute,
   logsRoute,
   githubRoute,
+  requireAuthGuard,
+  loginGuard,
+  setupGuard,
+  indexGuard,
+  setCachedClusterStatus,
 } from './router';
+import { useAuthStore } from './shared/stores/useAuthStore';
 
 describe('Given the Cubit TanStack Router configuration', () => {
+  beforeEach(() => {
+    useAuthStore.getState().actions.clearAuth();
+    setCachedClusterStatus(null);
+  });
+
   describe('When inspecting route path definitions', () => {
     it('Then indexRoute targets root path /', () => {
       expect(indexRoute.fullPath).toBe('/');
+    });
+
+    it('Then loginRoute targets /login', () => {
+      expect(loginRoute.fullPath).toBe('/login');
+    });
+
+    it('Then setupRoute targets /setup', () => {
+      expect(setupRoute.fullPath).toBe('/setup');
     });
 
     it('Then appsRoute targets /apps', () => {
@@ -53,6 +74,123 @@ describe('Given the Cubit TanStack Router configuration', () => {
       expect(cronRoute.fullPath).toBe('/cron');
       expect(queuesRoute.fullPath).toBe('/queues');
       expect(workflowsRoute.fullPath).toBe('/workflows');
+    });
+  });
+
+  describe('When evaluating route guards', () => {
+    describe('Scenario 1: Cluster is uninitialized', () => {
+      beforeEach(() => {
+        setCachedClusterStatus({ initialized: false, version: '1.3.0' });
+      });
+
+      it('Then requireAuthGuard redirects to /setup', async () => {
+        try {
+          await requireAuthGuard();
+          expect.fail('Should have thrown redirect');
+        } catch (err: any) {
+          expect(err?.options?.to).toBe('/setup');
+        }
+      });
+
+      it('Then loginGuard redirects to /setup', async () => {
+        try {
+          await loginGuard();
+          expect.fail('Should have thrown redirect');
+        } catch (err: any) {
+          expect(err?.options?.to).toBe('/setup');
+        }
+      });
+
+      it('Then setupGuard allows access without redirecting', async () => {
+        await expect(setupGuard()).resolves.toBeUndefined();
+      });
+
+      it('Then indexGuard redirects to /setup', async () => {
+        try {
+          await indexGuard();
+          expect.fail('Should have thrown redirect');
+        } catch (err: any) {
+          expect(err?.options?.to).toBe('/setup');
+        }
+      });
+    });
+
+    describe('Scenario 2: Cluster is initialized but caller is unauthenticated', () => {
+      beforeEach(() => {
+        setCachedClusterStatus({ initialized: true, version: '1.3.0' });
+        useAuthStore.getState().actions.clearAuth();
+      });
+
+      it('Then requireAuthGuard redirects to /login', async () => {
+        try {
+          await requireAuthGuard();
+          expect.fail('Should have thrown redirect');
+        } catch (err: any) {
+          expect(err?.options?.to).toBe('/login');
+        }
+      });
+
+      it('Then loginGuard allows access without redirecting', async () => {
+        await expect(loginGuard()).resolves.toBeUndefined();
+      });
+
+      it('Then setupGuard redirects to /login', async () => {
+        try {
+          await setupGuard();
+          expect.fail('Should have thrown redirect');
+        } catch (err: any) {
+          expect(err?.options?.to).toBe('/login');
+        }
+      });
+
+      it('Then indexGuard redirects to /login', async () => {
+        try {
+          await indexGuard();
+          expect.fail('Should have thrown redirect');
+        } catch (err: any) {
+          expect(err?.options?.to).toBe('/login');
+        }
+      });
+    });
+
+    describe('Scenario 3: Cluster is initialized and caller is authenticated', () => {
+      beforeEach(() => {
+        setCachedClusterStatus({ initialized: true, version: '1.3.0' });
+        useAuthStore.getState().actions.setAuth({
+          accessToken: 'valid-jwt-token',
+        });
+      });
+
+      it('Then requireAuthGuard allows access without redirecting', async () => {
+        await expect(requireAuthGuard()).resolves.toBeUndefined();
+      });
+
+      it('Then loginGuard redirects to /apps', async () => {
+        try {
+          await loginGuard();
+          expect.fail('Should have thrown redirect');
+        } catch (err: any) {
+          expect(err?.options?.to).toBe('/apps');
+        }
+      });
+
+      it('Then setupGuard redirects to /login', async () => {
+        try {
+          await setupGuard();
+          expect.fail('Should have thrown redirect');
+        } catch (err: any) {
+          expect(err?.options?.to).toBe('/login');
+        }
+      });
+
+      it('Then indexGuard redirects to /apps', async () => {
+        try {
+          await indexGuard();
+          expect.fail('Should have thrown redirect');
+        } catch (err: any) {
+          expect(err?.options?.to).toBe('/apps');
+        }
+      });
     });
   });
 
@@ -117,7 +255,7 @@ describe('Given the Cubit TanStack Router configuration', () => {
 
       it('Then missing appId returns undefined', () => {
         const validate = (logsRoute.options as any).validateSearch;
-        expect(validate({})).toEqual({ appId: undefined });
+        expect(validate({ appId: undefined })).toEqual({ appId: undefined });
       });
     });
   });
@@ -127,7 +265,7 @@ describe('Given the Cubit TanStack Router configuration', () => {
       expect(router).toBeDefined();
       expect(router.routeTree).toBeDefined();
       expect(rootRoute.children).toBeDefined();
-      expect((rootRoute.children as any)?.length).toBe(17);
+      expect((rootRoute.children as any)?.length).toBe(19);
     });
   });
 });
