@@ -39,7 +39,7 @@ const JS_WORKER_TEMPLATE = `export default {
 const PYTHON_WORKER_TEMPLATE = `from js import Response
 
 async def fetch(request, env):
-    return Response.new("Hello from Python Worker on Cubit celld v0.6.1!")`;
+    return Response.new("Hello from Python Worker on Cubit celld v0.6.2!")`;
 
 export function NewAppModal() {
   const navigate = useNavigate();
@@ -341,13 +341,13 @@ export function NewAppModal() {
                       >
                         Python
                         <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-1 rounded border border-emerald-500/30 font-mono">
-                          v0.6.1
+                          v0.6.2
                         </span>
                       </button>
                     </div>
                   </div>
                   <span className="text-[10px] text-zinc-500 font-mono">
-                    {inlineLanguage === 'python' ? 'celld v0.6.1 Python API' : 'Cloudflare Worker API'}
+                    {inlineLanguage === 'python' ? 'celld v0.6.2 Python API' : 'Cloudflare Worker API'}
                   </span>
                 </div>
                 <textarea

@@ -122,10 +122,10 @@ const sourceRules: PatternRule[] = [
   },
   {
     regex: /(?:from\s+js\s+import\s+Response|async\s+def\s+fetch\s*\()/,
-    name: 'Python Worker (celld v0.6.1)',
+    name: 'Python Worker (celld v0.6.2)',
     category: 'api_usage',
     status: 'supported',
-    details: 'Native Python worker execution supported via celld v0.6.1.',
+    details: 'Native Python worker execution supported via celld v0.6.2.',
   },
 ];
 

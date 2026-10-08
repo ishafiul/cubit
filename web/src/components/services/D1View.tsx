@@ -24,7 +24,7 @@ export function D1View({ initialSelectedId }: { initialSelectedId?: string } = {
 
   // Query state
   const [sqlQuery, setSqlQuery] = useState<string>(
-    `-- Celld 0.6.1 Serverless SQLite D1 Query
+    `-- Celld 0.6.2 Serverless SQLite D1 Query
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,

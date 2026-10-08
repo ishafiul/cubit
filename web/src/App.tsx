@@ -340,7 +340,7 @@ function DashboardLayout() {
               celld Runtime
             </span>
             <span className="text-emerald-400 font-mono font-bold">
-              v{runtimeStatus?.currentCelldVersion || '0.6.1'}
+              v{runtimeStatus?.currentCelldVersion || '0.6.2'}
             </span>
           </div>
           <div className="flex items-center justify-between text-zinc-400">
