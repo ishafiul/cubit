@@ -9,20 +9,37 @@ const TEMPLATES: Record<string, { name: string; code: string; method: string; pa
     path: '/',
     code: `export default {
   async fetch(request, env, ctx) {
-    return new Response("Hello World from Dynamic Celld 0.6.1 Worker!", {
+    return new Response("Hello World from Dynamic Celld 0.6.2 Worker!", {
       headers: { "content-type": "text/plain; charset=utf-8" },
     });
   },
 };`,
   },
   python: {
-    name: 'Python Worker (v0.6.1)',
+    name: 'Python Worker (v0.6.2)',
     method: 'GET',
     path: '/py',
     code: `from js import Response
 
 async def fetch(request, env):
-    return Response.new("Hello World from Python Worker on Celld v0.6.1!")`,
+    return Response.new("Hello World from Python Worker on Celld v0.6.2!")`,
+  },
+  timeout: {
+    name: 'AbortSignal & self',
+    method: 'GET',
+    path: '/timeout',
+    code: `export default {
+  async fetch(request, env, ctx) {
+    // celld v0.6.2 supports global self and caller AbortSignal
+    const hasSelf = typeof self !== "undefined" && typeof self.crypto !== "undefined";
+    const signal = AbortSignal.timeout(5000);
+    return Response.json({
+      hasSelf,
+      timeoutSignalActive: !signal.aborted,
+      celld_runtime: "v0.6.2",
+    });
+  },
+};`,
   },
   json: {
     name: 'JSON API Endpoint',
@@ -33,7 +50,7 @@ async def fetch(request, env):
     const url = new URL(request.url);
     return Response.json({
       status: "online",
-      celld_runtime: "v0.6.1",
+      celld_runtime: "v0.6.2",
       timestamp: new Date().toISOString(),
       path: url.pathname,
     });
@@ -200,7 +217,7 @@ export function DynamicWorkersView() {
                 <span>{activeTemplate === 'python' ? 'Python Worker Script' : 'Worker Script (ES Modules)'}</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-[11px] font-mono text-zinc-500">celld 0.6.1 Runtime</span>
+                <span className="text-[11px] font-mono text-zinc-500">celld 0.6.2 Runtime</span>
                 <span className="text-[10px] font-mono bg-zinc-950 text-zinc-500 border border-zinc-800 px-1.5 py-0.5 rounded">
                   Max code: 64 MiB
                 </span>
