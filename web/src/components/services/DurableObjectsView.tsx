@@ -294,14 +294,25 @@ export function DurableObjectsView({ initialSelectedId }: { initialSelectedId?: 
                   </div>
                 )}
 
-                {/* celld v0.6.1 DO Facets & Named IDs guidance */}
-                <div className="p-3 rounded-xl border border-sky-900/50 bg-sky-950/20 text-xs space-y-1">
+                {/* celld v0.6.2 DO Plain Classes, Facets & WebSockets guidance */}
+                <div className="p-3.5 rounded-xl border border-sky-900/50 bg-sky-950/20 text-xs space-y-2">
                   <div className="flex items-center gap-1.5 font-semibold text-sky-400">
-                    <span>celld v0.6.1 Facet Startup Props & Named IDs</span>
+                    <span>celld v0.6.2 Plain Classes & Facet WebSockets</span>
                   </div>
-                  <p className="text-[11px] text-zinc-400 leading-relaxed">
-                    Exported facets can accept startup properties via <code className="text-sky-300 font-mono">ctx.exports.App(&#123; props &#125;)</code>. Actor named IDs are preserved via <code className="text-sky-300 font-mono">ctx.id</code> across the cluster.
-                  </p>
+                  <ul className="text-[11px] text-zinc-400 space-y-1.5 leading-relaxed list-disc list-inside">
+                    <li>
+                      <span className="text-zinc-300 font-medium">Plain Class Support:</span> <code className="text-sky-300 font-mono">getDurableObjectClass()</code> accepts plain classes without extending runtime base.
+                    </li>
+                    <li>
+                      <span className="text-zinc-300 font-medium">WebSockets in Facets:</span> WebSockets work in facets (inbound and outbound) natively.
+                    </li>
+                    <li>
+                      <span className="text-zinc-300 font-medium">Remote Error Parity:</span> Peer-forwarded <code className="text-sky-300 font-mono">stub.fetch()</code> rejects on owner failure without re-running.
+                    </li>
+                    <li>
+                      <span className="text-zinc-300 font-medium">Startup Props & Named IDs:</span> Supported via <code className="text-sky-300 font-mono">ctx.exports.App(&#123; props &#125;)</code> and cluster-wide <code className="text-sky-300 font-mono">ctx.id</code>.
+                    </li>
+                  </ul>
                 </div>
               </div>
 
