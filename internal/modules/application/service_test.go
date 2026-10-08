@@ -12,6 +12,7 @@ import (
 
 	"github.com/ishaf/cubit/internal/domain"
 	"github.com/ishaf/cubit/internal/modules/application"
+	"github.com/ishaf/cubit/internal/modules/runtime"
 )
 
 type mockAppRepo struct {
@@ -983,6 +984,62 @@ export default {
 				}
 			})
 		})
+	})
+
+	t.Run("Given an ApplicationService injected with FakeWorkerExecutor", func(t *testing.T) {
+		repo := newMockAppRepo()
+		fakeExec := runtime.NewFakeWorkerExecutor()
+		fakeExec.SetDefaultResponse(&runtime.WorkerExecutionResult{
+			Status:  200,
+			Headers: map[string]string{"x-fake-resp": "ok"},
+			Body:    []byte("in-memory fake execution"),
+			Logs: []domain.ConsoleLogEntry{
+				{Level: "info", Message: "fake log line", Timestamp: time.Now().UnixMilli()},
+			},
+			CF: map[string]interface{}{
+				"country": "US",
+				"colo":    "SFO",
+				"city":    "San Francisco",
+			},
+		})
+
+		svc := application.NewService(repo, nil, nil, "cubit-fleet", fakeExec)
+		app, err := svc.Create(context.Background(), "fake-test-app", domain.SourceTypeInline, "", "", "export default {}", "", false, nil, nil)
+		if err != nil {
+			t.Fatalf("failed to create app: %v", err)
+		}
+		_ = svc.SetActiveDeployment(context.Background(), app.ID, "dep-test-1")
+
+		logCh, cancelLogs := svc.SubscribeLiveLogs(app.ID)
+		defer cancelLogs()
+
+		status, headers, body, err := svc.Invoke(context.Background(), app.ID, "POST", "/submit", map[string]string{"x-req": "true"}, []byte("input"))
+		if err != nil {
+			t.Fatalf("unexpected invoke error: %v", err)
+		}
+		if status != 200 || string(body) != "in-memory fake execution" {
+			t.Errorf("unexpected status/body: %d %s", status, string(body))
+		}
+		if headers["x-fake-resp"] != "ok" {
+			t.Errorf("expected header x-fake-resp: ok, got %v", headers)
+		}
+
+		invocations := fakeExec.GetInvocations()
+		if len(invocations) != 1 {
+			t.Fatalf("expected 1 recorded invocation, got %d", len(invocations))
+		}
+		if invocations[0].Method != "POST" || invocations[0].Path != "/submit" {
+			t.Errorf("expected POST /submit, got %s %s", invocations[0].Method, invocations[0].Path)
+		}
+
+		select {
+		case ev := <-logCh:
+			if len(ev.Logs) != 1 || ev.Logs[0].Message != "fake log line" {
+				t.Errorf("expected streamed log event with message 'fake log line', got %v", ev.Logs)
+			}
+		case <-time.After(1 * time.Second):
+			t.Error("timeout waiting for streamed log event")
+		}
 	})
 }
 

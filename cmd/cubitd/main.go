@@ -109,8 +109,9 @@ func main() {
 			log.Println("Cluster already initialized; skipped headless admin auto-provisioning.")
 		}
 	}
+	workerExecutor := runtimeModule.NewNodeWorkerExecutor()
 	nodeService := nodeModule.NewService(nodeRepo, dockerSupervisor, routeSyncer, fmt.Sprintf("s3://%s", *bucketName))
-	appService := appModule.NewService(appRepo, storageAdapter, routeSyncer, *bucketName)
+	appService := appModule.NewService(appRepo, storageAdapter, routeSyncer, *bucketName, workerExecutor)
 	appService.SetPort(*port)
 	depService := depModule.NewService(depRepo, appService, storageAdapter, routeSyncer, *bucketName)
 	depService.WithFleetReloader(depModule.NewCelldFleetReloader(nodeRepo, nil))
