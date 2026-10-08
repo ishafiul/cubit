@@ -35,21 +35,21 @@ describe('UpgradeModal', () => {
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );
 
-  it('Given UpgradeModal is open When rendered Then displays target version 0.6.1 and LTX epoch GC guidance', () => {
+  it('Given UpgradeModal is open When rendered Then displays target version 0.6.2 and LTX epoch GC guidance', () => {
     render(<UpgradeModal />, { wrapper });
 
-    // Target version input defaults to 0.6.1
+    // Target version input defaults to 0.6.2
     const input = screen.getByRole('textbox') as HTMLInputElement;
-    expect(input.value).toBe('0.6.1');
-    expect(input.placeholder).toBe('0.6.1');
+    expect(input.value).toBe('0.6.2');
+    expect(input.placeholder).toBe('0.6.2');
 
     // LTX epoch retention guidance is visible
-    expect(screen.getByText(/LTX Epoch Retention & GC \(celld v0.6.1\)/)).toBeDefined();
+    expect(screen.getByText(/LTX Epoch Retention & GC \(celld v0.6.2\)/)).toBeDefined();
     expect(screen.getByText(/CELLD_LTX_RETENTION_SECS/)).toBeDefined();
     expect(screen.getByText(/celld cell gc --dry-run/)).toBeDefined();
   });
 
-  it('Given UpgradeModal When submitting form Then invokes upgradeCelldMutation with 0.6.1', async () => {
+  it('Given UpgradeModal When submitting form Then invokes upgradeCelldMutation with 0.6.2', async () => {
     mutateAsyncMock.mockResolvedValueOnce({ success: true });
     render(<UpgradeModal />, { wrapper });
 
@@ -57,7 +57,7 @@ describe('UpgradeModal', () => {
     fireEvent.click(submitBtn);
 
     expect(mutateAsyncMock).toHaveBeenCalledWith({
-      data: { targetVersion: '0.6.1' },
+      data: { targetVersion: '0.6.2' },
     });
   });
 });
