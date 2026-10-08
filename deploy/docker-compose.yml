@@ -18,7 +18,7 @@ services:
       - CUBIT_TRAEFIK_DYNAMIC_PATH=/etc/traefik/dynamic/cubit.yaml
       - CUBIT_STORAGE_BACKEND=garage_s3
       - CUBIT_STORAGE_DIR=/var/lib/cubit/storage
-      - CUBIT_CELLD_IMAGE=ghcr.io/denoland/celld:0.6.1
+      - CUBIT_CELLD_IMAGE=ghcr.io/denoland/celld:0.6.2
       - DOCKER_HOST=unix:///var/run/docker.sock
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -73,7 +73,7 @@ services:
   # High-performance V8 isolate runtime powered by Deno Land
   # ============================================================================
   celld:
-    image: ghcr.io/denoland/celld:0.6.1
+    image: ghcr.io/denoland/celld:0.6.2
     container_name: celld
     restart: unless-stopped
     ports:
@@ -98,8 +98,8 @@ services:
       - AWS_ACCESS_KEY_ID=${GARAGE_ACCESS_KEY:-GKe68794adce2c6d38351d96ef}
       - AWS_SECRET_ACCESS_KEY=${GARAGE_SECRET_KEY:-d52b4fcda143ed470b456cd1148b35d4ec57022928ba37af0818560b34c54a47}
       - AWS_ALLOW_HTTP=true
-      # celld v0.6.1 epoch retention & memory limit configurations:
-      - CELLD_LTX_RETENTION_SECS=86400 # 24h retention before epoch GC
+      # celld v0.6.2 epoch retention & memory limit configurations:
+      - CELLD_LTX_RETENTION_SECS=86400 # 24h retention before epoch GC (actively runs on bucket durability nodes)
       - CELLD_MAX_ASSET_FILE_BYTES=26214400 # 25 MiB asset limit
       - CELLD_MAX_DYNAMIC_WORKER_CODE_BYTES=67108864 # 64 MiB dynamic worker code limit
     networks:

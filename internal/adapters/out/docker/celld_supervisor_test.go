@@ -395,4 +395,27 @@ func TestCelldSupervisor_HealthAndErrorHandling(t *testing.T) {
 			})
 		})
 	})
+
+	t.Run("Given empty version when starting celld", func(t *testing.T) {
+		runner := newMockCommandRunner()
+		supervisor := docker.NewCelldSupervisorWithConfig(docker.CelldSupervisorConfig{
+			ImageName: "ghcr.io/denoland/celld",
+			Runner:    runner,
+		})
+		node, _ := domain.NewNode("n-default-ver", "node-default-ver", "127.0.0.1", 9091, 9090, "0.6.2")
+
+		t.Run("When StartCelld is called with empty version", func(t *testing.T) {
+			err := supervisor.StartCelld(ctx, node, "", "cubit-fleet")
+
+			t.Run("Then it resolves image with DefaultCelldVersion 0.6.2", func(t *testing.T) {
+				if err != nil {
+					t.Fatalf("expected start to succeed, got: %v", err)
+				}
+				runCmd := strings.Join(runner.Calls()[0], " ")
+				if !strings.Contains(runCmd, "ghcr.io/denoland/celld:0.6.2") {
+					t.Errorf("expected command to use celld:0.6.2, got: %s", runCmd)
+				}
+			})
+		})
+	})
 }
